@@ -1,7 +1,7 @@
 import { mockEnabled } from "@/config";
 import { mobileApi } from "@/api/mobile";
 import { mock } from "./mock";
-import { dial } from "@/native/phone";
+import { phoneCapability, dial } from "@/native/phone";
 import type {
   BeginCall,
   BeginCallRequest,
@@ -27,16 +27,29 @@ interface RetryItem {
 const pending: RetryItem[] = [];
 const beginAttempts = new Map<string, { key: string; eventId: string }>();
 const activeBegins = new Set<string>();
+let currentCallId: string | undefined;
+let retrying: Promise<void> | undefined;
+export function hasUnfinishedCall() {
+  return !!currentCallId || activeBegins.size > 0;
+}
 export interface StartedCall {
   callId: string;
   startedAt: string;
   dialStarted: boolean;
+  dialUncertain?: boolean;
   dispatchId?: string;
 }
 export async function beginCall(
   source: Source,
   targetId: string,
+  onCreated?: (call: StartedCall) => void,
 ): Promise<StartedCall> {
+  if (currentCallId || activeBegins.size)
+    throw new Error("请先完成当前通话并保存结果");
+  if (!mockEnabled && !phoneCapability.available())
+    throw new Error(
+      "当前设备没有 Android 拨号插件，请使用含原插件的自定义基座",
+    );
   const attemptId = `${source}:${targetId}`;
   if (activeBegins.has(attemptId)) throw new Error("正在处理本次拨号，请稍候");
   activeBegins.add(attemptId);
@@ -65,8 +78,17 @@ export async function beginCall(
           source === "pc_dispatch" ? targetId : undefined,
         )
       : await mobileApi.beginCall(body, attempt.key);
+    if (!result?.call_id || !result?.phone_number)
+      throw new Error("派发已过期、被取消或目标已无法拨打，请刷新后重试");
     beginAttempts.delete(attemptId);
+    currentCallId = result.call_id;
     const startedAt = new Date().toISOString();
+    onCreated?.({
+      callId: result.call_id,
+      startedAt,
+      dialStarted: false,
+      dispatchId: result.dispatch_id,
+    });
     try {
       await dial(result.phone_number);
       if (!mockEnabled) {
@@ -83,11 +105,12 @@ export async function beginCall(
         dispatchId: result.dispatch_id,
       };
     } catch (cause) {
-      // The record already exists. The user confirms a failed/other result with the same call ID.
+      // A timeout does not prove that the native phone failed to start.
       return {
         callId: result.call_id,
         startedAt,
         dialStarted: false,
+        dialUncertain: (cause as { code?: string })?.code === "DIAL_TIMEOUT",
         dispatchId: result.dispatch_id,
       };
     }
@@ -102,12 +125,13 @@ export async function completeCall(
   durationSeconds = 0,
   note = "",
   recordingPath?: string,
+  endedAt?: string,
 ) {
   const body: CompleteCall = {
     device_event_id: uuid(),
     result_code: resultCode,
     started_at: startedAt,
-    ended_at: new Date().toISOString(),
+    ended_at: endedAt || new Date().toISOString(),
     duration_seconds: Math.max(0, durationSeconds),
     recording_available: !!recordingPath,
     note,
@@ -124,6 +148,7 @@ export async function completeCall(
   try {
     if (mockEnabled) {
       await mock.completeCall();
+      currentCallId = undefined;
       return "mock" as const;
     } else {
       const completed = await mobileApi.completeCall(
@@ -141,13 +166,24 @@ export async function completeCall(
         );
       if (item.recordingPath) recordingSynced = true;
     }
-    return recordingSynced ? ("recording_synced" as const) : ("synced" as const);
+    currentCallId = undefined;
+    return recordingSynced
+      ? ("recording_synced" as const)
+      : ("synced" as const);
   } catch {
     pending.push(item);
+    currentCallId = undefined;
     return resultSynced ? ("recording_pending" as const) : ("pending" as const);
   }
 }
-export async function retryPendingCompletions() {
+export function retryPendingCompletions(): Promise<void> {
+  if (!retrying)
+    retrying = drainPendingCompletions().finally(() => {
+      retrying = undefined;
+    });
+  return retrying;
+}
+async function drainPendingCompletions() {
   for (const item of [...pending]) {
     try {
       if (mockEnabled) await mock.completeCall();
@@ -165,7 +201,8 @@ export async function retryPendingCompletions() {
             item.uploadId,
           );
       }
-      pending.splice(pending.indexOf(item), 1);
+      const index = pending.indexOf(item);
+      if (index >= 0) pending.splice(index, 1);
     } catch {
       break;
     }
@@ -177,4 +214,5 @@ export function pendingCompletionCount() {
 export function clearCallState() {
   pending.length = 0;
   beginAttempts.clear();
+  currentCallId = undefined;
 }

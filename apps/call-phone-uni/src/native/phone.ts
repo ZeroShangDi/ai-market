@@ -5,6 +5,7 @@ export interface ObservedCallEvent {
   durationSeconds?: number;
   localRecordingAvailable?: boolean;
   recordingPath?: string;
+  endedAt?: string;
 }
 type NativeModule = {
   callPhone?: (
@@ -21,6 +22,9 @@ type NativeModule = {
 
 let nativeModule: NativeModule | undefined;
 let listenerRegistered = false;
+let dialedNumber = "";
+let incomingCall = false;
+const normalizeNumber = (value: string) => value.replace(/[^+0-9]/g, "");
 const observers = new Set<(event: ObservedCallEvent) => void>();
 function module(): NativeModule | undefined {
   // #ifdef APP-PLUS
@@ -46,10 +50,26 @@ export function observePhone(fn: (event: ObservedCallEvent) => void) {
     plugin.registerListener((result) => {
       if (result?.code !== 0 || !result?.data) return;
       const data = result.data;
+      if (data.status === 1) {
+        incomingCall = true;
+        return;
+      }
+      if (data.isIncoming === true) incomingCall = true;
+      if (incomingCall) {
+        if (data.status === 3 || data.status === 4) incomingCall = false;
+        return;
+      }
+      if (
+        !dialedNumber ||
+        (data.phoneNumber &&
+          normalizeNumber(String(data.phoneNumber)) !== dialedNumber)
+      )
+        return;
       if (data.status === 2) emit({ kind: "dialing" });
       if (data.status === 3)
         emit({
           kind: "ended",
+          endedAt: new Date().toISOString(),
           durationSeconds: Math.max(
             0,
             Math.floor((Number(data.duration) || 0) / 1000),
@@ -58,7 +78,8 @@ export function observePhone(fn: (event: ObservedCallEvent) => void) {
           recordingPath:
             typeof data.audioPath === "string" ? data.audioPath : undefined,
         });
-      if (data.status === 5) emit({ kind: "unanswered" });
+      if (data.status === 5)
+        emit({ kind: "unanswered", endedAt: new Date().toISOString() });
     });
     listenerRegistered = true;
   }
@@ -80,15 +101,24 @@ export function dial(phoneNumber: string): Promise<void> {
       ),
     );
   return new Promise((resolve, reject) => {
+    const timer = setTimeout(
+      () =>
+        reject(error("DIAL_TIMEOUT", "拨号插件未回应，请检查本机实际通话状态")),
+      15000,
+    );
     try {
-      plugin.callPhone!({ number: phoneNumber }, (result) =>
-        result?.code === 0
+      dialedNumber = normalizeNumber(phoneNumber);
+      incomingCall = false;
+      plugin.callPhone!({ number: phoneNumber }, (result) => {
+        clearTimeout(timer);
+        return result?.code === 0
           ? resolve()
           : reject(
               error("DIAL_FAILED", "拨号未能启动，请确认电话权限和设备状态"),
-            ),
-      );
+            );
+      });
     } catch {
+      clearTimeout(timer);
       reject(error("DIAL_FAILED", "拨号未能启动，请确认电话权限和设备状态"));
     }
   });

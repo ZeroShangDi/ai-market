@@ -57,6 +57,8 @@
 
 ## 模块文档
 
+- [模块边界与独立部署 ADR](architecture/modular-deployment-adr.md)：本次新增需求的推荐方案，明确前端独立制品、业务服务、公共能力、跨域流程、迁移和验收。
+- [PC / 移动端审查报告](reviews/2026-10-10-mobile-pc-audit.md)与[联调验收清单](reviews/mobile-pc-acceptance.md)：本轮修复、测试证据、未验证项与真实环境复现步骤。
 - [PC 端模块化架构罗盘](architecture/pc-module-architecture.md)：Electron + Vue 3 模块化单体、共享层边界、模块依赖方向、跨模块页面组合和菜单路由注册规则。
 - [后端代码位置与部署边界](architecture/backend-deployment.md)：PC、手机、Yudao 数据平面和产品控制/核心服务各自在哪里运行，以及哪些现有模块可复用。
 - [页面、数据库与 API 契约总表](contracts/page-api-matrix.md)：41 个第三级页面到业务表、API、权限、后端所有者和实现批次的映射。逐页实现以此为导航。

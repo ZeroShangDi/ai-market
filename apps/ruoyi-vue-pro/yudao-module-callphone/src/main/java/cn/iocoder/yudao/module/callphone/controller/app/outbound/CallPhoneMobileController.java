@@ -302,13 +302,11 @@ public class CallPhoneMobileController {
             throw exception(ErrorCodeConstants.CALL_EVENT_INVALID);
         }
         long elapsed = Duration.between(startedAt, endedAt).getSeconds();
-        if (elapsed < 0 || elapsed > 86400 || Math.abs(elapsed - reqVO.getDurationSeconds()) > 120) {
-            throw exception(ErrorCodeConstants.CALL_EVENT_INVALID);
-        }
+        int callDuration = validateCallDuration(elapsed, reqVO.getDurationSeconds());
         int updated = recordMapper.update(null, new LambdaUpdateWrapper<CallRecordDO>()
                 .set(CallRecordDO::getStatus, "ended").set(CallRecordDO::getResultCode, reqVO.getResultCode())
                 .set(CallRecordDO::getStartedAt, startedAt).set(CallRecordDO::getEndedAt, endedAt)
-                .set(CallRecordDO::getDurationSeconds, Math.toIntExact(elapsed))
+                .set(CallRecordDO::getDurationSeconds, callDuration)
                 .set(CallRecordDO::getRecordingState, reqVO.isRecordingAvailable() ? "pending" : "none")
                 .set(CallRecordDO::getNoteCiphertext, piiCryptoService.encrypt(reqVO.getNote()))
                 .set(CallRecordDO::getVersion, record.getVersion() + 1).eq(CallRecordDO::getId, record.getId())
@@ -369,7 +367,7 @@ public class CallPhoneMobileController {
         return task;
     }
 
-    PairedDeviceDO requireDevice(Long deviceId, String deviceKey) {
+    public PairedDeviceDO requireDevice(Long deviceId, String deviceKey) {
         requireAdminIdentity();
         adminUserApi.validateUser(getLoginUserId());
         PairedDeviceDO device = deviceMapper.selectById(deviceId);
@@ -406,6 +404,15 @@ public class CallPhoneMobileController {
         return MobileCallEventFingerprint.completedCall(deviceKey, req.getDeviceEventId(), req.getCallRecordId(),
                 req.getResultCode(), req.getStartedAt(), req.getEndedAt(), req.getDurationSeconds(), req.getNote(),
                 req.isRecordingAvailable());
+    }
+    static int validateCallDuration(long elapsed, Integer durationSeconds) {
+        // Ringing and time spent filling the result are not connected talk time.
+        // Permit up to five seconds of clock/rounding drift, but no duration beyond the call window.
+        if (elapsed < 0 || elapsed > 86400 || durationSeconds == null || durationSeconds < 0
+                || durationSeconds > 86400 || durationSeconds > elapsed + 5) {
+            throw exception(ErrorCodeConstants.CALL_EVENT_INVALID);
+        }
+        return durationSeconds;
     }
     private boolean isSameCompletedRequest(CallRecordDO record, CompleteCallReqVO req) {
         if (record == null || !"ended".equals(record.getStatus())

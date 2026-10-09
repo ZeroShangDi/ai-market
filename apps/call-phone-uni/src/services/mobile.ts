@@ -19,6 +19,10 @@ export const mobileService = {
   customer: (id: string) =>
     mockEnabled ? mock.customer(id) : mobileApi.customer(id),
   dispatches: () => (mockEnabled ? mock.dispatches() : mobileApi.dispatches()),
+  declineDispatch: (id: string, eventId: string) =>
+    mockEnabled
+      ? Promise.resolve(true)
+      : mobileApi.declineDispatch(id, eventId),
   heartbeat: () =>
     mockEnabled ? Promise.resolve(true) : mobileApi.heartbeat(),
   recordingAccess: (id: string) =>

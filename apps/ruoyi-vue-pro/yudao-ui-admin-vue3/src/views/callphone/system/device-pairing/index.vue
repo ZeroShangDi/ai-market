@@ -79,6 +79,9 @@
             }}{{ activeCode.status === 'pending' ? ' · 等待期间可以取消或让它自动过期' : '' }}</span
           ></div
         >
+        <el-button v-if="activeCode.status === 'pending'" link type="primary" @click="reopenPairing"
+          >继续配对</el-button
+        >
         <el-button v-if="activeCode.status === 'pending'" link type="danger" @click="cancelCode"
           >取消配对码</el-button
         >
@@ -97,9 +100,26 @@
           align-center
           finish-status="success"
         >
-          <el-step title="打开手机端" /><el-step title="输入配对码" /><el-step title="配对完成" />
+          <el-step title="打开手机端" /><el-step title="扫码或输入配对码" /><el-step
+            title="配对完成"
+          />
         </el-steps>
-        <p class="pair-hint">在手机 Call Phone 的「我的 → 设备配对」中输入以下 6 位数字</p>
+        <p class="pair-hint">手机登录相同员工账户后，在「我的 → 本机与配对」扫码或输入配对码</p>
+        <img
+          v-if="qrDataUrl && activeCode.status === 'pending'"
+          :src="qrDataUrl"
+          class="pair-qr"
+          alt="Call Phone 一次性配对二维码"
+        />
+        <el-input
+          v-if="activeCode.status === 'pending'"
+          v-model="mobileServiceUrl"
+          placeholder="手机可访问的服务地址（可选，如 https://api.example.com）"
+          @change="buildQr"
+        />
+        <p class="pair-hint"
+          >二维码只包含一次性配对码和工作区；请勿使用 localhost 作为手机服务地址。</p
+        >
         <div class="pair-code" aria-label="一次性配对码">{{
           activeCode.pairingCode || '••••••'
         }}</div>
@@ -148,21 +168,61 @@ import { Icon } from '@iconify/vue'
 import { useRoute } from 'vue-router'
 import * as DeviceApi from '@/api/callphone/device'
 import * as PreviewStore from '@/api/callphone/preview-store'
+import QRCode from 'qrcode'
+import { getTenantId } from '@/utils/auth'
 import { parseCallPhoneDateTime } from '@/utils/callphone/time'
 
 defineOptions({ name: 'CallPhoneDevicePairing' })
 const route = useRoute(),
   previewMode = import.meta.env.DEV && route.query.preview === '1'
+function reopenPairing() {
+  dialogVisible.value = true
+  void buildQr()
+  tickCountdown()
+}
 const loading = ref(false),
   creating = ref(false),
   dialogVisible = ref(false),
   remainingSeconds = ref(0)
 const devices = ref<DeviceApi.PairedDeviceVO[]>([]),
   activeCode = ref<DeviceApi.PairingCodeVO>()
+const qrDataUrl = ref('')
+const mobileServiceUrl = ref(import.meta.env.VITE_CALLPHONE_MOBILE_SERVICE_URL || '')
+let qrGeneration = 0
+let pollInFlight = false
+let deviceTimer: ReturnType<typeof setInterval> | undefined
+async function buildQr() {
+  const current = activeCode.value
+  const generation = ++qrGeneration
+  qrDataUrl.value = ''
+  if (!current?.pairingCode || current.status !== 'pending') return
+  const url = mobileServiceUrl.value.trim().replace(/\/+$/, '')
+  if (url && !/^https?:\/\/[^/\s?#@]+(?:\/[^\s?#]*)?$/.test(url)) {
+    ElMessage.warning('手机服务地址无效，请使用 http 或 https 地址')
+    return
+  }
+  const payload = JSON.stringify({
+    type: 'callphone-pairing',
+    version: 1,
+    code: current.pairingCode,
+    tenantId: String(previewMode ? '1' : getTenantId() || '1'),
+    ...(url ? { serviceUrl: url } : {})
+  })
+  try {
+    const result = await QRCode.toDataURL(payload, {
+      width: 216,
+      margin: 2,
+      errorCorrectionLevel: 'M'
+    })
+    if (generation === qrGeneration) qrDataUrl.value = result
+  } catch {
+    if (generation === qrGeneration) ElMessage.error('二维码生成失败，请使用六位配对码')
+  }
+}
 let pollTimer: ReturnType<typeof setInterval> | undefined,
   clockTimer: ReturnType<typeof setInterval> | undefined
 
-async function loadDevices() {
+async function loadDevices(silent = false) {
   loading.value = true
   try {
     devices.value = previewMode
@@ -170,18 +230,20 @@ async function loadDevices() {
       : await DeviceApi.getPairedDevicePage()
   } catch (error: any) {
     devices.value = []
-    ElMessage.error(error?.message || '设备列表加载失败')
+    if (!silent) ElMessage.error(error?.message || '设备列表加载失败')
   } finally {
     loading.value = false
   }
 }
 async function createCode() {
+  if (creating.value) return
   creating.value = true
   try {
     activeCode.value = previewMode
       ? PreviewStore.createPreviewPairingCode()
       : await DeviceApi.createPairingCode()
     dialogVisible.value = true
+    await buildQr()
     tickCountdown()
     startPolling()
   } catch (error: any) {
@@ -198,18 +260,23 @@ function tickCountdown() {
 function updateCountdown() {
   remainingSeconds.value = Math.max(
     0,
-    Math.ceil((new Date(activeCode.value?.expiresAt || 0).getTime() - Date.now()) / 1000)
+    Math.ceil(
+      (parseCallPhoneDateTime(activeCode.value?.expiresAt || 0).getTime() - Date.now()) / 1000
+    )
   )
 }
 function startPolling() {
   stopPolling()
   pollTimer = setInterval(async () => {
+    if (pollInFlight) return
     const current = activeCode.value
     if (!current || current.status !== 'pending') return stopPolling()
+    pollInFlight = true
     try {
       const latest = previewMode
         ? PreviewStore.getPreviewPairingCode(current.id)
         : await DeviceApi.getPairingCode(current.id)
+      if (activeCode.value?.id !== current.id || activeCode.value?.status !== 'pending') return
       if (latest) activeCode.value = { ...current, ...latest, pairingCode: current.pairingCode }
       const latestCode = activeCode.value
       if (latestCode && latestCode.status !== 'pending') {
@@ -218,6 +285,8 @@ function startPolling() {
       }
     } catch {
       /* Keep last confirmed state; next interval retries. */
+    } finally {
+      pollInFlight = false
     }
   }, 2500)
 }
@@ -230,7 +299,16 @@ async function cancelCode() {
   if (!current || current.status !== 'pending') return
   try {
     if (previewMode) PreviewStore.cancelPreviewPairingCode(current.id)
-    else await DeviceApi.cancelPairingCode(current.id)
+    else {
+      const cancelled = await DeviceApi.cancelPairingCode(current.id)
+      if (!cancelled) {
+        const latest = await DeviceApi.getPairingCode(current.id)
+        if (latest) activeCode.value = { ...current, ...latest }
+        await loadDevices()
+        ElMessage.warning('配对状态已变化，请查看最新状态')
+        return
+      }
+    }
     activeCode.value = { ...current, status: 'revoked' }
     stopPolling()
     ElMessage.success('配对码已取消')
@@ -256,7 +334,8 @@ async function revoke(row: DeviceApi.PairedDeviceVO) {
       { type: 'warning', confirmButtonText: '解除绑定' }
     )
     if (previewMode) PreviewStore.revokePreviewDevice(row.id)
-    else await DeviceApi.revokePairedDevice(row.id)
+    else if (!(await DeviceApi.revokePairedDevice(row.id)))
+      throw new Error('设备状态已变化，请刷新后重试')
     ElMessage.success('设备已解除绑定')
     await loadDevices()
   } catch (error: any) {
@@ -294,17 +373,31 @@ function formatTime(value?: string) {
 function onDialogClosed() {
   if (clockTimer) clearInterval(clockTimer)
   clockTimer = undefined
-  if (activeCode.value) activeCode.value = { ...activeCode.value, pairingCode: undefined }
+  qrGeneration++
+  qrDataUrl.value = ''
   if (activeCode.value?.status !== 'pending') stopPolling()
 }
-onMounted(loadDevices)
+onMounted(() => {
+  void loadDevices()
+  deviceTimer = setInterval(() => {
+    if (!loading.value) void loadDevices(true)
+  }, 15000)
+})
 onBeforeUnmount(() => {
   stopPolling()
+  qrGeneration++
+  if (deviceTimer) clearInterval(deviceTimer)
   if (clockTimer) clearInterval(clockTimer)
 })
 </script>
 
 <style scoped>
+.pair-qr {
+  display: block;
+  width: 216px;
+  height: 216px;
+  margin: 16px auto;
+}
 .device-pairing-page {
   padding: 20px;
 }

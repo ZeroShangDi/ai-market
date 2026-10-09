@@ -5,7 +5,9 @@
       <text class="sheet-help">{{
         dialStarted
           ? "已开始拨号。请根据实际通话选择结果，插件状态仅供参考。"
-          : "拨号未能启动，请记录实际结果。"
+          : dialUncertain
+            ? "未收到拨号插件确认，请检查本机实际通话状态后选择结果。"
+            : "拨号未能启动，请记录实际结果。"
       }}</text>
       <view class="choices"
         ><view
@@ -39,9 +41,11 @@ const props = defineProps<{
   callId: string;
   startedAt: string;
   dialStarted: boolean;
+  dialUncertain?: boolean;
   suggested?: ResultCode;
   durationSeconds?: number;
   recordingPath?: string;
+  endedAt?: string;
 }>();
 const emit = defineEmits<{ (e: "saved", result: ResultCode): void }>();
 const options = (Object.keys(resultLabels) as ResultCode[]).map((code) => ({
@@ -49,7 +53,7 @@ const options = (Object.keys(resultLabels) as ResultCode[]).map((code) => ({
   label: resultLabels[code],
 }));
 const availableOptions = computed(() =>
-  props.dialStarted
+  props.dialStarted || props.dialUncertain
     ? options
     : options.filter((item) => item.code !== "connected"),
 );
@@ -65,6 +69,12 @@ watch(
     }
   },
 );
+watch(
+  () => props.suggested,
+  (value) => {
+    if (!chosen.value && value) chosen.value = value;
+  },
+);
 async function submit() {
   if (!chosen.value || saving.value) return;
   saving.value = true;
@@ -75,6 +85,7 @@ async function submit() {
     props.durationSeconds,
     note.value,
     props.recordingPath,
+    props.endedAt,
   );
   saving.value = false;
   toast(

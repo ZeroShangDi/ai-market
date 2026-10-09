@@ -44,7 +44,7 @@ services:
       dockerfile: yudao-server/Dockerfile
     restart: unless-stopped
     ports:
-      - "127.0.0.1:48080:48080"
+      - "${CALLPHONE_API_BIND_HOST:-127.0.0.1}:48080:48080"
     environment:
       SPRING_PROFILES_ACTIVE: local
       JAVA_OPTS: "-Xms256m -Xmx768m -Djava.security.egd=file:/dev/./urandom"

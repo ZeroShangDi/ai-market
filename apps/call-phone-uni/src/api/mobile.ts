@@ -1,4 +1,5 @@
 import {
+  error,
   downloadRecording as downloadRecordingFile,
   hasCallphoneDeviceCredential,
   request,
@@ -34,6 +35,8 @@ export const mobileApi = {
       display_name: displayName,
       platform,
     });
+    if (!result?.device_id || !result?.device_key)
+      throw error("PAIRING_INVALID", "配对码无效、已过期或不属于当前员工账户");
     setCallphoneDeviceCredential(result.device_id, result.device_key);
     return { device_id: result.device_id, display_name: result.display_name };
   },
@@ -54,6 +57,11 @@ export const mobileApi = {
     hasCallphoneDeviceCredential()
       ? request<boolean>("POST", `${base}/devices/heartbeat`)
       : Promise.resolve(false),
+  declineDispatch: (id: string, deviceEventId: string) =>
+    request<boolean>("POST", `${base}/call-dispatches/${enc(id)}/decline`, {
+      device_event_id: deviceEventId,
+      reason_code: "not_available",
+    }),
   beginCall: (body: BeginCallRequest, key: string) =>
     request<BeginCall>("POST", `${base}/calls`, body, key),
   callStarted: (callId: string, startedAt: string, deviceEventId: string) =>
@@ -77,6 +85,11 @@ export const mobileApi = {
       ? request<Device>("GET", `${base}/devices/current`)
       : Promise.resolve({ paired: false }),
   unpair: (key: string) =>
-    request<void>("DELETE", `${base}/devices/current/pairing`, undefined, key),
+    request<boolean>(
+      "DELETE",
+      `${base}/devices/current/pairing`,
+      undefined,
+      key,
+    ),
   diagnostics: () => request<Diagnostics>("GET", `${base}/diagnostics`),
 };

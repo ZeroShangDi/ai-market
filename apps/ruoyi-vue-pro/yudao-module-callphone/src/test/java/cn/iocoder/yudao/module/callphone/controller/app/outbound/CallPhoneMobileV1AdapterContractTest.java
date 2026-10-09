@@ -1,5 +1,7 @@
 package cn.iocoder.yudao.module.callphone.controller.app.outbound;
 
+import cn.iocoder.yudao.module.callphone.controller.mobile.CallPhoneMobileV1AdapterController;
+
 import cn.iocoder.yudao.framework.common.pojo.CommonResult;
 import cn.iocoder.yudao.framework.common.exception.ServiceException;
 import cn.iocoder.yudao.module.callphone.controller.app.outbound.CallPhoneMobileController.AcceptDispatchRespVO;

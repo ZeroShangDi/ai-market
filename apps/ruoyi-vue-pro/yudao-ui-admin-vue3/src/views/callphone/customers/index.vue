@@ -39,17 +39,17 @@
         :closable="false"
       />
 
-      <el-form :inline="true" :model="query" class="filter-bar" @submit.prevent="load">
+      <el-form :inline="true" :model="query" class="filter-bar" @submit.prevent="search">
         <el-form-item label="号码后四位"
           ><el-input
             v-model="query.query"
             clearable
             maxlength="4"
             placeholder="输入号码后四位"
-            @keyup.enter="load"
+            @keyup.enter="search"
         /></el-form-item>
         <el-form-item label="客户阶段">
-          <el-select v-model="query.stage" clearable placeholder="全部阶段" @change="load">
+          <el-select v-model="query.stage" clearable placeholder="全部阶段" @change="search">
             <el-option
               v-for="stage in stageOptions"
               :key="stage.stageCode"
@@ -59,7 +59,7 @@
           </el-select>
         </el-form-item>
         <el-form-item
-          ><el-button type="primary" @click="load">筛选</el-button
+          ><el-button type="primary" @click="search">筛选</el-button
           ><el-button @click="reset">重置</el-button></el-form-item
         >
       </el-form>
@@ -459,6 +459,7 @@ import * as CustomerStageApi from '@/api/callphone/customer-stage'
 import * as CustomerFieldApi from '@/api/callphone/customer-field'
 import * as CustomerFieldPreview from '@/api/callphone/customer-field/preview'
 import * as UserApi from '@/api/system/user'
+import { parseCallPhoneDateTime } from '@/utils/callphone/time'
 import { checkPermi } from '@/utils/permission'
 import { useRoute, useRouter } from 'vue-router'
 
@@ -559,6 +560,10 @@ async function load() {
   } finally {
     loading.value = false
   }
+}
+function search() {
+  query.pageNo = 1
+  void load()
 }
 function reset() {
   query.pageNo = 1
@@ -999,7 +1004,7 @@ function sourceLabel(source?: string) {
   )
 }
 function formatTime(value?: string) {
-  return value ? new Date(value).toLocaleString('zh-CN', { hour12: false }) : '—'
+  return value ? parseCallPhoneDateTime(value).toLocaleString('zh-CN', { hour12: false }) : '—'
 }
 function formatCustomValue(value: unknown) {
   if (Array.isArray(value)) return value.join('、') || '—'

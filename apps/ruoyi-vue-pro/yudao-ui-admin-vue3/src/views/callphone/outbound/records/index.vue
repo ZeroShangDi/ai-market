@@ -518,6 +518,7 @@
 <script setup lang="ts">
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useRoute, useRouter } from 'vue-router'
+import * as CustomerApi from '@/api/callphone/customer'
 import * as OutboundApi from '@/api/callphone/outbound'
 import * as DictDataApi from '@/api/system/dict/dict.data'
 import * as PreviewStore from '@/api/callphone/preview-store'
@@ -1240,7 +1241,7 @@ function closeStartDrawer(done: () => void) {
     .catch(() => undefined)
 }
 async function sendDispatch() {
-  if (!dispatch.deviceId) return
+  if (dispatching.value || !dispatch.deviceId || !selectedCustomer.value) return
   if (previewMode) {
     const customer = selectedCustomer.value
     if (!customer) return
@@ -1393,28 +1394,43 @@ async function loadCallResultOptions() {
     /* Keep built-in defaults until this optional business dictionary is available. */
   }
 }
+async function openCustomerFromRoute() {
+  const customerId = String(route.query.customerId || '')
+  if (!customerId) return
+  try {
+    const customer = previewMode
+      ? PreviewStore.findPreviewCustomer(customerId)
+      : await CustomerApi.getCustomer(customerId)
+    if (!customer) throw new Error('客户不存在或无权拨打')
+    await openStartDrawer({
+      id: '',
+      customerId: customer.id,
+      customerName: customer.name,
+      phoneDisplay: customer.phoneDisplay,
+      direction: 'outbound',
+      ownerUserId: customer.ownerUserId || '',
+      ownerName: customer.ownerName || '',
+      status: 'requested',
+      durationSeconds: 0,
+      recordingState: 'none',
+      summaryState: 'unavailable',
+      version: 1
+    })
+  } catch (error: any) {
+    ElMessage.error(error?.message || '读取外呼客户失败')
+  }
+}
+watch(
+  () => route.query.customerId,
+  () => {
+    if (route.path.endsWith('/outbound/records') || route.path.endsWith('/outbound-records'))
+      void openCustomerFromRoute()
+  }
+)
 onMounted(async () => {
   await loadCallResultOptions()
   await loadRecords()
-  const customerId = String(route.query.customerId || '')
-  if (previewMode && customerId) {
-    const customer = PreviewStore.findPreviewCustomer(customerId)
-    if (customer)
-      await openStartDrawer({
-        id: '',
-        customerId: customer.id,
-        customerName: customer.name,
-        phoneDisplay: customer.phoneDisplay,
-        direction: 'outbound',
-        ownerUserId: customer.ownerUserId || '',
-        ownerName: customer.ownerName || '',
-        status: 'ended',
-        durationSeconds: 0,
-        recordingState: 'none',
-        summaryState: 'unavailable',
-        version: 1
-      })
-  }
+  await openCustomerFromRoute()
   const callRecordId = String(route.query.callRecordId || '')
   if (callRecordId) {
     try {
@@ -1428,7 +1444,11 @@ onMounted(async () => {
     }
   }
 })
-onBeforeUnmount(stopDispatchPolling)
+onBeforeUnmount(() => {
+  stopDispatchPolling()
+  if (customerSearchTimer) clearTimeout(customerSearchTimer)
+  customerSearchRequestVersion++
+})
 </script>
 
 <style scoped lang="scss">

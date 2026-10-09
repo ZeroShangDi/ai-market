@@ -1,11 +1,10 @@
 <template>
   <view class="page"
     ><view class="wrap">
-      <view class="detail-head"
-        ><view class="back" @tap="back"
-          ><image src="/static/figma/2-71-imgFrame.svg" /></view
-        ><text>客户详情</text></view
-      >
+      <MobileHeader
+        title="客户详情"
+        back-icon="/static/figma/2-71-imgFrame.svg"
+      />
       <PreviewBanner />
       <view v-if="loading" class="state">正在加载客户资料…</view>
       <view v-else-if="errorMessage" class="state"
@@ -86,20 +85,30 @@
         <view v-if="playbackState" class="feedback">{{ playbackState }}</view>
       </template> </view
     ><CallResultSheet
-      :visible="!!activeCall"
+      :visible="!!activeCall && !launching"
       :call-id="activeCall?.callId || ''"
       :started-at="activeCall?.startedAt || ''"
       :dial-started="activeCall?.dialStarted || false"
+      :dial-uncertain="activeCall?.dialUncertain"
       :suggested="suggested"
       :duration-seconds="observedDuration"
       :recording-path="recordingPath"
+      :ended-at="observedEndAt"
       @saved="saved"
     />
   </view>
 </template>
 <script setup lang="ts">
 import { ref } from "vue";
-import { onLoad, onShow, onHide, onUnload } from "@dcloudio/uni-app";
+import {
+  onLoad,
+  onShow,
+  onHide,
+  onUnload,
+  onBackPress,
+} from "@dcloudio/uni-app";
+import MobileHeader from "@/components/MobileHeader.vue";
+import { ensureSession } from "@/services/session";
 import PreviewBanner from "@/components/PreviewBanner.vue";
 import CallResultSheet from "@/components/CallResultSheet.vue";
 import { mobileService } from "@/services/mobile";
@@ -116,24 +125,33 @@ const customerId = ref(""),
 const activeCall = ref<StartedCall | null>(null),
   suggested = ref<ResultCode>(),
   observedDuration = ref(0),
-  recordingPath = ref("");
+  recordingPath = ref(""),
+  observedEndAt = ref("");
 let audio: UniApp.InnerAudioContext | undefined,
   stopObserve: (() => void) | undefined;
 onLoad((options) => {
   customerId.value = String(options?.id || "");
-  void load();
 });
 onShow(() => {
+  if (!ensureSession()) return;
   if (customerId.value) void load();
   if (!stopObserve)
     stopObserve = phoneCapability.observe((event) => {
       if (!activeCall.value) return;
+      if (event.endedAt) observedEndAt.value = event.endedAt;
       if (event.kind === "unanswered") suggested.value = "no_answer";
       if (event.kind === "ended") {
         observedDuration.value = event.durationSeconds || 0;
         recordingPath.value = event.recordingPath || "";
       }
     });
+});
+onBackPress(() => {
+  if (activeCall.value || launching.value) {
+    toast("请先保存当前通话结果");
+    return true;
+  }
+  return false;
 });
 onHide(() => {
   audio?.stop();
@@ -164,7 +182,17 @@ async function load() {
 function back() {
   uni.navigateBack();
 }
+const launching = ref(false);
 async function call() {
+  if (launching.value || activeCall.value) return toast("请先保存当前通话结果");
+  launching.value = true;
+  try {
+    await doCall();
+  } finally {
+    launching.value = false;
+  }
+}
+async function doCall() {
   if (!customer.value?.phone_dialable)
     return toast("当前账户无拨号权限或号码不可用");
   const confirmed = await new Promise<boolean>((resolve) =>
@@ -179,9 +207,20 @@ async function call() {
     suggested.value = undefined;
     observedDuration.value = 0;
     recordingPath.value = "";
-    activeCall.value = await beginCall("customer_detail", customer.value.id);
+    observedEndAt.value = "";
+    activeCall.value = await beginCall(
+      "customer_detail",
+      customer.value.id,
+      (call) => {
+        activeCall.value = call;
+      },
+    );
     if (!activeCall.value.dialStarted)
-      toast("拨号插件不可用或拨号失败，请确认结果");
+      toast(
+        activeCall.value.dialUncertain
+          ? "拨号插件未回应，请检查本机通话状态并记录实际结果"
+          : "拨号未能启动，请确认结果",
+      );
   } catch (e) {
     toast(messageOf(e));
   }
@@ -248,8 +287,7 @@ function saved() {
 .wrap {
   max-width: 500px;
   margin: auto;
-  padding: calc(19px + var(--status-bar-height) + env(safe-area-inset-top)) 15px
-    40px;
+  padding: 0 15px 40px;
 }
 .detail-head {
   height: 38px;

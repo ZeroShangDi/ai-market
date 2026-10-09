@@ -1,4 +1,6 @@
-package cn.iocoder.yudao.module.callphone.controller.app.outbound;
+package cn.iocoder.yudao.module.callphone.controller.mobile;
+
+import cn.iocoder.yudao.module.callphone.controller.app.outbound.CallPhoneMobileController;
 
 import cn.iocoder.yudao.framework.common.pojo.CommonResult;
 import cn.iocoder.yudao.framework.common.pojo.PageResult;
@@ -202,6 +204,7 @@ public class CallPhoneMobileV1AdapterController {
     @PostMapping("/pairings/claim")
     @Operation(summary = "按兼容契约认领配对码")
     @PreAuthorize("@ss.hasPermission('callphone:device:pair:manage')")
+    @cn.iocoder.yudao.framework.apilog.core.annotation.ApiAccessLog(requestEnable = false)
     public CommonResult<PairingClaimDTO> claimPairing(@RequestBody @Valid PairingClaimV1ReqVO req) {
         PairingClaimReqVO source = new PairingClaimReqVO(); source.setPairingCode(req.getPairingCode());
         source.setDisplayName(req.getDisplayName()); source.setPlatform(req.getPlatform());
@@ -280,6 +283,7 @@ public class CallPhoneMobileV1AdapterController {
     @PostMapping("/calls/{callId}/complete")
     @Operation(summary = "按兼容契约回填通话结果")
     @PreAuthorize("@ss.hasPermission('callphone:call:dispatch:create')")
+    @cn.iocoder.yudao.framework.apilog.core.annotation.ApiAccessLog(requestEnable = false)
     public CommonResult<Boolean> complete(@PathVariable Long callId, @RequestBody @Valid CompleteCallV1ReqVO req,
             @RequestHeader("X-Callphone-Device-Id") @NotBlank String deviceId,
             @RequestHeader("X-Callphone-Device-Key") @NotBlank String deviceKey) {
@@ -368,7 +372,7 @@ public class CallPhoneMobileV1AdapterController {
         }
     }
 
-    static DiagnosticsDTO toDiagnosticsDTO(EntitlementSnapshotRespVO entitlement, boolean paired) {
+    public static DiagnosticsDTO toDiagnosticsDTO(EntitlementSnapshotRespVO entitlement, boolean paired) {
         String licenseCheck = "unavailable";
         if (entitlement != null) {
             if ("not_configured".equals(entitlement.getState())) {
