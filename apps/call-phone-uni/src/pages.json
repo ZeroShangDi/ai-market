@@ -1,0 +1,13 @@
+{
+  "pages": [
+    { "path": "pages/index/index", "style": { "navigationStyle": "custom" } },
+    { "path": "pages/customers/index", "style": { "navigationStyle": "custom" } },
+    { "path": "pages/customers/detail", "style": { "navigationStyle": "custom" } },
+    { "path": "pages/mine/index", "style": { "navigationStyle": "custom" } }
+  ],
+  "globalStyle": {
+    "navigationBarTextStyle": "black",
+    "navigationBarTitleText": "Call Phone",
+    "backgroundColor": "#f7f8fc"
+  }
+}

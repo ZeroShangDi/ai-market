@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="cn.iocoder.yudao.module.callphone.dal.mysql.leads.LeadAssignmentRuleMemberMapper">
+    <select id="selectByRuleIds"
+            resultType="cn.iocoder.yudao.module.callphone.dal.dataobject.leads.LeadAssignmentRuleMemberDO">
+        SELECT id, tenant_id, rule_id, user_id, sort_no, creator, create_time, updater, update_time, deleted
+        FROM cp_lead_assignment_rule_member
+        WHERE tenant_id = #{tenantId}
+          AND deleted = b'0'
+          AND rule_id IN
+        <foreach collection="ruleIds" item="ruleId" open="(" separator="," close=")">
+            #{ruleId}
+        </foreach>
+        ORDER BY rule_id ASC, sort_no ASC
+    </select>
+</mapper>

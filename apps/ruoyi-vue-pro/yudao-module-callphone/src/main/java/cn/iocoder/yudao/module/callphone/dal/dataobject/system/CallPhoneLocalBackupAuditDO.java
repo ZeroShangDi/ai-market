@@ -1,0 +1,18 @@
+package cn.iocoder.yudao.module.callphone.dal.dataobject.system;
+
+import cn.iocoder.yudao.framework.tenant.core.db.TenantBaseDO;
+import com.baomidou.mybatisplus.annotation.TableId;
+import com.baomidou.mybatisplus.annotation.TableName;
+import lombok.Data;
+import lombok.EqualsAndHashCode;
+
+@TableName("cp_local_backup_audit")
+@Data
+@EqualsAndHashCode(callSuper = true)
+public class CallPhoneLocalBackupAuditDO extends TenantBaseDO {
+    @TableId private Long id;
+    private Long backupId;
+    private String action;
+    private Long actorId;
+    private String summaryCiphertext;
+}

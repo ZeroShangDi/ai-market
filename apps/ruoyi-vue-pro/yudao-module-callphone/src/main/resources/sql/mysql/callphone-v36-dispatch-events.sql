@@ -1,0 +1,20 @@
+CREATE TABLE IF NOT EXISTS `cp_call_dispatch_event` (
+  `id` bigint NOT NULL,
+  `tenant_id` bigint NOT NULL DEFAULT 0,
+  `dispatch_id` bigint NOT NULL,
+  `event_type` varchar(24) NOT NULL,
+  `from_status` varchar(24) DEFAULT NULL,
+  `to_status` varchar(24) DEFAULT NULL,
+  `actor_type` varchar(16) NOT NULL,
+  `actor_id` bigint DEFAULT NULL,
+  `device_id` bigint DEFAULT NULL,
+  `reason_code` varchar(64) DEFAULT NULL,
+  `occurred_at` datetime(3) NOT NULL,
+  `creator` varchar(64) DEFAULT '',
+  `create_time` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  `updater` varchar(64) DEFAULT '',
+  `update_time` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  `deleted` bit(1) NOT NULL DEFAULT b'0',
+  PRIMARY KEY (`id`),
+  KEY `idx_cp_dispatch_event_tenant_dispatch_time` (`tenant_id`,`dispatch_id`,`occurred_at`,`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='Call Phone 外呼派发状态事件';

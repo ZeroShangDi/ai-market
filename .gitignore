@@ -1,0 +1,47 @@
+.references/
+
+# Local environment and credentials
+.env
+.env.*
+!.env.example
+!.env.*.example
+*.pem
+*.key
+*.p8
+*.p12
+*.pfx
+*.jks
+*.keystore
+id_rsa
+id_ed25519
+!apps/ruoyi-vue-pro/yudao-ui-admin-vue3/.env.dev
+!apps/ruoyi-vue-pro/yudao-ui-admin-vue3/.env.prod
+!apps/ruoyi-vue-pro/yudao-ui-admin-vue3/.env.stage
+!apps/ruoyi-vue-pro/yudao-ui-admin-vue3/.env.test
+apps/ruoyi-vue-pro/yudao-server/src/main/resources/application-local.yaml
+apps/ruoyi-vue-pro/yudao-ui-admin-vue3/src/utils/jsencrypt.ts
+
+# Dependencies and generated build output
+node_modules/
+.pnpm-store/
+target/
+dist/
+coverage/
+*.flattened-pom.xml
+.DS_Store
+.cache/
+.vite/
+unpackage/
+.image/
+
+# Local editor and runtime state
+.idea/
+.vscode/
+*.log
+*.bak
+*.orig
+*.rej
+*.swp
+*.swo
+*.tmp
+*~

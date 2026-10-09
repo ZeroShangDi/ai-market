@@ -1,0 +1,81 @@
+{
+    "name" : "Call Phone",
+    "appid" : "__UNI__D608100",
+    "description" : "Call Phone 移动端",
+    "versionName" : "1.0.3",
+    "versionCode" : 101,
+    "transformPx" : false,
+    /* 5+App特有相关 */
+    "app-plus" : {
+        "usingComponents" : true,
+        "nvueStyleCompiler" : "uni-app",
+        "compilerVersion" : 3,
+        "splashscreen" : {
+            "alwaysShowBeforeRender" : true,
+            "waiting" : true,
+            "autoclose" : true,
+            "delay" : 0
+        },
+        /* 模块配置 */
+        "modules" : {},
+        /* 应用发布信息 */
+        "distribute" : {
+            /* android打包配置 */
+            "android" : {
+                "permissions" : [
+                    "<uses-permission android:name=\"android.permission.INTERNET\"/>",
+                    "<uses-permission android:name=\"android.permission.CALL_PHONE\"/>",
+                    "<uses-permission android:name=\"android.permission.READ_PHONE_STATE\"/>",
+                    "<uses-permission android:name=\"android.permission.READ_CALL_LOG\"/>",
+                    "<uses-permission android:name=\"android.permission.RECORD_AUDIO\"/>",
+                    "<uses-permission android:name=\"android.permission.READ_EXTERNAL_STORAGE\"/>"
+                ]
+            },
+            /* ios打包配置 */
+            "ios" : {
+                "dSYMs" : false
+            },
+            /* SDK配置 */
+            "sdkConfigs" : {},
+            "nativePlugins" : {
+                "leven-call" : {
+                    "__plugin_info__" : {
+                        "name" : "安卓电话通话短信监听原生插件",
+                        "description" : "旧版 CallPhone 使用的 Android 通话监听和本机录音查询插件",
+                        "platforms" : "Android",
+                        "url" : "https://ext.dcloud.net.cn/plugin?id=16275",
+                        "android_package_name" : "uni.UNID608100",
+                        "ios_bundle_id" : "",
+                        "isCloud" : true,
+                        "bought" : 1,
+                        "pid" : "16275",
+                        "parameters" : {}
+                    }
+                }
+            }
+        }
+    },
+    /* 快应用特有相关 */
+    "quickapp" : {},
+    /* 小程序特有相关 */
+    "mp-weixin" : {
+        "appid" : "",
+        "setting" : {
+            "urlCheck" : false
+        },
+        "usingComponents" : true
+    },
+    "mp-alipay" : {
+        "usingComponents" : true
+    },
+    "mp-baidu" : {
+        "usingComponents" : true
+    },
+    "mp-toutiao" : {
+        "usingComponents" : true
+    },
+    "uniStatistics" : {
+        "enable" : false
+    },
+    "vueVersion" : "3"
+}

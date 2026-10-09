@@ -1,0 +1,47 @@
+-- Customer-local AI usage audit metadata. Do not store prompts, recordings, or model response text here.
+CREATE TABLE IF NOT EXISTS `cp_ai_run` (
+  `id` bigint NOT NULL,
+  `tenant_id` bigint NOT NULL DEFAULT 0,
+  `actor_user_id` bigint NOT NULL,
+  `feature` varchar(48) NOT NULL,
+  `source_type` varchar(24) DEFAULT NULL,
+  `source_id` bigint DEFAULT NULL,
+  `model_key` varchar(96) NOT NULL,
+  `prompt_version` varchar(64) DEFAULT NULL,
+  `status` varchar(16) NOT NULL,
+  `latency_ms` int DEFAULT NULL,
+  `input_tokens` int DEFAULT NULL,
+  `output_tokens` int DEFAULT NULL,
+  `estimated_cost` decimal(14,8) DEFAULT NULL,
+  `error_code` varchar(64) DEFAULT NULL,
+  `completed_at` datetime(3) DEFAULT NULL,
+  `creator` varchar(64) DEFAULT '',
+  `create_time` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  `updater` varchar(64) DEFAULT '',
+  `update_time` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  `deleted` bit(1) NOT NULL DEFAULT b'0',
+  PRIMARY KEY (`id`),
+  KEY `idx_cp_ai_run_tenant_time` (`tenant_id`,`create_time`,`id`),
+  KEY `idx_cp_ai_run_tenant_feature_time` (`tenant_id`,`feature`,`create_time`),
+  KEY `idx_cp_ai_run_tenant_actor_time` (`tenant_id`,`actor_user_id`,`create_time`),
+  KEY `idx_cp_ai_run_tenant_status_time` (`tenant_id`,`status`,`create_time`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='Call Phone AI 请求审计元数据，不含提示词与模型正文';
+
+CREATE TABLE IF NOT EXISTS `cp_ai_feedback` (
+  `id` bigint NOT NULL,
+  `tenant_id` bigint NOT NULL DEFAULT 0,
+  `ai_run_id` bigint NOT NULL,
+  `actor_user_id` bigint NOT NULL,
+  `rating` tinyint unsigned NOT NULL,
+  `reason_code` varchar(40) DEFAULT NULL,
+  `comment_ciphertext` varchar(2048) DEFAULT NULL,
+  `submitted_at` datetime(3) NOT NULL,
+  `creator` varchar(64) DEFAULT '',
+  `create_time` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  `updater` varchar(64) DEFAULT '',
+  `update_time` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  `deleted` bit(1) NOT NULL DEFAULT b'0',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_cp_ai_feedback_tenant_run` (`tenant_id`,`ai_run_id`),
+  KEY `idx_cp_ai_feedback_tenant_actor` (`tenant_id`,`actor_user_id`,`submitted_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='Call Phone AI 用户反馈';
