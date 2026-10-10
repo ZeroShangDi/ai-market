@@ -57,6 +57,8 @@
 
 ## 模块文档
 
+- [uni 功能复查与待修复清单](reviews/2026-10-10-uni-functional-readiness.md)：5 项核心问题、验证证据与用户已确认范围；不做手机报表或独立本机录音库，录音跟随客户沟通记录播放，代码修复待后续。
+- [通用应用更新模块](modules/app-update-module.md)：待实现方案，明确已有升级能力复用、版本源/平台适配、通用流程与验收标准。
 - [模块边界与独立部署 ADR](architecture/modular-deployment-adr.md)：本次新增需求的推荐方案，明确前端独立制品、业务服务、公共能力、跨域流程、迁移和验收。
 - [PC / 移动端审查报告](reviews/2026-10-10-mobile-pc-audit.md)与[联调验收清单](reviews/mobile-pc-acceptance.md)：本轮修复、测试证据、未验证项与真实环境复现步骤。
 - [PC 端模块化架构罗盘](architecture/pc-module-architecture.md)：Electron + Vue 3 模块化单体、共享层边界、模块依赖方向、跨模块页面组合和菜单路由注册规则。
