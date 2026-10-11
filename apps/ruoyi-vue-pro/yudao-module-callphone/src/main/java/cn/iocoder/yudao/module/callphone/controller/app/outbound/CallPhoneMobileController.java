@@ -367,6 +367,50 @@ public class CallPhoneMobileController {
         return task;
     }
 
+    /** Reconcile a delayed native end event without rewriting the user's immutable result. */
+    @PostMapping("/calls/observed-end")
+    @PreAuthorize("@ss.hasPermission('callphone:call:dispatch:create')")
+    @ApiAccessLog(requestEnable = false)
+    @Transactional(rollbackFor = Exception.class)
+    public CommonResult<Boolean> observedEnd(@RequestBody @Valid ObservedEndReqVO req,
+            @RequestHeader("X-Callphone-Device-Key") @NotBlank String deviceKey) {
+        PairedDeviceDO device = requireDevice(req.getDeviceId(), deviceKey);
+        String fingerprint = DeviceCredentialUtils.hmacSha256(deviceKey, "observed-end-v1",
+                String.valueOf(req.getCallRecordId()), req.getDeviceEventId(), req.getEndedAt().toInstant().toString(),
+                String.valueOf(req.getDurationSeconds()));
+        MobileCallEventDO prior = getExistingEvent(device.getId(), req.getDeviceEventId(), "observed_end");
+        if (prior != null) {
+            if (!Objects.equals(prior.getCallRecordId(), req.getCallRecordId()) || !Objects.equals(prior.getRequestFingerprint(), fingerprint))
+                throw exception(ErrorCodeConstants.IDEMPOTENCY_CONFLICT);
+            return success(true);
+        }
+        CallRecordDO record = recordMapper.selectById(req.getCallRecordId());
+        if (record == null || !"ended".equals(record.getStatus()) || !Objects.equals(record.getDeviceId(), device.getId())
+                || !Objects.equals(record.getOwnerUserId(), getLoginUserId()) || record.getStartedAt() == null)
+            throw exception(ErrorCodeConstants.CALL_EVENT_INVALID);
+        LocalDateTime endedAt = req.getEndedAt().withOffsetSameInstant(ZoneOffset.UTC).toLocalDateTime();
+        if (endedAt.isAfter(LocalDateTime.now(ZoneOffset.UTC).plusMinutes(5))) throw exception(ErrorCodeConstants.CALL_EVENT_INVALID);
+        int duration = validateCallDuration(Duration.between(record.getStartedAt(), endedAt).getSeconds(), req.getDurationSeconds());
+        // Duplicate/less informative callbacks cannot erase an already observed duration.
+        if (duration > (record.getDurationSeconds() == null ? 0 : record.getDurationSeconds())) {
+            int updated = recordMapper.update(null, new LambdaUpdateWrapper<CallRecordDO>()
+                    .set(CallRecordDO::getDurationSeconds, duration).set(CallRecordDO::getEndedAt, endedAt)
+                    .set(CallRecordDO::getVersion, record.getVersion() + 1)
+                    .eq(CallRecordDO::getId, record.getId()).eq(CallRecordDO::getDeviceId, device.getId())
+                    .eq(CallRecordDO::getVersion, record.getVersion()).eq(CallRecordDO::getStatus, "ended"));
+            if (updated != 1) throw exception(ErrorCodeConstants.CALL_EVENT_INVALID);
+        }
+        saveEvent(device.getId(), req.getDeviceEventId(), "observed_end", record.getCallDispatchId(), record.getId(), fingerprint);
+        return success(true);
+    }
+    @Data public static class ObservedEndReqVO {
+        @NotNull private Long deviceId;
+        @NotNull private Long callRecordId;
+        @NotBlank @Size(max = 64) private String deviceEventId;
+        @NotNull private OffsetDateTime endedAt;
+        @NotNull @Min(0) @Max(86400) private Integer durationSeconds;
+    }
+
     public PairedDeviceDO requireDevice(Long deviceId, String deviceKey) {
         requireAdminIdentity();
         adminUserApi.validateUser(getLoginUserId());

@@ -6,25 +6,41 @@ let accessToken = "",
 let callphoneDevice: { id: string; key: string } | undefined;
 let refreshing: Promise<void> | undefined;
 let sessionVersion = 0;
+let deviceVersion = 0;
+const sessionObservers = new Set<() => void>();
+export const getSessionVersion = () => sessionVersion;
+export function onSessionChange(observer: () => void) {
+  sessionObservers.add(observer);
+  return () => {
+    sessionObservers.delete(observer);
+  };
+}
+function changedSession() {
+  sessionVersion++;
+  refreshing = undefined;
+  sessionObservers.forEach((observer) => observer());
+}
 export function setAccessToken(token: string, refresh = "") {
   accessToken = token;
   refreshToken = refresh;
-  sessionVersion++;
+  changedSession();
 }
 export function clearAccessToken() {
   accessToken = "";
   refreshToken = "";
   callphoneDevice = undefined;
-  sessionVersion++;
+  changedSession();
 }
 export function hasAccessToken() {
   return !!accessToken;
 }
 export function setCallphoneDeviceCredential(id: string, key: string) {
   callphoneDevice = { id, key };
+  deviceVersion++;
 }
 export function clearCallphoneDeviceCredential() {
   callphoneDevice = undefined;
+  deviceVersion++;
 }
 export function hasCallphoneDeviceCredential() {
   return !!callphoneDevice;
@@ -147,42 +163,58 @@ async function refreshSession() {
         refreshToken = result.refreshToken;
       })
       .finally(() => {
-        refreshing = undefined;
+        if (version === sessionVersion) refreshing = undefined;
       });
   }
   return refreshing;
 }
-export async function request<T>(
-  method: "GET" | "POST" | "DELETE",
-  path: string,
-  body?: unknown,
-  key?: string,
+function assertSession(version: number, device: number) {
+  if (version !== sessionVersion || device !== deviceVersion)
+    throw error("AUTH_REQUIRED", "账户或设备会话已变更，请重新加载");
+}
+// JSON and file requests share refresh coordination and credential-generation checks.
+async function authenticated<T>(
+  operation: () => Promise<{ statusCode: number; data?: any }>,
+  accept: (result: any) => T,
 ): Promise<T> {
   if (!accessToken)
     throw error("AUTH_REQUIRED", "请先登录并获取客户侧数据服务授权");
-  const version = sessionVersion;
-  let result = await send(method, path, body, key);
-  if (version !== sessionVersion)
-    throw error("AUTH_REQUIRED", "账户会话已变更，请重新加载");
-  if (result.statusCode === 401 || (result.data as any)?.code === 401) {
-    try {
-      await refreshSession();
-    } catch (e) {
-      if (version === sessionVersion) clearAccessToken();
-      throw e;
-    }
-    result = await send(method, path, body, key);
-  }
-  if (version !== sessionVersion)
-    throw error("AUTH_REQUIRED", "账户会话已变更，请重新加载");
+  const version = sessionVersion,
+    device = deviceVersion,
+    token = accessToken;
   try {
-    return unwrapResponse<T>(result.data, result.statusCode);
+    let result = await operation();
+    assertSession(version, device);
+    if (
+      result.statusCode === 401 ||
+      result.data?.code === 401 ||
+      result.data?.error?.code === "AUTH_REQUIRED"
+    ) {
+      // Another concurrent request may already have refreshed this token.
+      if (token === accessToken) await refreshSession();
+      assertSession(version, device);
+      result = await operation();
+    }
+    assertSession(version, device);
+    return accept(result);
   } catch (e) {
+    assertSession(version, device);
     if ((e as ApiError).code === "AUTH_REQUIRED") clearAccessToken();
     if ((e as ApiError).code === "DEVICE_REVOKED")
       clearCallphoneDeviceCredential();
     throw e;
   }
+}
+export function request<T>(
+  method: "GET" | "POST" | "DELETE",
+  path: string,
+  body?: unknown,
+  key?: string,
+): Promise<T> {
+  return authenticated(
+    () => send(method, path, body, key),
+    (result) => unwrapResponse<T>(result.data, result.statusCode),
+  );
 }
 export async function checkDataService(): Promise<string> {
   if (!connectionSettings().serviceUrl) return "未配置客户侧数据服务地址";
@@ -209,55 +241,100 @@ export async function uploadRecording(
     throw error("AUTH_REQUIRED", "请先登录并连接配对设备");
   if (!filePath || /^https?:\/\//i.test(filePath))
     throw error("UPLOAD_INCOMPLETE", "本机录音文件不可用");
-  const result = await new Promise<UniApp.UploadFileSuccessCallbackResult>(
-    (resolve, reject) =>
-      uni.uploadFile({
-        url: `${connectionSettings().serviceUrl}/api/v1/mobile/calls/${encodeURIComponent(callId)}/recording`,
-        filePath,
-        name: "file",
-        formData: { upload_id: uploadId },
-        timeout: 60000,
-        header: headers(),
-        success: resolve,
-        fail: () =>
-          reject(error("UPLOAD_INCOMPLETE", "录音上传失败，请稍后重试")),
-      }),
+  return authenticated(
+    async () => {
+      const result = await new Promise<UniApp.UploadFileSuccessCallbackResult>(
+        (resolve, reject) =>
+          uni.uploadFile({
+            url: `${connectionSettings().serviceUrl}/api/v1/mobile/calls/${encodeURIComponent(callId)}/recording`,
+            filePath,
+            name: "file",
+            formData: { upload_id: uploadId },
+            timeout: 60000,
+            header: headers(),
+            success: resolve,
+            fail: () =>
+              reject(error("SERVICE_UNAVAILABLE", "录音上传失败，请稍后重试")),
+          }),
+      );
+      let data: any;
+      try {
+        data =
+          typeof result.data === "string"
+            ? JSON.parse(result.data)
+            : result.data;
+      } catch {
+        if (result.statusCode >= 200 && result.statusCode < 300)
+          throw error("INVALID_RESPONSE", "客户侧数据服务返回格式不正确");
+      }
+      return { ...result, data };
+    },
+    (result) => {
+      if (unwrapResponse<boolean>(result.data, result.statusCode) !== true)
+        throw error("UPLOAD_INCOMPLETE", "录音上传未完成");
+    },
   );
-  let value: any;
-  try {
-    value =
-      typeof result.data === "string" ? JSON.parse(result.data) : result.data;
-  } catch {
-    throw error("INVALID_RESPONSE", "客户侧数据服务返回格式不正确");
-  }
-  if (unwrapResponse<boolean>(value, result.statusCode) !== true)
-    throw error("UPLOAD_INCOMPLETE", "录音上传未完成");
 }
+
 export async function downloadRecording(path: string): Promise<string> {
   if (!accessToken || !callphoneDevice)
     throw error("AUTH_REQUIRED", "请先登录并连接配对设备");
   if (!/^\/api\/v1\/mobile\/calls\/\d+\/recording$/.test(path))
     throw error("INVALID_RESPONSE", "录音地址无效");
-  const result = await new Promise<UniApp.DownloadSuccessData>(
-    (resolve, reject) =>
-      uni.downloadFile({
-        url: connectionSettings().serviceUrl + path,
-        timeout: 60000,
-        header: headers(),
-        success: resolve,
-        fail: () =>
-          reject(error("SERVICE_UNAVAILABLE", "录音下载失败，请稍后重试")),
-      }),
-  );
-  if (
-    result.statusCode < 200 ||
-    result.statusCode >= 300 ||
-    !result.tempFilePath
-  )
-    throw error(
-      "RECORDING_FORBIDDEN",
-      "当前账号无权播放录音或录音不存在",
-      result.statusCode,
+  let temporaryPath = "";
+  try {
+    return await authenticated(
+      () =>
+        new Promise<UniApp.DownloadSuccessData>((resolve, reject) =>
+          uni.downloadFile({
+            url: connectionSettings().serviceUrl + path,
+            timeout: 60000,
+            header: headers(),
+            success: (result) => {
+              temporaryPath = result.tempFilePath || "";
+              resolve(result);
+            },
+            fail: () =>
+              reject(error("SERVICE_UNAVAILABLE", "录音下载失败，请稍后重试")),
+          }),
+        ),
+      (result: UniApp.DownloadSuccessData) => {
+        if (
+          result.statusCode < 200 ||
+          result.statusCode >= 300 ||
+          !result.tempFilePath
+        )
+          throw error(
+            result.statusCode === 401
+              ? "AUTH_REQUIRED"
+              : result.statusCode === 403
+                ? "FORBIDDEN"
+                : result.statusCode === 404
+                  ? "NOT_FOUND"
+                  : "SERVICE_UNAVAILABLE",
+            result.statusCode === 401
+              ? "登录已过期，请重新登录"
+              : result.statusCode === 403
+                ? "当前账号无权播放录音"
+                : result.statusCode === 404
+                  ? "录音不存在或尚未上传"
+                  : "录音服务暂时不可用，请重试",
+            result.statusCode,
+          );
+        return result.tempFilePath;
+      },
     );
-  return result.tempFilePath;
+  } catch (e) {
+    if (temporaryPath && typeof plus !== "undefined")
+      plus.io.resolveLocalFileSystemURL(
+        temporaryPath,
+        (entry) =>
+          entry.remove(
+            () => {},
+            () => {},
+          ),
+        () => {},
+      );
+    throw e;
+  }
 }

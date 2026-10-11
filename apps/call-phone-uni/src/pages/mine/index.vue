@@ -39,9 +39,60 @@
           ><text>诊断与帮助</text><text>权限、录音、同步状态</text></view
         ><image class="arrow" src="/static/figma/2-112-imgFrame2.svg"
       /></view>
+      <view class="setting" @tap="checkUpdates(true)"
+        ><view class="setting-text"
+          ><text>应用更新</text
+          ><text
+            >{{ updateLabels[updateState.status]
+            }}{{
+              updateState.progress != null ? ` ${updateState.progress}%` : ""
+            }}</text
+          ></view
+        ></view
+      >
+      <view v-if="updateState.release || updateState.message" class="state">
+        <text>{{ updateState.message || updateState.release?.notes }}</text>
+        <button
+          v-if="
+            ['available', 'cancelled'].includes(updateState.status) ||
+            (updateState.status === 'failed' &&
+              updateState.stage === 'download')
+          "
+          @tap="updates.download()"
+        >
+          下载更新
+        </button>
+        <button
+          v-if="
+            updateState.status === 'failed' && updateState.stage === 'install'
+          "
+          @tap="installSettings"
+        >
+          打开安装权限设置
+        </button>
+        <button
+          v-if="
+            ['readyToInstall', 'deferred'].includes(updateState.status) ||
+            (updateState.status === 'failed' && updateState.stage === 'install')
+          "
+          @tap="updates.install()"
+        >
+          继续安装
+        </button>
+        <button
+          v-if="
+            ['downloading', 'verifying', 'readyToInstall', 'deferred'].includes(
+              updateState.status,
+            )
+          "
+          @tap="updates.cancel()"
+        >
+          取消更新
+        </button>
+      </view>
       <view class="divider" /><text class="hint">{{
         pendingCompletionCount()
-          ? `有 ${pendingCompletionCount()} 条通话结果待同步（仅当前进程保留）`
+          ? `有 ${pendingCompletionCount()} 条通话结果待同步`
           : "发生同步异常时，这里会显示待处理项"
       }}</text>
       <view v-if="panel" class="panel-scrim" @tap="panel = ''"
@@ -98,7 +149,7 @@
               >
                 {{ claimingPairing ? "正在配对…" : "确认配对" }}</button
               ><text class="pairing-hint"
-                >设备密钥仅保存在本次运行内存中；重启应用后需重新配对。</text
+                >{{ persistenceStatus }}；重新登录同一账户后恢复本机配对。</text
               ></view
             ><text>连通性测试：{{ connectivityStatus }}</text
             ><button
@@ -126,7 +177,37 @@
             ><text>自动录音：{{ recordingStatus }}</text
             ><text>文件权限：{{ fileStatus }}</text
             ><text>拨号测试：{{ testCallStatus }}</text
-            ><button class="secondary" @tap="checkNative">检查本机权限</button
+            ><text>{{ persistenceStatus }}</text>
+            <view v-for="item in pending" :key="item.key">
+              <text
+                >通话 {{ item.id }}：{{ item.message || "等待同步"
+                }}{{
+                  item.durable ? "（已安全保存）" : "（尚未安全保存）"
+                }}</text
+              >
+              <button
+                v-if="item.failure === 'permanent'"
+                class="secondary"
+                @tap="disposeTask(item.id)"
+              >
+                处置无法同步的任务
+              </button>
+            </view>
+            <button
+              v-if="recordingStatus !== '已开启'"
+              class="secondary"
+              @tap="openNativeSettings('recording')"
+            >
+              设置自动录音
+            </button>
+            <button
+              v-if="fileStatus !== '已授权'"
+              class="secondary"
+              @tap="openNativeSettings('files')"
+            >
+              设置文件权限
+            </button>
+            <button class="secondary" @tap="checkNative">检查本机权限</button
             ><button class="secondary" :disabled="testCallBusy" @tap="testCall">
               测试拨号 10086</button
             ><button class="secondary" @tap="retry">重试同步</button></template
@@ -138,6 +219,13 @@
   /></view>
 </template>
 <script setup lang="ts">
+import { openAndroidInstallSettings } from "@/modules/app-update/android";
+import {
+  checkUpdates,
+  updateState,
+  updateLabels,
+  updates,
+} from "@/services/updates";
 import { computed, ref } from "vue";
 import { onShow } from "@dcloudio/uni-app";
 import MobileHeader from "@/components/MobileHeader.vue";
@@ -148,6 +236,8 @@ import {
   checkDataService,
   clearCallphoneDeviceCredential,
   messageOf,
+  getSessionVersion,
+  hasAccessToken,
 } from "@/api/http";
 import { connectionSettings, normalizeServiceUrl } from "@/config";
 import { parsePairingPayload } from "@/services/pairing";
@@ -155,12 +245,26 @@ import { ensureSession, logout } from "@/services/session";
 import { mockEnabled } from "@/config";
 import {
   clearCallState,
+  restoreCallQueue,
+  pending,
+  discardPending,
+  hasUnfinishedCall,
+  hasUnsafeResults,
   pendingCompletionCount,
   retryPendingCompletions,
 } from "@/services/calls";
+import { persistenceStatus, forgetDevice } from "@/services/vault";
+import { refreshDispatches } from "@/services/foreground";
 import { phoneCapability } from "@/native/phone";
 import { when, toast } from "@/ui/format";
 import type { Bootstrap, Device, Diagnostics } from "@/types/mobile";
+function installSettings() {
+  try {
+    openAndroidInstallSettings();
+  } catch (e) {
+    toast(messageOf(e));
+  }
+}
 const bootstrap = ref<Bootstrap>(),
   device = ref<Device>(),
   diagnostics = ref<Diagnostics>(),
@@ -217,25 +321,34 @@ function diagnosticLabel(value?: string) {
   return value ? diagnosticLabels[value] || "未知状态" : "未检查";
 }
 onShow(() => {
-  if (ensureSession()) void load();
+  if (ensureSession()) {
+    void load();
+    if (panel.value === "diagnostics") void checkNative();
+  }
 });
 async function load() {
+  const session = getSessionVersion();
   bootstrap.value = undefined;
   device.value = undefined;
   loading.value = true;
   errorMessage.value = "";
   try {
-    bootstrap.value = await mobileService.bootstrap();
-    device.value = await mobileService.device();
+    const account = await mobileService.bootstrap();
+    if (session !== getSessionVersion()) return;
+    const currentDevice = await mobileService.device();
+    if (session !== getSessionVersion()) return;
+    bootstrap.value = account;
+    device.value = currentDevice;
   } catch (e) {
-    errorMessage.value = messageOf(e);
+    if (session === getSessionVersion()) errorMessage.value = messageOf(e);
   } finally {
-    loading.value = false;
+    if (session === getSessionVersion()) loading.value = false;
   }
 }
 async function open(value: "account" | "device" | "diagnostics") {
   panel.value = value;
   if (value === "diagnostics") {
+    void checkNative();
     try {
       diagnostics.value = await mobileService.diagnostics();
     } catch (e) {
@@ -243,15 +356,59 @@ async function open(value: "account" | "device" | "diagnostics") {
     }
   }
 }
+let checkingPermissions = false;
 async function checkNative() {
-  const [recording, files] = await Promise.all([
+  if (checkingPermissions) return;
+  checkingPermissions = true;
+  recordingStatus.value = fileStatus.value = "检查中…";
+  const [recording, files] = await Promise.allSettled([
     phoneCapability.recordingConfigured(),
     phoneCapability.filePermission(),
   ]);
   recordingStatus.value =
-    recording === null ? "插件不可用" : recording ? "已开启" : "未开启";
+    recording.status === "rejected"
+      ? messageOf(recording.reason)
+      : recording.value === null
+        ? "当前平台不支持"
+        : recording.value
+          ? "已开启"
+          : "未开启";
   fileStatus.value =
-    files === null ? "插件不可用" : files ? "已授权" : "未授权";
+    files.status === "rejected"
+      ? messageOf(files.reason)
+      : files.value === null
+        ? "当前平台不支持"
+        : files.value
+          ? "已授权"
+          : "未授权";
+  checkingPermissions = false;
+}
+function openNativeSettings(kind: "recording" | "files") {
+  try {
+    kind === "recording"
+      ? phoneCapability.openRecordingSettings()
+      : phoneCapability.openFilePermissionSettings();
+  } catch (e) {
+    toast(messageOf(e));
+  }
+}
+async function disposeTask(id: string) {
+  const confirmed = await new Promise<boolean>((resolve) =>
+    uni.showModal({
+      title: "处置无法同步的任务",
+      content:
+        "请先联系管理员处理权限或数据问题。仅当确认不再同步时删除本机任务；未上传的结果和录音将无法恢复。",
+      confirmText: "删除本机任务",
+      success: (result) => resolve(!!result.confirm),
+      fail: () => resolve(false),
+    }),
+  );
+  if (!confirmed) return;
+  try {
+    discardPending(id);
+  } catch (e) {
+    toast(messageOf(e));
+  }
 }
 async function testConnectivity() {
   if (mockEnabled) {
@@ -269,6 +426,7 @@ async function testConnectivity() {
   }
 }
 async function testCall() {
+  if (hasUnfinishedCall()) return toast("请先结束当前客户通话并保存结果");
   if (!phoneCapability.available()) {
     testCallStatus.value = "当前环境没有 Android 通话插件";
     return;
@@ -292,7 +450,7 @@ async function testCall() {
   }
 }
 async function retry() {
-  await retryPendingCompletions();
+  await retryPendingCompletions(true);
   toast(pendingCompletionCount() ? "仍有结果待同步" : "待同步结果已处理");
 }
 function onPairingCodeInput(event: any) {
@@ -300,6 +458,8 @@ function onPairingCodeInput(event: any) {
   pairingCode.value = String(value).replace(/\D/g, "").slice(0, 6);
 }
 async function claimPairing() {
+  if (hasUnfinishedCall() || hasUnsafeResults())
+    return toast("请先安全保存当前通话结果，再连接设备");
   const code = String(pairingCode.value).trim();
   if (!/^\d{6}$/.test(code)) return toast("请输入六位配对码");
   const system = uni.getSystemInfoSync();
@@ -320,8 +480,10 @@ async function claimPairing() {
       pairingDeviceName.value.trim() || "我的手机",
       platform,
     );
+    clearCallState();
+    restoreCallQueue();
     pairingCode.value = "";
-    await mobileService.heartbeat();
+    await refreshDispatches();
     await load();
     toast("手机已配对");
   } catch (e) {
@@ -331,6 +493,8 @@ async function claimPairing() {
   }
 }
 async function unpair() {
+  if (hasUnfinishedCall() || pendingCompletionCount())
+    return toast("请先保存并处理待同步结果，再解绑本机");
   const confirmed = await new Promise<boolean>((resolve) =>
     uni.showModal({
       title: "解绑本机",
@@ -342,6 +506,7 @@ async function unpair() {
   try {
     const result = await mobileService.unpair("mobile-unpair-" + Date.now());
     if (result === false) throw new Error("解绑未完成，请刷新后重试");
+    forgetDevice();
     clearCallphoneDeviceCredential();
     clearCallState();
     panel.value = "";
@@ -352,14 +517,25 @@ async function unpair() {
   }
 }
 async function signOut() {
+  if (hasUnfinishedCall() || hasUnsafeResults())
+    return toast("请先结束通话并安全保存结果");
   if (pendingCompletionCount()) {
-    toast("请先在诊断与帮助中同步待处理通话结果，再退出登录");
-    return;
+    const confirmed = await new Promise<boolean>((resolve) =>
+      uni.showModal({
+        title: "保留待同步结果并退出",
+        content:
+          "结果将加密保留在本机；再次登录相同服务、工作区和账户后继续处理。切换账户不会发送这些任务。",
+        success: (result) => resolve(!!result.confirm),
+        fail: () => resolve(false),
+      }),
+    );
+    if (!confirmed) return;
   }
   try {
     await logout();
-  } catch {
-    /* Local session is always cleared. */
+  } catch (e) {
+    toast(messageOf(e));
+    if (hasAccessToken()) return;
   }
   uni.reLaunch({ url: "/pages/login/index" });
 }

@@ -300,6 +300,24 @@ public class CallPhoneMobileV1AdapterController {
         return mobileController.complete(internal, deviceKey);
     }
 
+    @PostMapping("/calls/{callId}/observed-end")
+    @PreAuthorize("@ss.hasPermission('callphone:call:dispatch:create')")
+    @cn.iocoder.yudao.framework.apilog.core.annotation.ApiAccessLog(requestEnable = false)
+    public CommonResult<Boolean> observedEnd(@PathVariable Long callId, @RequestBody @Valid ObservedEndV1ReqVO req,
+            @RequestHeader("X-Callphone-Device-Id") @NotBlank String deviceId,
+            @RequestHeader("X-Callphone-Device-Key") @NotBlank String deviceKey) {
+        CallPhoneMobileController.ObservedEndReqVO internal = new CallPhoneMobileController.ObservedEndReqVO();
+        internal.setDeviceId(Long.valueOf(deviceId)); internal.setCallRecordId(callId);
+        internal.setDeviceEventId(req.getDeviceEventId()); internal.setEndedAt(req.getEndedAt());
+        internal.setDurationSeconds(req.getDurationSeconds());
+        return mobileController.observedEnd(internal, deviceKey);
+    }
+    @Data public static class ObservedEndV1ReqVO {
+        @JsonAlias("device_event_id") @NotBlank @Size(max = 64) private String deviceEventId;
+        @JsonAlias("ended_at") @NotNull private OffsetDateTime endedAt;
+        @JsonAlias("duration_seconds") @NotNull @Min(0) @Max(86400) private Integer durationSeconds;
+    }
+
     @PostMapping(path = "/calls/{callId}/recording", consumes = "multipart/form-data")
     @Operation(summary = "上传已结束通话的本机录音到客户侧加密存储")
     @PreAuthorize("@ss.hasPermission('callphone:call:dispatch:create')")

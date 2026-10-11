@@ -9,6 +9,13 @@
           title
         }}</text>
         <view
+          v-if="foregroundDispatches.length"
+          class="dispatch-entry"
+          role="button"
+          @tap="openDispatches"
+          >待接派发 {{ foregroundDispatches.length }}</view
+        >
+        <view
           v-if="actionIcon"
           class="header-action"
           role="button"
@@ -19,6 +26,7 @@
   ></view>
 </template>
 <script setup lang="ts">
+import { foregroundDispatches } from "@/services/foreground";
 import { hasUnfinishedCall } from "@/services/calls";
 defineProps<{
   title: string;
@@ -27,6 +35,11 @@ defineProps<{
   backIcon?: string;
 }>();
 defineEmits<{ (event: "action"): void }>();
+function openDispatches() {
+  if (hasUnfinishedCall())
+    return uni.showToast({ title: "请先完成当前通话", icon: "none" });
+  uni.reLaunch({ url: "/pages/customers/index" });
+}
 function back() {
   if (hasUnfinishedCall()) {
     uni.showToast({ title: "请先完成当前通话并保存结果", icon: "none" });
@@ -38,6 +51,13 @@ function back() {
 }
 </script>
 <style scoped lang="scss">
+.dispatch-entry {
+  color: #294fdb;
+  font-size: 12px;
+  padding: 8px;
+  background: #e8f0ff;
+  border-radius: 12px;
+}
 .header-space {
   height: calc(
     52px + max(var(--status-bar-height, 0px), env(safe-area-inset-top, 0px))

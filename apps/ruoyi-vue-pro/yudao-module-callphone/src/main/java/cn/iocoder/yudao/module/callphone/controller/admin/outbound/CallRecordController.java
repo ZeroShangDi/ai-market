@@ -82,24 +82,24 @@ public class CallRecordController {
     public CommonResult<PageResult<CallRecordRespVO>> getPage(@Valid CallRecordPageReqVO reqVO) {
         PageResult<CallRecordDO> page = callRecordService.getCallRecordPage(reqVO);
         List<CallRecordRespVO> records = BeanUtils.toBean(page.getList(), CallRecordRespVO.class);
-        Map<Long, AdminUserRespDTO> userMap = adminUserApi.getUserMap(
-                cn.iocoder.yudao.framework.common.util.collection.CollectionUtils.convertSet(
-                        page.getList(), CallRecordDO::getOwnerUserId));
-        Map<Long, PairedDeviceDO> deviceMap = deviceMapper.selectBatchIds(
-                cn.iocoder.yudao.framework.common.util.collection.CollectionUtils.convertSet(
-                        page.getList(), CallRecordDO::getDeviceId)).stream()
-                .collect(java.util.stream.Collectors.toMap(PairedDeviceDO::getId, device -> device, (left, right) -> left));
+        Set<Long> ownerIds = page.getList().stream().map(CallRecordDO::getOwnerUserId)
+                .filter(Objects::nonNull).collect(Collectors.toSet());
+        Map<Long, AdminUserRespDTO> userMap = ownerIds.isEmpty() ? Map.of() : adminUserApi.getUserMap(ownerIds);
+        Set<Long> deviceIds = page.getList().stream().map(CallRecordDO::getDeviceId)
+                .filter(Objects::nonNull).collect(Collectors.toSet());
+        Map<Long, PairedDeviceDO> deviceMap = deviceIds.isEmpty() ? Map.of() : deviceMapper.selectBatchIds(deviceIds)
+                .stream().collect(Collectors.toMap(PairedDeviceDO::getId, device -> device, (left, right) -> left));
         for (int i = 0; i < records.size(); i++) {
             CallRecordRespVO record = records.get(i);
             CallRecordDO source = page.getList().get(i);
             record.setCustomerName(piiCryptoService.decrypt(source.getCustomerNameCiphertext()));
             record.setNextStep(piiCryptoService.decrypt(source.getNextStepCiphertext()));
             record.setNote(piiCryptoService.decrypt(source.getNoteCiphertext()));
-            AdminUserRespDTO owner = userMap.get(record.getOwnerUserId());
+            AdminUserRespDTO owner = record.getOwnerUserId() == null ? null : userMap.get(record.getOwnerUserId());
             if (owner != null) {
                 record.setOwnerName(owner.getNickname());
             }
-            PairedDeviceDO device = deviceMap.get(record.getDeviceId());
+            PairedDeviceDO device = record.getDeviceId() == null ? null : deviceMap.get(record.getDeviceId());
             if (device != null) record.setDeviceName(device.getDisplayName());
         }
         return success(new PageResult<>(records, page.getTotal()));

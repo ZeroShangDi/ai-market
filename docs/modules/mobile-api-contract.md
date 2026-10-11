@@ -5,7 +5,7 @@
 ## 范围与设计边界
 
 - 页面：工作台（空白占位）、客户列表、客户详情、我的；以 [Figma 移动端稿](https://www.figma.com/design/mmSoRVtmnoG8FfglOju1Jh/Call-Phone?node-id=1-2) 为视觉和交互依据。
-- 2026-10-10 用户确认：不做手机报表或独立本机录音库，录音通过客户页面的沟通记录播放；通用自动更新另见[模块方案](app-update-module.md)。权限引导、安全持久化、失败分类及文件传输认证恢复均纳入待修复范围，完整问题与验收见[uni 功能复查](../reviews/2026-10-10-uni-functional-readiness.md)。这些是后续任务，不代表下文所述内存凭据/队列等现状已修复。
+- 2026-10-10 用户确认：不做手机报表或独立本机录音库，录音通过客户页面的沟通记录播放；通用自动更新另见[模块方案](app-update-module.md)。权限引导、安全持久化、失败分类及文件传输认证恢复均纳入待修复范围，完整问题与验收见[uni 功能复查](../reviews/2026-10-10-uni-functional-readiness.md)。后续代码实现与尚待真机验收的边界见[实施记录](../reviews/2026-10-10-uni-remediation-progress.md)。
 - 后端只保存客户授权的业务信息、通话元数据及客户侧录音；手机拨号、通话监听与录音由现有 uni-app 原生插件完成，API 不模拟拨号能力。
 - PC 创建外呼派发，手机前台确认后才读取号码并调用系统拨号；“已派发 / 已接受 / 已拨号 / 已接通”是不同状态。
 - API 逻辑前缀为 `/api/v1`，沿用 `docs/README.md` 的 UTC 时间、字符串 ID、分页和错误信封约定。芋道接入时可将该契约映射到 `/app-api` 路由，但不要让移动端绑定芋道内部 Controller 路径。
@@ -20,7 +20,7 @@
 - 创建/命令类写操作使用 `Idempotency-Key`（UUID），原生插件回调用 `device_event_id`，录音 multipart 上传用 `upload_id`。同一幂等标识、相同请求/文件的重试返回首次结果；相同标识搭配不同请求/文件返回冲突。
 - 通话完成事件使用 `(device_id, device_event_id)` 唯一键，并保存由该设备配对密钥计算的 HMAC 请求指纹（不保存明文备注）；相同事件 ID、相同请求返回原结果，事件 ID 相同但通话/结果/时间/时长/备注不同则返回 `IDEMPOTENCY_CONFLICT`。旧事件无指纹时由已保存的加密通话记录字段做兼容核对。
 - 手机号仅在当前用户字段权限允许时返回；客户端不得将授权判断仅放在 UI。API/分析/崩溃日志必须遮蔽手机号、姓名、录音 URL 与令牌。
-- 移动端离线时，通话结果进入当前进程内存中的待同步队列，恢复连接后以原键重试；应用进程退出后队列可能丢失，当前没有安全的持久化队列。不得因产品方授权服务短暂不可用而阻断客户本地数据访问。
+- 移动端离线时，Android 通话结果进入系统 Keystore 加密的待同步队列，重新登录并验证原设备后以原键恢复；不支持安全存储的平台明确提示，无法安全保存时不释放通话锁。不得因产品方授权服务短暂不可用而阻断客户本地数据访问。
 
 ## 页面数据与接口
 
@@ -55,11 +55,11 @@
 
 ### 保留移动端 `/api/v1/mobile` 路径
 
-Call Phone 模块增加兼容控制器，手机端无需改成 `/callphone/mobile/*`。设备请求通过 `X-Callphone-Device-Id` 与 `X-Callphone-Device-Key` 传递配对凭据；服务端在 `cp_device` 持久化密钥 SHA-256 摘要并逐请求校验，原始密钥目前只保存在 uni-app 运行时内存，应用进程重启后需要重新配对；Android Keystore/iOS Keychain 持久化尚未接入。客户查询额外要求 `callphone:customer:query`，派发与通话动作要求 `callphone:call:dispatch:create`，配对认领要求 `callphone:device:pair:manage`。兼容接口如下：
+Call Phone 模块增加兼容控制器，手机端无需改成 `/callphone/mobile/*`。设备请求通过 `X-Callphone-Device-Id` 与 `X-Callphone-Device-Key` 传递配对凭据；服务端在 `cp_device` 持久化密钥 SHA-256 摘要并逐请求校验，原始密钥在 Android 经 Keystore AES-GCM 保存，重启后员工重新登录并经服务端验证恢复原设备；H5/iOS 不提供安全持久化。客户查询额外要求 `callphone:customer:query`，派发与通话动作要求 `callphone:call:dispatch:create`，配对认领要求 `callphone:device:pair:manage`。兼容接口如下：
 
 | 移动端契约路径 | 对应模块能力 |
 |---|---|
-| `POST /api/v1/mobile/pairings/claim` | 把 `pairing_code/display_name/platform` 映射到现有配对认领，并以 `device_id/device_key/display_name` 返回；密钥在客户端进入内存凭据容器 |
+| `POST /api/v1/mobile/pairings/claim` | 把 `pairing_code/display_name/platform` 映射到现有配对认领，并以 `device_id/device_key/display_name` 返回；Android 先检测安全存储可用，再认领并保存身份 |
 | `GET /api/v1/mobile/bootstrap` | 返回当前成员、租户工作区、配对设备存在状态和受限授权快照；许可证访问错误以 `unavailable` 表示 |
 | `GET /api/v1/mobile/customers?scope=today\|recent\|all&page=&page_size=&q=` | 返回本人有效客户；today 按上海自然日内的通话记录筛选，UTC 存储的通话时间使用左闭右开日界；recent 是近 30 天有通话记录，all 是本人全部有效客户；手机号可拨字段仅在 `callphone:call:dispatch:create` 权限下返回，`q` 只匹配掩码号码 |
 | `GET /api/v1/mobile/customers/{customer_id}` | 返回本人客户详情和最近 20 条通话摘要；跨成员、归档客户返回空结果 |
@@ -114,3 +114,8 @@ Yudao 兼容层对缺少客户或派发 ID 的拨号请求返回 Call Phone 错�
 4. 重放通话结束事件不会重复生成记录；离线结果可以在恢复连接后同步。
 5. 录音缺失/上传失败/无播放权限都有明确 UI 状态；原始本机路径与号码不进入日志。
 6. 授权服务离线时按缓存权益展示状态，不发送客户信息到产品方授权服务。
+
+
+### 延迟结束事件
+
+`POST /api/v1/mobile/calls/{callId}/observed-end`：`device_event_id`、`ended_at`、`duration_seconds`。用于人工确认保存后延迟到达的 native 时长，不更改人工结果或备注。沿用账户授权和设备密钥校验，要求原通话已结束且归属当前设备/员工；校验时长范围，较小/重复时长不覆盖已有值，以独立事件及 HMAC 指纹拒绝冲突重放。延迟录音沿用原 recording 上传入口，不放宽设备归属。

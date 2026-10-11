@@ -55,7 +55,7 @@ export function observePhone(fn: (event: ObservedCallEvent) => void) {
         return;
       }
       if (data.isIncoming === true) incomingCall = true;
-      if (incomingCall) {
+      if (incomingCall && (!data.phoneNumber || normalizeNumber(String(data.phoneNumber)) !== dialedNumber || data.isIncoming === true)) {
         if (data.status === 3 || data.status === 4) incomingCall = false;
         return;
       }
@@ -128,25 +128,50 @@ function nativeCheck(
 ): Promise<boolean | null> {
   const plugin = module();
   if (!plugin?.[method]) return Promise.resolve(null);
-  return new Promise((resolve) =>
-    plugin[method]!((result: any) =>
-      resolve(
-        result?.code === 0
-          ? !!(result.data?.isOpen ?? result.data?.status)
-          : null,
-      ),
-    ),
-  );
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(
+      () => reject(error("PERMISSION_TIMEOUT", "权限检查超时，请返回后重试")),
+      8000,
+    );
+    try {
+      plugin[method]!((result: any) => {
+        clearTimeout(timer);
+        if (result?.code !== 0)
+          reject(
+            error("PERMISSION_CHECK_FAILED", "权限检查失败，请检查系统设置"),
+          );
+        else resolve(!!(result.data?.isOpen ?? result.data?.status));
+      });
+    } catch {
+      clearTimeout(timer);
+      reject(error("PERMISSION_CHECK_FAILED", "无法读取权限，请重试"));
+    }
+  });
 }
+function openSettings(
+  method: "toCallAutoRecorderPage" | "toAllFilesPermissionPage",
+) {
+  const plugin = module();
+  if (!plugin?.[method])
+    throw error("NATIVE_PLUGIN_UNAVAILABLE", "当前平台不支持此设置入口");
+  try {
+    plugin[method]!((result: any) => {
+      if (result?.code && result.code !== 0)
+        uni.showToast({ title: "打开系统设置失败，请手工检查", icon: "none" });
+    });
+  } catch {
+    throw error("SETTINGS_FAILED", "打开系统设置失败，请手工检查");
+  }
+}
+
 export const phoneCapability = {
   available: () => !!module()?.callPhone,
   observe: observePhone,
   dial,
   recordingConfigured: () => nativeCheck("checkCallAutoRecorder"),
   filePermission: () => nativeCheck("checkAllFilesPermission"),
-  openRecordingSettings: () => module()?.toCallAutoRecorderPage?.(() => {}),
-  openFilePermissionSettings: () =>
-    module()?.toAllFilesPermissionPage?.(() => {}),
+  openRecordingSettings: () => openSettings("toCallAutoRecorderPage"),
+  openFilePermissionSettings: () => openSettings("toAllFilesPermissionPage"),
   async openWeChat() {
     // #ifdef APP-PLUS
     try {

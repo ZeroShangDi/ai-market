@@ -1,3 +1,4 @@
+import { saveDevice, verifyDeviceStorage } from "@/services/vault";
 import {
   error,
   downloadRecording as downloadRecordingFile,
@@ -26,6 +27,7 @@ export const mobileApi = {
     displayName: string,
     platform: "android" | "ios",
   ) => {
+    verifyDeviceStorage();
     const result = await request<{
       device_id: string;
       device_key: string;
@@ -37,6 +39,7 @@ export const mobileApi = {
     });
     if (!result?.device_id || !result?.device_key)
       throw error("PAIRING_INVALID", "配对码无效、已过期或不属于当前员工账户");
+    saveDevice(result.device_id, result.device_key);
     setCallphoneDeviceCredential(result.device_id, result.device_key);
     return { device_id: result.device_id, display_name: result.display_name };
   },
@@ -72,6 +75,20 @@ export const mobileApi = {
     }),
   completeCall: (id: string, body: CompleteCall, key: string) =>
     request<boolean>("POST", `${base}/calls/${enc(id)}/complete`, body, key),
+  observedEnd: (
+    id: string,
+    body: {
+      device_event_id: string;
+      ended_at: string;
+      duration_seconds: number;
+    },
+  ) =>
+    request<boolean>(
+      "POST",
+      `${base}/calls/${enc(id)}/observed-end`,
+      body,
+      body.device_event_id,
+    ),
   recordingAccess: (id: string) =>
     request<{ url?: string; playback_url?: string; expires_at?: string }>(
       "GET",

@@ -25,7 +25,25 @@
         placeholder="备注（可选）"
         maxlength="300"
       />
-      <button class="submit" :disabled="saving || !chosen" @tap="submit">
+      <text v-if="!endedAt && !manualEnd" class="sheet-help"
+        >等待通话结束。若系统未回传，请核实电话已挂断后人工确认。</text
+      >
+      <button
+        v-if="!endedAt && !manualEnd"
+        :disabled="saving"
+        @tap="confirmEnd"
+      >
+        已挂断，人工确认结束
+      </button>
+      <button
+        class="submit"
+        :disabled="
+          saving ||
+          !chosen ||
+          (!endedAt && !manualEnd && (dialStarted || dialUncertain))
+        "
+        @tap="submit"
+      >
         {{ saving ? "保存中…" : "保存结果" }}
       </button>
     </view></view
@@ -33,7 +51,8 @@
 </template>
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
-import { completeCall } from "@/services/calls";
+import { completeCall, confirmCallEnded } from "@/services/calls";
+import { messageOf, getSessionVersion } from "@/api/http";
 import { resultLabels, toast } from "@/ui/format";
 import type { ResultCode } from "@/types/mobile";
 const props = defineProps<{
@@ -60,10 +79,31 @@ const availableOptions = computed(() =>
 const chosen = ref<ResultCode | "">("");
 const note = ref("");
 const saving = ref(false);
+const manualEnd = ref("");
+async function confirmEnd() {
+  const callId = props.callId;
+  const result = await new Promise<boolean>((resolve) =>
+    uni.showModal({
+      title: "确认电话已结束",
+      content:
+        "请先在系统电话中确认已挂断。确认后将允许保存结果；通话时长以系统回传为准。",
+      success: (result) => resolve(!!result.confirm),
+      fail: () => resolve(false),
+    }),
+  );
+  if (!result || callId !== props.callId) return;
+  try {
+    manualEnd.value = confirmCallEnded(callId);
+  } catch (e) {
+    toast(messageOf(e));
+  }
+}
 watch(
   () => props.visible,
   (value) => {
     if (value) {
+      manualEnd.value = "";
+      saving.value = false;
       chosen.value = props.suggested || "";
       note.value = "";
     }
@@ -78,28 +118,37 @@ watch(
 async function submit() {
   if (!chosen.value || saving.value) return;
   saving.value = true;
-  const state = await completeCall(
-    props.callId,
-    chosen.value,
-    props.startedAt,
-    props.durationSeconds,
-    note.value,
-    props.recordingPath,
-    props.endedAt,
-  );
-  saving.value = false;
-  toast(
-    state === "recording_synced"
-      ? "通话结果与录音已同步"
-      : state === "synced"
-        ? "通话结果已保存"
-        : state === "mock"
-          ? "演示结果已记录；未上传真实录音"
-          : state === "recording_pending"
-            ? "通话结果已保存；录音上传失败，已保留重试任务"
-            : "同步失败，已保留本次结果；请保持应用打开后重试",
-  );
-  emit("saved", chosen.value);
+  const callId = props.callId, session = getSessionVersion(), resultCode = chosen.value;
+  const current = () => props.callId === callId && session === getSessionVersion();
+  try {
+    const state = await completeCall(
+      props.callId,
+      chosen.value,
+      props.startedAt,
+      props.durationSeconds,
+      note.value,
+      props.recordingPath,
+      props.endedAt,
+    );
+    if (!current()) return;
+    saving.value = false;
+    toast(
+      state === "recording_synced"
+        ? "通话结果与录音已同步"
+        : state === "synced"
+          ? "通话结果已保存"
+          : state === "mock"
+            ? "演示结果已记录；未上传真实录音"
+            : state === "recording_pending"
+              ? "通话结果已保存；录音上传失败，已保留重试任务"
+              : "同步失败，已保留本次结果；请保持应用打开后重试",
+    );
+    emit("saved", resultCode);
+  } catch (e) {
+    if (current()) toast(messageOf(e));
+  } finally {
+    if (current()) saving.value = false;
+  }
 }
 </script>
 <style scoped lang="scss">

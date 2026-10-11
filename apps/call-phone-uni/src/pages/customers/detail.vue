@@ -114,7 +114,7 @@ import CallResultSheet from "@/components/CallResultSheet.vue";
 import { mobileService } from "@/services/mobile";
 import { beginCall, type StartedCall } from "@/services/calls";
 import { phoneCapability } from "@/native/phone";
-import { messageOf } from "@/api/http";
+import { messageOf, getSessionVersion, onSessionChange } from "@/api/http";
 import { resultLabels, when, duration, toast } from "@/ui/format";
 import type { CallRecord, Customer, ResultCode } from "@/types/mobile";
 const customerId = ref(""),
@@ -131,6 +131,13 @@ let audio: UniApp.InnerAudioContext | undefined,
   stopObserve: (() => void) | undefined;
 onLoad((options) => {
   customerId.value = String(options?.id || "");
+});
+const stopSession = onSessionChange(() => {
+  activeCall.value = null;
+  recordingPath.value = "";
+  observedEndAt.value = "";
+  stopObserve?.();
+  stopObserve = undefined;
 });
 onShow(() => {
   if (!ensureSession()) return;
@@ -159,10 +166,12 @@ onHide(() => {
   audio = undefined;
 });
 onUnload(() => {
+  stopSession();
   stopObserve?.();
   stopObserve = undefined;
 });
 async function load() {
+  const session = getSessionVersion();
   if (!customerId.value) {
     errorMessage.value = "缺少客户编号";
     loading.value = false;
@@ -171,12 +180,15 @@ async function load() {
   loading.value = true;
   errorMessage.value = "";
   try {
-    customer.value = await mobileService.customer(customerId.value);
+    const result = await mobileService.customer(customerId.value);
+    if (session !== getSessionVersion()) return;
+    customer.value = result;
   } catch (e) {
+    if (session !== getSessionVersion()) return;
     customer.value = undefined;
     errorMessage.value = messageOf(e);
   } finally {
-    loading.value = false;
+    if (session === getSessionVersion()) loading.value = false;
   }
 }
 function back() {
@@ -193,6 +205,7 @@ async function call() {
   }
 }
 async function doCall() {
+  const session = getSessionVersion();
   if (!customer.value?.phone_dialable)
     return toast("当前账户无拨号权限或号码不可用");
   const confirmed = await new Promise<boolean>((resolve) =>
@@ -202,7 +215,7 @@ async function doCall() {
       success: (r) => resolve(!!r.confirm),
     }),
   );
-  if (!confirmed) return;
+  if (!confirmed || session !== getSessionVersion()) return;
   try {
     suggested.value = undefined;
     observedDuration.value = 0;
@@ -212,7 +225,7 @@ async function doCall() {
       "customer_detail",
       customer.value.id,
       (call) => {
-        activeCall.value = call;
+        if (session === getSessionVersion()) activeCall.value = call;
       },
     );
     if (!activeCall.value.dialStarted)
@@ -238,15 +251,18 @@ async function wechat() {
     toast("微信不可用，请检查是否安装并允许打开");
 }
 async function play(record: CallRecord) {
+  const session = getSessionVersion();
   playbackState.value = "正在检查录音权限…";
   try {
     const access = await mobileService.recordingAccess(record.id);
+    if (session !== getSessionVersion()) return;
     const url = access.playback_url || access.url;
     if (!url) {
       playbackState.value = "录音尚未同步或没有可播放文件";
       return;
     }
     const localUrl = await mobileService.downloadRecording(url);
+    if (session !== getSessionVersion()) return;
     audio?.stop();
     audio?.destroy();
     audio = uni.createInnerAudioContext();
@@ -262,6 +278,7 @@ async function play(record: CallRecord) {
     });
     audio.play();
   } catch (e) {
+    if (session !== getSessionVersion()) return;
     const code = (e as any)?.code;
     playbackState.value =
       code === "RECORDING_FORBIDDEN" || code === "FORBIDDEN"

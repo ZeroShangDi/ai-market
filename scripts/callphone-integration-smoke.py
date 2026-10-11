@@ -93,6 +93,13 @@ def exercise(client):
         require(client.request('POST', path, completion, completion_key), 'Completion replay rejected')
         record = client.request('GET', admin + '/call-record/get?id=' + call['call_id'])
         require(record['status'] == 'ended' and record['resultCode'] == 'no_answer' and record['durationSeconds'] == 0, 'PC record does not match mobile result')
+        observation = {'device_event_id': str(uuid.uuid4()), 'ended_at': completion['ended_at'], 'duration_seconds': 0}
+        observed_path = mobile + '/calls/' + call['call_id'] + '/observed-end'
+        require(client.request('POST', observed_path, observation), 'Late end observation rejected')
+        require(client.request('POST', observed_path, observation), 'Late end observation replay rejected')
+        observed_record = client.request('GET', admin + '/call-record/get?id=' + call['call_id'])
+        require(observed_record['resultCode'] == 'no_answer' and observed_record['durationSeconds'] == 0,
+                'Observation replay changed the saved result')
         detail = client.request('GET', mobile + '/customers/' + str(customer))
         require(detail['last_call_result'] == 'no_answer', 'Customer latest call not updated')
         declined = client.request('POST', admin + '/call-dispatch/create', body, str(uuid.uuid4()))
@@ -109,7 +116,7 @@ def exercise(client):
             pass
         else:
             raise ApiFailure('Revoked device credentials were accepted')
-        print('PASS pairing / heartbeat / customers / dispatch / result / replay / decline / cancel / revoke')
+        print('PASS pairing / heartbeat / customers / dispatch / result / replay / observed-end / decline / cancel / revoke')
     finally:
         # Archive only our newly created fixture; retained audit/record rows are intentional.
         cleanups = []

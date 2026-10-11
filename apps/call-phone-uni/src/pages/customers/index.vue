@@ -123,7 +123,6 @@
 import { ref } from "vue";
 import {
   onShow,
-  onHide,
   onUnload,
   onReachBottom,
   onBackPress,
@@ -135,10 +134,13 @@ import CallResultSheet from "@/components/CallResultSheet.vue";
 import { mobileService } from "@/services/mobile";
 import { beginCall, type StartedCall } from "@/services/calls";
 import { phoneCapability } from "@/native/phone";
-import { messageOf } from "@/api/http";
+import { messageOf, getSessionVersion, onSessionChange } from "@/api/http";
 import { resultLabels, when, duration, toast } from "@/ui/format";
 import { ensureSession } from "@/services/session";
-import { dispatchPollMs } from "@/config";
+import {
+  foregroundDispatches as dispatches,
+  refreshDispatches,
+} from "@/services/foreground";
 import type { Customer, Dispatch, ResultCode, Scope } from "@/types/mobile";
 const filters: { scope: Scope; label: string }[] = [
   { scope: "today", label: "今天" },
@@ -148,7 +150,6 @@ const filters: { scope: Scope; label: string }[] = [
 const scope = ref<Scope>("today"),
   scopeLabel = ref("今天"),
   customers = ref<Customer[]>([]),
-  dispatches = ref<Dispatch[]>([]),
   total = ref(0),
   page = ref(1),
   loading = ref(false),
@@ -161,14 +162,13 @@ const activeCall = ref<StartedCall | null>(null),
   observedEndAt = ref("");
 const dispatchProgress = ref("");
 let listGeneration = 0;
-let refreshInFlight = false;
 const launching = ref(false);
-let pollTimer: ReturnType<typeof setInterval> | undefined,
-  stopObserve: (() => void) | undefined;
+let stopObserve: (() => void) | undefined;
 async function load(reset = false) {
   if (loading.value && !reset) return;
   if (reset) listGeneration++;
-  const generation = listGeneration;
+  const generation = listGeneration,
+    session = getSessionVersion();
   const requestedScope = scope.value;
   if (reset) {
     page.value = 1;
@@ -180,7 +180,8 @@ async function load(reset = false) {
   errorMessage.value = "";
   try {
     const result = await mobileService.customers(requestedScope, page.value);
-    if (generation !== listGeneration) return;
+    if (generation !== listGeneration || session !== getSessionVersion())
+      return;
     customers.value = reset
       ? result.items
       : [...customers.value, ...result.items];
@@ -188,36 +189,11 @@ async function load(reset = false) {
     hasMore.value = result.items.length >= 20 || !!result.next_cursor;
     page.value++;
   } catch (e) {
-    if (generation === listGeneration) errorMessage.value = messageOf(e);
+    if (generation === listGeneration && session === getSessionVersion())
+      errorMessage.value = messageOf(e);
   } finally {
-    if (generation === listGeneration) loading.value = false;
-  }
-}
-async function refreshDispatches() {
-  if (refreshInFlight) return;
-  refreshInFlight = true;
-  try {
-    await doRefreshDispatches();
-  } finally {
-    refreshInFlight = false;
-  }
-}
-async function doRefreshDispatches() {
-  try {
-    await mobileService.heartbeat();
-  } catch {
-    /* Keep polling dispatches so a transient heartbeat failure does not hide an available request. */
-  }
-  try {
-    dispatches.value = (await mobileService.dispatches()).items.filter(
-      (item) =>
-        (item.status === "queued" || item.status === "pending") &&
-        new Date(item.expires_at).getTime() > Date.now(),
-    );
-  } catch (e) {
-    dispatches.value = [];
-    if ((e as any)?.code === "DEVICE_REVOKED")
-      dispatchProgress.value = "本机已被解绑，请到我的重新配对";
+    if (generation === listGeneration && session === getSessionVersion())
+      loading.value = false;
   }
 }
 function select(value: Scope) {
@@ -241,6 +217,7 @@ async function launch(source: "customer_list" | "pc_dispatch", id: string) {
   }
 }
 async function doLaunch(source: "customer_list" | "pc_dispatch", id: string) {
+  const session = getSessionVersion();
   const ok = await new Promise<boolean>((resolve) =>
     uni.showModal({
       title: source === "pc_dispatch" ? "接受电脑派发" : "确认拨打",
@@ -251,14 +228,14 @@ async function doLaunch(source: "customer_list" | "pc_dispatch", id: string) {
       success: (r) => resolve(!!r.confirm),
     }),
   );
-  if (!ok) return;
+  if (!ok || session !== getSessionVersion()) return;
   try {
     suggested.value = undefined;
     observedDuration.value = 0;
     recordingPath.value = "";
     observedEndAt.value = "";
     activeCall.value = await beginCall(source, id, (call) => {
-      activeCall.value = call;
+      if (session === getSessionVersion()) activeCall.value = call;
     });
     if (source === "pc_dispatch")
       dispatchProgress.value = activeCall.value.dialStarted
@@ -273,7 +250,7 @@ async function doLaunch(source: "customer_list" | "pc_dispatch", id: string) {
           : "拨号未能启动，请确认结果",
       );
   } catch (e) {
-    toast(messageOf(e));
+    if (session === getSessionVersion()) toast(messageOf(e));
   }
 }
 function callCustomer(id: string) {
@@ -320,12 +297,17 @@ function saved(result: ResultCode) {
   void load(true);
   void refreshDispatches();
 }
+const stopSession = onSessionChange(() => {
+  activeCall.value = null;
+  recordingPath.value = "";
+  observedEndAt.value = "";
+  stopObserve?.();
+  stopObserve = undefined;
+});
 onShow(() => {
   if (!ensureSession()) return;
   void load(true);
-  if (pollTimer) clearInterval(pollTimer);
   void refreshDispatches();
-  pollTimer = setInterval(refreshDispatches, dispatchPollMs);
   if (!stopObserve)
     stopObserve = phoneCapability.observe((event) => {
       if (!activeCall.value) return;
@@ -344,11 +326,8 @@ onBackPress(() => {
   }
   return false;
 });
-onHide(() => {
-  if (pollTimer) clearInterval(pollTimer);
-});
 onUnload(() => {
-  if (pollTimer) clearInterval(pollTimer);
+  stopSession();
   listGeneration++;
   stopObserve?.();
   stopObserve = undefined;

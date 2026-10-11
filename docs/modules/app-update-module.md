@@ -51,3 +51,17 @@
 - [ ] 初期只声称支持已经实测的平台及制品类型；其他应用接入只需替换适配器/策略，不复制业务流程。
 
 相关交接：[uni 功能复查与已确认修复清单](../reviews/2026-10-10-uni-functional-readiness.md)。
+
+## 2026-10-11 实施补充
+
+已实现 `apps/call-phone-uni/src/modules/app-update/{core,source,android}.ts`，由 `services/updates.ts` 注入通话与安全保存许可。旧 `.references/CallPhone` 中存在升级中心云函数，但缺少客户端依赖，且当前工程没有可核验的 uniCloud 部署配置，因此首期使用独立的签名 HTTPS 清单适配；以后接入旧中心需实现相同 VersionSource 并保留可信校验。
+
+配置项：`VITE_UPDATE_MANIFEST_URL`、`VITE_UPDATE_PUBLIC_KEY`（RSA SPKI DER base64 公钥）、`VITE_UPDATE_DOWNLOAD_ORIGINS`（逗号分隔 HTTPS origin）、`VITE_UPDATE_CHANNEL`。不填时自动检查不打扰启动，手工检查返回可理解错误；不把服务故障视为最新版。
+
+清单格式为 `{ "payload": "精确 JSON 文本", "signature": "RSA-SHA256 base64 签名" }`，签名针对 payload 原始 UTF-8 字节。payload 内容为 `{ "release": null }`（无发布）或 `{ "release": { ... } }`，字段见 `core.ts` 的 Release；必须包含应用、平台、架构、渠道、版本号、最低基座、发布时间、强制标记，以及 APK URL、字节数、SHA-256 和包名。发行方离线执行 `node scripts/sign-app-release.mjs release.json private-key.pem signed-manifest.json`；私钥不得打包到客户端。每个平台/架构/渠道可配置各自清单地址。
+
+Android 下载走原生下载器；下载 URL origin 必须在配置允许列表内，清单签名在下载前验证，实际 APK 的大小、摘要、包名、版本号和与已安装应用相同签名在下载后及安装前验证。原生下载器的重定向逐跳策略尚不能由该适配器完整观测；正式发布应使用不重定向的固定制品 URL，不能宣称已验证所有 CDN 重定向行为。签名轮换和 WGT 更新未支持。
+
+安装请求发出仅进入 `installationRequested`，返回前台重新读取实际版本核对；权限拒绝有系统设置入口，用户取消后可重试。可选更新不阻塞正常业务；强制更新阻止新外呼而保留当前通话结束/保存路径。安装中及等待系统安装时同样禁止新外呼。已安全保存的待同步任务不因更新删除。
+
+实现与测试进度、真机和发布源条件见[修复实施记录](../reviews/2026-10-10-uni-remediation-progress.md)。以上代码接入不等于正式升级发布完成，原真机验收复选项暂不勾选。
