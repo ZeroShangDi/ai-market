@@ -88,17 +88,22 @@ public class CallPhoneMobileController {
     public CommonResult<PairingClaimRespVO> claimPairing(@RequestBody @Valid PairingClaimReqVO reqVO) {
         requireAdminIdentity();
         adminUserApi.validateUser(getLoginUserId());
+        return claimPairingForUser(reqVO, getLoginUserId());
+    }
+
+    /** Shared atomic claim; callers must authenticate the account or a one-time QR grant. */
+    public CommonResult<PairingClaimRespVO> claimPairingForUser(PairingClaimReqVO reqVO, Long ownerUserId) {
         LocalDateTime now = LocalDateTime.now(ZoneOffset.UTC);
         DesktopPairingCodeDO pairing = pairingCodeMapper.selectPendingByCodeHash(DeviceCredentialUtils.sha256(reqVO.getPairingCode()), now);
-        if (pairing == null || !Objects.equals(pairing.getOwnerUserId(), getLoginUserId())
+        if (pairing == null || !Objects.equals(pairing.getOwnerUserId(), ownerUserId)
                 || !"pending".equals(pairing.getStatus())) return success(null);
         String rawDeviceKey = DeviceCredentialUtils.createDeviceKey();
         PairedDeviceDO device = new PairedDeviceDO(); device.setId(IdUtil.getSnowflake().nextId());
-        device.setOwnerUserId(getLoginUserId()); device.setDisplayName(reqVO.getDisplayName().trim());
+        device.setOwnerUserId(ownerUserId); device.setDisplayName(reqVO.getDisplayName().trim());
         device.setPlatform(reqVO.getPlatform()); device.setStatus("paired"); device.setLastSeenAt(now);
         device.setDeviceKeyHash(DeviceCredentialUtils.sha256(rawDeviceKey));
         int updated = pairingCodeMapper.update(null, new LambdaUpdateWrapper<DesktopPairingCodeDO>()
-                .set(DesktopPairingCodeDO::getStatus, "claimed").set(DesktopPairingCodeDO::getDeviceId, device.getId())
+                .set(DesktopPairingCodeDO::getLoginSecretHash, null).set(DesktopPairingCodeDO::getStatus, "claimed").set(DesktopPairingCodeDO::getDeviceId, device.getId())
                 .eq(DesktopPairingCodeDO::getId, pairing.getId()).eq(DesktopPairingCodeDO::getStatus, "pending")
                 .gt(DesktopPairingCodeDO::getExpiresAt, now));
         if (updated != 1) return success(null);

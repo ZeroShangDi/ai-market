@@ -15,6 +15,7 @@ public class DesktopPairingCodeDO extends TenantBaseDO {
     @TableId private Long id;
     private Long ownerUserId;
     private String codeHash;
+    private String loginSecretHash;
     private String status;
     private Long deviceId;
     private LocalDateTime expiresAt;

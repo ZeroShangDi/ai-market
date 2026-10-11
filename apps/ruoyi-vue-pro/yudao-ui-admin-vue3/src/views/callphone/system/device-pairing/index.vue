@@ -12,7 +12,7 @@
       <header class="page-heading">
         <div
           ><h1>电脑与配对</h1
-          ><p>把 Call Phone 手机端绑定到当前成员，用手机确认并执行电脑发起的外呼。</p></div
+          ><p>把 Call Phone 手机端绑定到当前成员，手机扫码登录后自动执行电脑发起的外呼。</p></div
         >
         <el-button
           type="primary"
@@ -23,6 +23,12 @@
         >
       </header>
 
+      <el-form label-position="top">
+        <el-form-item label="手机可访问的服务器地址（本电脑保存一次即可）">
+          <el-input v-model="mobileServiceUrl" :disabled="activeCode?.status === 'pending'"
+            placeholder="例如 http://192.168.31.25:48080" @change="saveServiceUrl" />
+        </el-form-item>
+      </el-form>
       <div class="security-note"
         ><Icon icon="ep:lock" /><div
           ><strong>配对安全</strong
@@ -100,25 +106,19 @@
           align-center
           finish-status="success"
         >
-          <el-step title="打开手机端" /><el-step title="扫码或输入配对码" /><el-step
+          <el-step title="打开手机端" /><el-step title="扫码登录" /><el-step
             title="配对完成"
           />
         </el-steps>
-        <p class="pair-hint">手机登录相同员工账户后，在「我的 → 本机与配对」扫码或输入配对码</p>
+        <p class="pair-hint">手机打开 App 扫码，即可登录当前员工账户并完成配对</p>
         <img
           v-if="qrDataUrl && activeCode.status === 'pending'"
           :src="qrDataUrl"
           class="pair-qr"
           alt="Call Phone 一次性配对二维码"
         />
-        <el-input
-          v-if="activeCode.status === 'pending'"
-          v-model="mobileServiceUrl"
-          placeholder="手机可访问的服务地址（可选，如 https://api.example.com）"
-          @change="buildQr"
-        />
         <p class="pair-hint"
-          >二维码只包含一次性配对码和工作区；请勿使用 localhost 作为手机服务地址。</p
+          >二维码包含一次性登录授权，请仅使用自己的手机扫描。</p
         >
         <div class="pair-code" aria-label="一次性配对码">{{
           activeCode.pairingCode || '••••••'
@@ -127,7 +127,7 @@
           ><el-icon><Clock /></el-icon
           ><span>{{
             activeCode.status === 'pending'
-              ? `剩余 ${remainingSeconds} 秒，等待手机确认`
+              ? `剩余 ${remainingSeconds} 秒，等待手机扫码`
               : codeStatusLabel(activeCode.status)
           }}</span></div
         >
@@ -187,7 +187,21 @@ const loading = ref(false),
 const devices = ref<DeviceApi.PairedDeviceVO[]>([]),
   activeCode = ref<DeviceApi.PairingCodeVO>()
 const qrDataUrl = ref('')
-const mobileServiceUrl = ref(import.meta.env.VITE_CALLPHONE_MOBILE_SERVICE_URL || '')
+const serviceStorageKey = `callphone-mobile-service:${location.origin}:${getTenantId() || '1'}`
+const mobileServiceUrl = ref(localStorage.getItem(serviceStorageKey) || import.meta.env.VITE_CALLPHONE_MOBILE_SERVICE_URL || '')
+function saveServiceUrl() {
+  try {
+    const url = new URL(mobileServiceUrl.value.trim())
+    if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.search || url.hash ||
+        url.pathname !== '/' || ['localhost', '0.0.0.0', '[::1]'].includes(url.hostname) || /^127\./.test(url.hostname)) throw new Error()
+    mobileServiceUrl.value = url.origin
+    localStorage.setItem(serviceStorageKey, url.origin)
+    return true
+  } catch {
+    ElMessage.warning('请填写手机可访问的服务器地址，不能使用 localhost 或本机回环地址')
+    return false
+  }
+}
 let qrGeneration = 0
 let pollInFlight = false
 let deviceTimer: ReturnType<typeof setInterval> | undefined
@@ -203,7 +217,9 @@ async function buildQr() {
   }
   const payload = JSON.stringify({
     type: 'callphone-pairing',
-    version: 1,
+    version: previewMode ? 1 : 2,
+    pairingId: current.id,
+    loginSecret: current.loginSecret,
     code: current.pairingCode,
     tenantId: String(previewMode ? '1' : getTenantId() || '1'),
     ...(url ? { serviceUrl: url } : {})
@@ -216,7 +232,7 @@ async function buildQr() {
     })
     if (generation === qrGeneration) qrDataUrl.value = result
   } catch {
-    if (generation === qrGeneration) ElMessage.error('二维码生成失败，请使用六位配对码')
+    if (generation === qrGeneration) ElMessage.error('二维码生成失败，请关闭后重新打开')
   }
 }
 let pollTimer: ReturnType<typeof setInterval> | undefined,
@@ -236,7 +252,7 @@ async function loadDevices(silent = false) {
   }
 }
 async function createCode() {
-  if (creating.value) return
+  if (creating.value || !saveServiceUrl()) return
   creating.value = true
   try {
     activeCode.value = previewMode
@@ -277,7 +293,7 @@ function startPolling() {
         ? PreviewStore.getPreviewPairingCode(current.id)
         : await DeviceApi.getPairingCode(current.id)
       if (activeCode.value?.id !== current.id || activeCode.value?.status !== 'pending') return
-      if (latest) activeCode.value = { ...current, ...latest, pairingCode: current.pairingCode }
+      if (latest) activeCode.value = { ...current, ...latest, pairingCode: current.pairingCode, loginSecret: current.loginSecret }
       const latestCode = activeCode.value
       if (latestCode && latestCode.status !== 'pending') {
         stopPolling()
@@ -355,7 +371,7 @@ function codeStatusLabel(status: string) {
   return (
     (
       {
-        pending: '等待手机确认',
+        pending: '等待手机扫码',
         claimed: '已配对',
         expired: '已过期',
         revoked: '已取消'

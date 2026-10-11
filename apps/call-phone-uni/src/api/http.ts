@@ -105,7 +105,7 @@ async function send(
 ) {
   const { serviceUrl } = connectionSettings();
   if (!serviceUrl)
-    throw error("API_NOT_CONFIGURED", "请先在登录页配置客户侧数据服务地址");
+    throw error("API_NOT_CONFIGURED", "请先扫描电脑上的登录配对二维码");
   return new Promise<UniApp.RequestSuccessCallbackResult>((resolve, reject) =>
     uni.request({
       url: serviceUrl + path,
@@ -149,11 +149,23 @@ async function refreshSession() {
   if (!refreshToken) throw error("AUTH_REQUIRED", "登录已过期，请重新登录");
   if (!refreshing) {
     const version = sessionVersion;
+    const device = callphoneDevice && { ...callphoneDevice };
+    const deviceGeneration = deviceVersion;
     refreshing = publicRequest<{ accessToken: string; refreshToken: string }>(
       "POST",
       "/admin-api/system/auth/refresh-token?refreshToken=" +
         encodeURIComponent(refreshToken),
     )
+      .catch(async (reason) => {
+        if (!["AUTH_REQUIRED", "400"].includes((reason as ApiError).code) || !device) throw reason;
+        assertSession(version, deviceGeneration);
+        const result = await publicRequest<{ accessToken: string; refreshToken: string; deviceId: string }>(
+          "POST", "/api/v1/mobile/session/resume", { deviceId: device.id, deviceKey: device.key },
+        );
+        assertSession(version, deviceGeneration);
+        if (result.deviceId !== device.id) throw error("INVALID_RESPONSE", "恢复的设备不一致");
+        return result;
+      })
       .then((result) => {
         if (version !== sessionVersion)
           throw error("AUTH_REQUIRED", "账户会话已变更");

@@ -8,7 +8,7 @@
       <header class="page-heading">
         <div>
           <h1>通话记录</h1>
-          <p>查看手机端外呼与来电结果；拨号请求经配对手机确认后执行。</p>
+          <p>查看手机端外呼与来电结果；拨号请求由配对手机自动执行。</p>
         </div>
         <div class="heading-actions">
           <el-button v-if="previewMode" disabled>导出</el-button>
@@ -194,7 +194,7 @@
           @change="loadRecords"
         />
       </footer>
-      <p class="privacy-note">外呼请求发到手机后，只有手机确认并完成拨号才会生成通话记录。</p>
+      <p class="privacy-note">外呼请求发到手机后，只有手机接受请求才会生成通话记录。</p>
     </section>
 
     <el-drawer
@@ -208,7 +208,7 @@
         ><div class="drawer-title"
           ><div
             ><strong>发起外呼</strong
-            ><p>将客户与拨号信息发送到已配对手机；手机确认后才会调用系统拨号。</p></div
+            ><p>将客户与拨号信息发送到已配对手机；手机自动接受后会调用系统拨号。</p></div
           ></div
         ></template
       >
@@ -301,8 +301,8 @@
         <div class="dispatch-explainer"
           ><strong>拨号由手机端执行</strong
           ><p
-            >发送后等待手机确认，有效期 5 分钟。PC
-            不会直接呼叫客户；完整号码仅在设备确认且权限校验通过后返回。</p
+            >发送后等待手机自动拨号，有效期 5 分钟。PC
+            不会直接呼叫客户；完整号码仅在设备认证且权限校验通过后返回。</p
           ></div
         >
       </div>
@@ -429,7 +429,7 @@
           v-if="activeDispatch.status === 'queued'"
           class="status-hint"
           title="手机端接受后才会拨号"
-          description="当前仅表示请求已发送并等待手机确认，不代表已经拨号或接通。"
+          description="当前仅表示请求已发送并等待手机自动拨号，不代表已经拨号或接通。"
           type="info"
           :closable="false"
         />
@@ -516,6 +516,7 @@
 </template>
 
 <script setup lang="ts">
+import { startDirectCall } from '@/utils/callphone/direct-call'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useRoute, useRouter } from 'vue-router'
 import * as CustomerApi from '@/api/callphone/customer'
@@ -789,7 +790,7 @@ const detailEvents = computed(() => {
   if (detail.value.deviceName)
     events.push({
       key: `accepted-${detail.value.id}`,
-      title: '手机已确认并拨号',
+      title: '手机已开始拨号',
       time: formatTime(detail.value.startedAt),
       description: detail.value.deviceName,
       type: 'success' as const
@@ -988,7 +989,7 @@ const dispatchStatusTitle = computed(() => {
     return '手机已接受'
   }
   return {
-    queued: '等待手机确认',
+    queued: '等待手机自动拨号',
     accepted: '手机已接受',
     declined: '手机已拒绝',
     expired: '请求已过期',
@@ -1154,6 +1155,11 @@ function retryDispatch() {
 }
 
 async function openStartDrawer(row?: OutboundApi.CallRecordVO, draft?: OutboundDispatchDraft) {
+  if (row?.customerId && !draft && !previewMode) {
+    await startDirectCall({ customerId: row.customerId, source: 'customer_detail' })
+    return
+  }
+
   // A newly opened draft represents a new user intent. Retain keys only while
   // this draft stays open so a retry after a network timeout reuses its key.
   dispatchIdempotencyKeys = new Map()

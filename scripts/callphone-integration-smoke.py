@@ -135,6 +135,49 @@ def exercise(client):
             except ApiFailure:
                 print('Synthetic customer archive needs review; see integration-smoke fixtures.', file=sys.stderr)
 
+def exercise_qr_login(client):
+    """Exercise one-time login capability and device-scoped session boundaries."""
+    mobile = Client(client.base, client.headers['tenant-id'], '')
+    pairing = client.request('POST', '/admin-api/callphone/device/pairing-code/create')
+    device = None
+    def rejected(action, expected):
+        try:
+            action()
+        except ApiFailure as error:
+            require(expected in str(error), 'Unexpected rejection type: ' + str(error))
+        else:
+            raise ApiFailure('Invalid QR/device session was accepted')
+    try:
+        body = {'pairingId': pairing['id'], 'pairingCode': pairing['pairingCode'],
+                'loginSecret': pairing['loginSecret'], 'displayName': '扫码登录API验收（不会拨号）'}
+        rejected(lambda: mobile.request('POST', '/api/v1/mobile/session/scan', {**body, 'loginSecret': 'x' * 43}), '401')
+        session = mobile.request('POST', '/api/v1/mobile/session/scan', body)
+        require(session and session.get('deviceKey'), 'Scan session missing device key')
+        device = session['deviceId']
+        rejected(lambda: mobile.request('POST', '/api/v1/mobile/session/scan', body), '401')
+        proof = {'deviceId': device, 'deviceKey': session['deviceKey']}
+        resumed = mobile.request('POST', '/api/v1/mobile/session/resume', proof)
+        require(resumed['userId'] == session['userId'] and resumed['deviceId'] == device, 'Resume changed account/device')
+        foreign = Client(client.base, '999999', '')
+        rejected(lambda: foreign.request('POST', '/api/v1/mobile/session/resume', proof), 'business code')
+        mobile.headers.update({'Authorization': 'Bearer ' + resumed['accessToken'],
+                              'X-Callphone-Device-Id': str(device), 'X-Callphone-Device-Key': session['deviceKey']})
+        require(mobile.request('GET', '/api/v1/mobile/bootstrap'), 'QR mobile bootstrap failed')
+        require(mobile.request('POST', '/api/v1/mobile/devices/heartbeat'), 'QR heartbeat failed')
+        rejected(lambda: mobile.request('GET', '/admin-api/callphone/customer/page?pageNo=1&pageSize=10'), '403')
+        refreshed = mobile.request('POST', '/admin-api/system/auth/refresh-token?refreshToken=' + urllib.parse.quote(resumed['refreshToken']))
+        mobile.headers['Authorization'] = 'Bearer ' + refreshed['accessToken']
+        rejected(lambda: mobile.request('GET', '/admin-api/callphone/customer/page?pageNo=1&pageSize=10'), '403')
+        require(client.request('POST', '/admin-api/callphone/device/revoke', {'id': device}), 'QR revoke failed')
+        rejected(lambda: mobile.request('POST', '/api/v1/mobile/devices/heartbeat'), '1031000001')
+        mobile.headers.pop('Authorization')
+        rejected(lambda: mobile.request('POST', '/api/v1/mobile/session/resume', proof), '1031000001')
+        print('PASS QR login / single-use / resume / tenant isolation / scoped token / scoped refresh / revocation')
+    finally:
+        if device:
+            client.request('POST', '/admin-api/callphone/device/revoke', {'id': device})
+        client.request('POST', '/admin-api/callphone/device/pairing-code/cancel', {'id': pairing['id']})
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--base-url', default=os.environ.get('CALLPHONE_BASE_URL', 'http://127.0.0.1:48080'))
@@ -156,6 +199,7 @@ def main():
     print('PASS authenticated PC + canonical mobile API read checks')
     if args.exercise:
         exercise(client)
+        exercise_qr_login(client)
     else:
         print('Read-only run. Use --exercise only in a test workspace for server workflow checks.')
 

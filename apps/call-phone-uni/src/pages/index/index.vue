@@ -4,21 +4,26 @@
       ><MobileHeader
         title="工作台"
         action-icon="/static/figma/2-2-imgFrame.svg"
-        action-label="打开我的账户"
-        @action="openMine" /><PreviewBanner
+        action-label="扫码连接电脑"
+        action-position="left"
+        @action="scanComputer" /><PreviewBanner
     /></view>
     <TabBar current="workbench" />
   </view>
 </template>
 <script setup lang="ts">
+import { scanAndPair } from "@/services/pairing-actions";
+import { toast } from "@/ui/format";
+import { messageOf } from "@/api/http";
 import MobileHeader from "@/components/MobileHeader.vue";
-import { onShow } from "@dcloudio/uni-app";
-import { ensureSession } from "@/services/session";
 import TabBar from "@/components/TabBar.vue";
 import PreviewBanner from "@/components/PreviewBanner.vue";
-onShow(ensureSession);
-function openMine() {
-  uni.reLaunch({ url: "/pages/mine/index" });
+async function scanComputer() {
+  try {
+    if (await scanAndPair()) toast("手机已配对，电脑外呼将自动拨打");
+  } catch (e) {
+    toast(messageOf(e));
+  }
 }
 </script>
 <style scoped lang="scss">

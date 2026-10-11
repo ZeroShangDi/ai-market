@@ -18,25 +18,22 @@
         ><view class="setting-icon"
           ><image src="/static/figma/2-112-imgFrame1.svg" /></view
         ><view class="setting-text"
-          ><text>账户与授权</text><text>查看有效期与设备授权</text></view
-        ><image class="arrow" src="/static/figma/2-112-imgFrame2.svg"
-      /></view>
-      <view class="setting" @tap="open('device')"
-        ><view class="setting-icon"
-          ><image src="/static/figma/2-112-imgFrame3.svg" /></view
-        ><view class="setting-text"
-          ><text>本机与配对</text
-          ><text
-            >{{ device?.paired_computer || "尚未配对电脑" }} ·
-            {{ device?.paired ? "已连接" : "未配对" }}</text
-          ></view
+          ><text>账户与连接</text><text>账户、服务器与电脑配对</text></view
         ><image class="arrow" src="/static/figma/2-112-imgFrame2.svg"
       /></view>
       <view class="setting" @tap="open('diagnostics')"
         ><view class="setting-icon"
+          ><image src="/static/figma/2-112-imgFrame3.svg" /></view
+        ><view class="setting-text"
+          ><text>拨号与录音</text
+          ><text>权限、录音与通话结果同步</text></view
+        ><image class="arrow" src="/static/figma/2-112-imgFrame2.svg"
+      /></view>
+      <view class="setting" @tap="open('device')"
+        ><view class="setting-icon"
           ><image src="/static/figma/2-112-imgFrame4.svg" /></view
         ><view class="setting-text"
-          ><text>诊断与帮助</text><text>权限、录音、同步状态</text></view
+          ><text>辅助功能</text><text>后台运行、悬浮窗与手机宠</text></view
         ><image class="arrow" src="/static/figma/2-112-imgFrame2.svg"
       /></view>
       <view class="setting" @tap="checkUpdates(true)"
@@ -90,129 +87,48 @@
           取消更新
         </button>
       </view>
-      <view class="divider" /><text class="hint">{{
-        pendingCompletionCount()
-          ? `有 ${pendingCompletionCount()} 条通话结果待同步`
-          : "发生同步异常时，这里会显示待处理项"
-      }}</text>
       <view v-if="panel" class="panel-scrim" @tap="panel = ''"
         ><view class="panel" @tap.stop>
-          <text class="panel-title">{{ panelTitle }}</text>
-          <template v-if="panel === 'account'"
-            ><text>账户：{{ bootstrap?.user?.name || "未登录" }}</text
-            ><text>工作区：{{ bootstrap?.workspace?.name || "未配置" }}</text
-            ><text>授权状态：{{ licenseStatus }}</text
-            ><button class="secondary" @tap="signOut">退出登录</button
-            ><text
-              >最后验证：{{
-                bootstrap?.license?.last_verified_at
-                  ? when(bootstrap.license.last_verified_at)
-                  : "暂无"
-              }}</text
-            ></template
+          <view class="panel-heading"
+            ><text class="panel-title">{{ panelTitle }}</text
+            ><button class="panel-dismiss" aria-label="关闭" @tap="panel = ''">
+              <text aria-hidden="true">×</text>
+            </button></view
           >
-          <template v-if="panel === 'device'"
-            ><text>本机：{{ device?.name || "未配置" }}</text
-            ><text
-              >配对电脑：{{
-                device?.paired_computer || (device?.paired ? "已连接" : "无")
-              }}</text
-            ><text
-              >上次同步：{{
-                device?.last_sync_at ? when(device.last_sync_at) : "暂无"
-              }}</text
-            ><view v-if="!device?.paired" class="pairing-form"
-              ><text class="pairing-title">连接电脑</text
-              ><text>输入电脑“电脑与配对”页面显示的六位配对码</text
-              ><button
-                class="secondary"
-                :disabled="claimingPairing"
-                @tap="scanPairing"
-              >
-                扫码配对</button
-              ><input
-                v-model="pairingCode"
-                class="pairing-input code-input"
-                type="digit"
-                maxlength="6"
-                placeholder="六位配对码"
-                @input="onPairingCodeInput"
-              /><input
-                v-model="pairingDeviceName"
-                class="pairing-input"
-                maxlength="40"
-                placeholder="手机名称（如：销售手机）"
-              /><button
-                class="primary"
-                :disabled="claimingPairing"
-                @tap="claimPairing"
-              >
-                {{ claimingPairing ? "正在配对…" : "确认配对" }}</button
-              ><text class="pairing-hint"
-                >{{ persistenceStatus }}；重新登录同一账户后恢复本机配对。</text
-              ></view
-            ><text>连通性测试：{{ connectivityStatus }}</text
-            ><button
-              class="secondary"
-              :disabled="checkingConnectivity"
-              @tap="testConnectivity"
-            >
-              {{
-                checkingConnectivity ? "检查中…" : "测试客户侧数据服务连通性"
-              }}</button
-            ><button v-if="device?.paired" class="secondary" @tap="unpair">
-              解绑本机
-            </button></template
-          >
-          <template v-if="panel === 'diagnostics'"
-            ><text
-              >数据服务：{{ diagnosticLabel(diagnostics?.data_service) }}</text
-            ><text
-              >授权检查：{{ diagnosticLabel(diagnostics?.license_check) }}</text
-            ><text>待同步结果：{{ pendingCompletionCount() }}</text
-            ><text
-              >通话插件：{{
-                phoneCapability.available() ? "已检测到" : "当前环境不可用"
-              }}</text
-            ><text>自动录音：{{ recordingStatus }}</text
-            ><text>文件权限：{{ fileStatus }}</text
-            ><text>拨号测试：{{ testCallStatus }}</text
-            ><text>{{ persistenceStatus }}</text>
-            <view v-for="item in pending" :key="item.key">
-              <text
-                >通话 {{ item.id }}：{{ item.message || "等待同步"
-                }}{{
-                  item.durable ? "（已安全保存）" : "（尚未安全保存）"
-                }}</text
-              >
-              <button
-                v-if="item.failure === 'permanent'"
-                class="secondary"
-                @tap="disposeTask(item.id)"
-              >
-                处置无法同步的任务
-              </button>
+          <template v-if="panel === 'account'">
+            <view class="card-list">
+              <ReadinessCard title="当前账户" :status="bootstrap?.user?.name || '未连接'" :state="bootstrap ? 'ready' : 'unknown'" />
+              <ReadinessCard title="工作空间" :status="bootstrap?.workspace?.name || '未连接'" :state="bootstrap ? 'ready' : 'unknown'" />
+              <ReadinessCard title="服务授权" :status="licenseStatus" :state="bootstrap?.license?.status === 'active' ? 'ready' : 'unknown'" description="AI 服务套餐与有效期，不代表手机电话权限" />
+              <ReadinessCard title="电脑配对" :status="device?.paired ? '已配对' : '未配对'" :state="device?.paired ? 'ready' : 'action'" action="去配对" @action="scanPairing" />
+              <ReadinessCard title="服务器连接" :description="serviceAddress || (mockEnabled ? '当前为预览模式' : '扫码配对后自动配置服务器地址')" :status="checkingConnectivity ? '检查中' : connectivityStatus" :state="checkingConnectivity ? 'checking' : connectivityStatus.includes('可达') ? 'ready' : 'unknown'" action="测试连接" @action="testConnectivity" />
+              <ReadinessCard title="扫码相机" :state="readiness.camera" :status="checkLabel(readiness.camera)" action="去授权" @action="systemSettings('app')" />
+              <ReadinessCard title="本机安全存储" :state="persistenceStatus.includes('已启用') ? 'ready' : 'unknown'" :status="persistenceStatus.includes('已启用') ? '已启用' : '待确认'" />
             </view>
-            <button
-              v-if="recordingStatus !== '已开启'"
-              class="secondary"
-              @tap="openNativeSettings('recording')"
-            >
-              设置自动录音
-            </button>
-            <button
-              v-if="fileStatus !== '已授权'"
-              class="secondary"
-              @tap="openNativeSettings('files')"
-            >
-              设置文件权限
-            </button>
-            <button class="secondary" @tap="checkNative">检查本机权限</button
-            ><button class="secondary" :disabled="testCallBusy" @tap="testCall">
-              测试拨号 10086</button
-            ><button class="secondary" @tap="retry">重试同步</button></template
-          >
-          <button class="close" @tap="panel = ''">完成</button>
+            <text class="group-note">{{ pairedText }}。配对身份会安全保存，重新打开自动连接。</text>
+            <text class="group-note">最后验证：{{ bootstrap?.license?.last_verified_at ? when(bootstrap.license.last_verified_at) : '暂无' }}</text>
+            <view class="group-actions"><button v-if="device?.paired" class="secondary" @tap="unpair">解除配对</button><button v-if="hasAccessToken()" class="secondary" @tap="signOut">退出账户</button></view>
+          </template>
+          <template v-if="panel === 'diagnostics'">
+            <view class="card-list">
+              <ReadinessCard v-for="item in preparationCards" :key="item.key" :title="item.title" :state="item.state" :status="item.status" :action="item.action" :description="item.description" @action="runCardAction(item.key)" />
+              <ReadinessCard title="通话插件" :state="readiness.plugin" :status="checkLabel(readiness.plugin)" :description="readiness.plugin !== 'ready' ? '请在安装后的 App 中检查通话插件，浏览器无法使用原生通话能力。' : undefined" />
+              <ReadinessCard title="通话结果同步" :state="pendingCompletionCount() ? 'action' : 'ready'" :status="pendingCompletionCount() ? pendingCompletionCount() + ' 条待同步' : '无待处理'" action="重试" @action="retry" />
+            </view>
+            <text v-if="readiness.error" class="group-note">{{ readiness.error }}</text>
+            <view v-for="item in pending" :key="item.key" class="group-note"><text>通话 {{ item.id }}：{{ item.message || '等待同步' }}</text><button v-if="item.failure === 'permanent'" class="secondary" @tap="disposeTask(item.id)">处置无法同步的任务</button></view>
+            <view class="group-actions"><button class="secondary" @tap="checkNative">重新检查</button><button class="secondary" :disabled="testCallBusy" @tap="testCall">测试拨号 10086</button></view>
+            <text class="group-note">拨号测试：{{ testCallStatus }}</text>
+          </template>
+          <template v-if="panel === 'device'">
+            <view class="card-list">
+              <ReadinessCard title="悬浮窗权限" :state="stateOf(mobilePet.permission)" :status="checkLabel(stateOf(mobilePet.permission), '已允许')" action="去开启" @action="overlaySettings" />
+              <ReadinessCard title="后台运行" :state="readiness.battery" :status="checkLabel(readiness.battery, '已允许')" action="去设置" :description="readiness.battery !== 'ready' ? '允许后台运行有助于接收消息；部分手机还需在系统设置中开启自启动。' : undefined" @action="systemSettings('battery')" />
+              <ReadinessCard title="手机宠" :state="mobilePet.visible ? 'ready' : mobilePet.enabled ? 'action' : 'unknown'" :status="mobilePet.visible ? '已开启' : mobilePet.enabled ? '待开启权限' : '未开启'" :action="mobilePet.enabled ? '去设置' : '开启'" description="可拖动，点击返回 App，长按关闭。" @action="mobilePet.enabled ? overlaySettings() : togglePet()" />
+            </view>
+            <text class="group-note">{{ mobilePet.message || '这些功能可按需开启。后台运行效果取决于手机系统设置，清理进程后可能中断。' }}</text>
+            <view class="group-actions"><button class="secondary" @tap="checkNative">重新检查</button><button v-if="mobilePet.enabled" class="secondary" @tap="togglePet">关闭手机宠</button></view>
+          </template>
         </view></view
       > </view
     ><TabBar current="mine"
@@ -228,21 +144,25 @@ import {
 } from "@/services/updates";
 import { computed, ref } from "vue";
 import { onShow } from "@dcloudio/uni-app";
+import ReadinessCard from "@/components/ReadinessCard.vue";
+import { readiness, stateOf, refreshReadiness, openSystemSettings, configureFiles, type CheckState } from "@/modules/device-readiness";
+import { mobilePet, refreshMobilePet, setMobilePetEnabled, openOverlaySettings } from "@/modules/mobile-pet";
 import MobileHeader from "@/components/MobileHeader.vue";
 import TabBar from "@/components/TabBar.vue";
 import PreviewBanner from "@/components/PreviewBanner.vue";
 import { mobileService } from "@/services/mobile";
 import {
   checkDataService,
+  clearAccessToken,
   clearCallphoneDeviceCredential,
   messageOf,
   getSessionVersion,
   hasAccessToken,
 } from "@/api/http";
-import { connectionSettings, normalizeServiceUrl } from "@/config";
-import { parsePairingPayload } from "@/services/pairing";
-import { ensureSession, logout } from "@/services/session";
-import { mockEnabled } from "@/config";
+
+import { scanAndPair } from "@/services/pairing-actions";
+import { logout } from "@/services/session";
+import { mockEnabled, connectionSettings } from "@/config";
 import {
   clearCallState,
   restoreCallQueue,
@@ -253,6 +173,7 @@ import {
   pendingCompletionCount,
   retryPendingCompletions,
 } from "@/services/calls";
+import { forgetRememberedDevice } from "@/services/remembered-device";
 import { persistenceStatus, forgetDevice } from "@/services/vault";
 import { refreshDispatches } from "@/services/foreground";
 import { phoneCapability } from "@/native/phone";
@@ -271,15 +192,24 @@ const bootstrap = ref<Bootstrap>(),
   loading = ref(false),
   errorMessage = ref(""),
   panel = ref<"account" | "device" | "diagnostics" | "">(""),
-  pairingCode = ref(""),
   pairingDeviceName = ref("我的手机"),
-  claimingPairing = ref(false),
-  recordingStatus = ref("未检查"),
-  fileStatus = ref("未检查"),
   connectivityStatus = ref("未检查"),
   checkingConnectivity = ref(false),
   testCallStatus = ref("未测试"),
   testCallBusy = ref(false);
+const serviceAddress = ref(connectionSettings().serviceUrl);
+const preparationCards = computed(() => [
+  { key: 'phone', title: '电话与通话记录', state: readiness.phone, status: checkLabel(readiness.phone), action: '去授权' },
+  { key: 'microphone', title: '麦克风', state: readiness.microphone, status: checkLabel(readiness.microphone), action: '去授权' },
+  { key: 'recording', title: '自动录音', state: readiness.recording, status: checkLabel(readiness.recording, '已开启'), action: '去设置',
+    description: readiness.recording === 'unknown' ? '当前设备无法自动确认录音设置，请在系统通话设置中检查。' : undefined },
+  { key: 'files', title: '录音文件访问', state: readiness.files, status: checkLabel(readiness.files, '已允许'), action: '去开启' },
+]);
+function runCardAction(key: string) {
+  if (key === 'recording') openNativeSettings('recording');
+  else if (key === 'files') openNativeSettings('files');
+  else systemSettings('app');
+}
 const licenseStatus = computed(
   () =>
     ({
@@ -302,9 +232,9 @@ const pairedText = computed(() =>
 const panelTitle = computed(
   () =>
     ({
-      account: "账户与授权",
-      device: "本机与配对",
-      diagnostics: "诊断与帮助",
+      account: "账户与连接",
+      device: "辅助功能",
+      diagnostics: "拨号与录音",
       "": "",
     })[panel.value],
 );
@@ -321,7 +251,8 @@ function diagnosticLabel(value?: string) {
   return value ? diagnosticLabels[value] || "未知状态" : "未检查";
 }
 onShow(() => {
-  if (ensureSession()) {
+  void checkNative();
+  if (hasAccessToken() || mockEnabled) {
     void load();
     if (panel.value === "diagnostics") void checkNative();
   }
@@ -347,8 +278,11 @@ async function load() {
 }
 async function open(value: "account" | "device" | "diagnostics") {
   panel.value = value;
+  serviceAddress.value = connectionSettings().serviceUrl;
+  void checkNative();
   if (value === "diagnostics") {
     void checkNative();
+    if (!hasAccessToken() && !mockEnabled) return;
     try {
       diagnostics.value = await mobileService.diagnostics();
     } catch (e) {
@@ -356,38 +290,22 @@ async function open(value: "account" | "device" | "diagnostics") {
     }
   }
 }
-let checkingPermissions = false;
-async function checkNative() {
-  if (checkingPermissions) return;
-  checkingPermissions = true;
-  recordingStatus.value = fileStatus.value = "检查中…";
-  const [recording, files] = await Promise.allSettled([
-    phoneCapability.recordingConfigured(),
-    phoneCapability.filePermission(),
-  ]);
-  recordingStatus.value =
-    recording.status === "rejected"
-      ? messageOf(recording.reason)
-      : recording.value === null
-        ? "当前平台不支持"
-        : recording.value
-          ? "已开启"
-          : "未开启";
-  fileStatus.value =
-    files.status === "rejected"
-      ? messageOf(files.reason)
-      : files.value === null
-        ? "当前平台不支持"
-        : files.value
-          ? "已授权"
-          : "未授权";
-  checkingPermissions = false;
+function checkLabel(state: CheckState, ready = '已就绪') {
+  return state === 'ready' ? ready : state === 'action' ? '需设置' : state === 'checking' ? '检查中' : '无法确认';
 }
+async function checkNative() { await Promise.all([refreshReadiness(), refreshMobilePet()]); }
+function systemSettings(kind: 'app' | 'battery') {
+  try { openSystemSettings(kind); } catch (e) { toast(messageOf(e)); }
+}
+async function togglePet() {
+  try { await setMobilePetEnabled(!mobilePet.enabled); } catch (e) { toast(messageOf(e)); }
+}
+function overlaySettings() { try { openOverlaySettings(); } catch (e) { toast(messageOf(e)); } }
 function openNativeSettings(kind: "recording" | "files") {
   try {
     kind === "recording"
       ? phoneCapability.openRecordingSettings()
-      : phoneCapability.openFilePermissionSettings();
+      : configureFiles();
   } catch (e) {
     toast(messageOf(e));
   }
@@ -453,45 +371,6 @@ async function retry() {
   await retryPendingCompletions(true);
   toast(pendingCompletionCount() ? "仍有结果待同步" : "待同步结果已处理");
 }
-function onPairingCodeInput(event: any) {
-  const value = event?.detail?.value ?? event?.target?.value ?? event;
-  pairingCode.value = String(value).replace(/\D/g, "").slice(0, 6);
-}
-async function claimPairing() {
-  if (hasUnfinishedCall() || hasUnsafeResults())
-    return toast("请先安全保存当前通话结果，再连接设备");
-  const code = String(pairingCode.value).trim();
-  if (!/^\d{6}$/.test(code)) return toast("请输入六位配对码");
-  const system = uni.getSystemInfoSync();
-  const platform =
-    String(system.platform || "").toLowerCase() === "ios" ? "ios" : "android";
-  const confirmed = await new Promise<boolean>((resolve) =>
-    uni.showModal({
-      title: "确认配对",
-      content: "将本手机连接到当前账户下的电脑，并允许接收外呼派发。",
-      success: (r) => resolve(!!r.confirm),
-    }),
-  );
-  if (!confirmed) return;
-  claimingPairing.value = true;
-  try {
-    await mobileService.claimPairing(
-      code,
-      pairingDeviceName.value.trim() || "我的手机",
-      platform,
-    );
-    clearCallState();
-    restoreCallQueue();
-    pairingCode.value = "";
-    await refreshDispatches();
-    await load();
-    toast("手机已配对");
-  } catch (e) {
-    toast(messageOf(e));
-  } finally {
-    claimingPairing.value = false;
-  }
-}
 async function unpair() {
   if (hasUnfinishedCall() || pendingCompletionCount())
     return toast("请先保存并处理待同步结果，再解绑本机");
@@ -507,11 +386,13 @@ async function unpair() {
     const result = await mobileService.unpair("mobile-unpair-" + Date.now());
     if (result === false) throw new Error("解绑未完成，请刷新后重试");
     forgetDevice();
+    forgetRememberedDevice();
     clearCallphoneDeviceCredential();
     clearCallState();
     panel.value = "";
+    clearAccessToken();
     toast("本机已解绑");
-    await load();
+    uni.reLaunch({ url: "/pages/index/index" });
   } catch (e) {
     toast(messageOf(e));
   }
@@ -537,49 +418,40 @@ async function signOut() {
     toast(messageOf(e));
     if (hasAccessToken()) return;
   }
-  uni.reLaunch({ url: "/pages/login/index" });
+  uni.reLaunch({ url: "/pages/index/index" });
 }
 async function scanPairing() {
-  // #ifdef H5
-  toast("浏览器预览请手动输入配对码；扫码请使用手机 App");
-  return;
-  // #endif
-  // #ifndef H5
-  if (claimingPairing.value) return;
-  uni.scanCode({
-    onlyFromCamera: true,
-    scanType: ["qrCode"],
-    success: (result) => {
-      try {
-        const payload = parsePairingPayload(result.result);
-        const current = connectionSettings();
-        if (payload.tenantId && payload.tenantId !== current.tenantId)
-          throw new Error(
-            "二维码工作区与当前登录不同，请使用电脑相同工作区登录",
-          );
-        if (
-          payload.serviceUrl &&
-          normalizeServiceUrl(payload.serviceUrl) !==
-            normalizeServiceUrl(current.serviceUrl)
-        )
-          throw new Error(
-            "二维码服务地址与当前登录不同，请先退出并登录对应服务",
-          );
-        pairingCode.value = payload.code;
-        void claimPairing();
-      } catch (e) {
-        toast(messageOf(e));
-      }
-    },
-    fail: (result) => {
-      if (!/cancel/i.test(result.errMsg || ""))
-        toast("无法扫码，请检查相机权限或输入配对码");
-    },
-  });
-  // #endif
+  try {
+    if (await scanAndPair(pairingDeviceName.value.trim() || "我的手机")) {
+      await load();
+      toast("手机已配对，电脑外呼将自动拨打");
+    }
+  } catch (e) {
+    toast(messageOf(e));
+  }
 }
 </script>
 <style scoped lang="scss">
+.panel-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.panel .panel-dismiss {
+  margin: 0;
+  padding: 0;
+  width: 40px;
+  height: 40px;
+  line-height: 38px;
+  background: transparent;
+  font-size: 28px;
+  color: #687386;
+}
+.panel-dismiss::after {
+  border: none;
+}
+
 .page {
   min-height: 100vh;
   background: #f7f8fc;
@@ -702,7 +574,7 @@ async function scanPairing() {
 .panel {
   width: 100%;
   border-radius: 22px 22px 0 0;
-  background: white;
+  background: #f5f7fa;
   max-height: 88vh;
   overflow-y: auto;
   padding: 24px 20px calc(20px + env(safe-area-inset-bottom));
@@ -772,4 +644,21 @@ async function scanPairing() {
   font-size: 11px;
   line-height: 1.5;
 }
+</style>
+
+<style scoped>
+.check-group { padding: 0 14px; background: #f7f9fc; border-radius: 14px; }
+.group-heading { display: flex; justify-content: space-between; align-items: center; margin-top: 12px; font-size: 14px; font-weight: 600; color: #273247; }
+.group-heading text:last-child { font-size: 11px; color: #8b95a6; font-weight: 400; }
+.group-note { color: #788397; font-size: 12px; line-height: 1.65; }
+.group-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.panel .group-actions button { width: auto; flex: 1 1 42%; margin: 0; min-height: 44px; line-height: 44px; font-size: 12px; }
+.panel .danger-action { background: #fff1f0; color: #bd4545; }
+</style>
+
+
+
+<style scoped>
+.card-list { display: flex; flex-direction: column; gap: 9px; }
+.card-list :deep(.check-card) { margin-bottom: 0; }
 </style>

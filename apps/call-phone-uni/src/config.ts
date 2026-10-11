@@ -1,4 +1,4 @@
-// Only non-secret connection preferences are persisted. Credentials remain in memory.
+// Only non-secret connection preferences are persisted. Tokens remain in memory; device identity uses the separate Keystore vault.
 export const mockEnabled =
   import.meta.env.DEV && import.meta.env.VITE_MOBILE_MOCK === "true";
 const defaults = {
@@ -27,4 +27,4 @@ export function saveConnectionSettings(serviceUrl: string, tenantId: string) {
     tenantId: tenantId.trim(),
   });
 }
-export const dispatchPollMs = 15000;
+export const dispatchPollMs = 3000;

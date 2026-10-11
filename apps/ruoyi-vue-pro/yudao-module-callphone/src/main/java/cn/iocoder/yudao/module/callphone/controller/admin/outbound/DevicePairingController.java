@@ -60,6 +60,7 @@ public class DevicePairingController {
     @PostMapping("/pairing-code/create")
     @Operation(summary = "创建 5 分钟有效的手机配对码")
     @PreAuthorize("@ss.hasPermission('callphone:device:pair:manage')")
+    @cn.iocoder.yudao.framework.apilog.core.annotation.ApiAccessLog(responseEnable = false)
     public CommonResult<PairingCodeRespVO> createCode() {
         LocalDateTime now = LocalDateTime.now(ZoneOffset.UTC);
         String code = null;
@@ -70,8 +71,10 @@ public class DevicePairingController {
         if (code == null) throw new IllegalStateException("Unable to allocate pairing code");
         DesktopPairingCodeDO entity = new DesktopPairingCodeDO(); entity.setId(IdUtil.getSnowflake().nextId());
         entity.setOwnerUserId(getLoginUserId()); entity.setCodeHash(DeviceCredentialUtils.sha256(code)); entity.setStatus("pending");
+        String loginSecret = DeviceCredentialUtils.createDeviceKey();
+        entity.setLoginSecretHash(DeviceCredentialUtils.sha256(loginSecret));
         entity.setExpiresAt(now.plusMinutes(5)); pairingCodeMapper.insert(entity);
-        PairingCodeRespVO resp = new PairingCodeRespVO(); resp.setId(entity.getId()); resp.setPairingCode(code);
+        PairingCodeRespVO resp = new PairingCodeRespVO(); resp.setId(entity.getId()); resp.setPairingCode(code); resp.setLoginSecret(loginSecret);
         resp.setStatus(entity.getStatus()); resp.setExpiresAt(entity.getExpiresAt()); return success(resp);
     }
 
@@ -125,6 +128,6 @@ public class DevicePairingController {
     }
 
     @Data public static class PairingCodeCancelReqVO { @NotNull private Long id; }
-    @Data public static class PairingCodeRespVO { private Long id; private String pairingCode; private String status; private LocalDateTime expiresAt; private Long deviceId; }
+    @Data public static class PairingCodeRespVO { private Long id; private String pairingCode; private String loginSecret; private String status; private LocalDateTime expiresAt; private Long deviceId; }
     @Data public static class DeviceRespVO { private Long id; private String displayName; private String platform; private String status; private LocalDateTime lastSeenAt; }
 }

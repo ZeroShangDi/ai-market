@@ -22,15 +22,10 @@
         >{{ scopeLabel }} · {{ total }} 位客户产生沟通记录</text
       >
       <view v-if="dispatches.length" class="dispatch"
-        ><text class="dispatch-title">电脑已派发 · 待手机确认</text
+        ><text class="dispatch-title">电脑外呼 · 等待自动拨号</text
         ><text class="dispatch-name"
           >{{ dispatches[0].customer_name }} ·
           {{ dispatches[0].phone_display }}</text
-        ><button
-          :disabled="launching || !!activeCall"
-          @tap="acceptDispatch(dispatches[0])"
-        >
-          确认并拨号</button
         ><button
           :disabled="launching || !!activeCall"
           @tap="declineDispatch(dispatches[0])"
@@ -282,9 +277,6 @@ async function declineDispatch(item: Dispatch) {
   } finally {
     launching.value = false;
   }
-}
-function acceptDispatch(item: Dispatch) {
-  void launch("pc_dispatch", item.id);
 }
 function saved(result: ResultCode) {
   if (activeCall.value?.dispatchId)

@@ -2,6 +2,7 @@
   <view class="header-space"
     ><view class="mobile-header"
       ><view class="header-row">
+        <view v-if="actionIcon && actionPosition === 'left'" class="header-action" role="button" :aria-label="actionLabel" @tap="$emit('action')"><image :src="actionIcon" /></view>
         <view v-if="backIcon" class="header-back" @tap="back"
           ><image :src="backIcon"
         /></view>
@@ -13,10 +14,10 @@
           class="dispatch-entry"
           role="button"
           @tap="openDispatches"
-          >待接派发 {{ foregroundDispatches.length }}</view
+          >等待拨号 {{ foregroundDispatches.length }}</view
         >
         <view
-          v-if="actionIcon"
+          v-if="actionIcon && actionPosition !== 'left'"
           class="header-action"
           role="button"
           :aria-label="actionLabel"
@@ -24,14 +25,31 @@
           ><image :src="actionIcon"
         /></view> </view></view
   ></view>
+  <CallResultSheet
+    v-if="automaticCall"
+    :visible="true"
+    v-bind="automaticObservation"
+    :call-id="automaticCall.callId"
+    :started-at="automaticCall.startedAt"
+    :dial-started="automaticCall.dialStarted"
+    :dial-uncertain="automaticCall.dialUncertain"
+    @saved="finishAutomaticCall"
+  />
 </template>
 <script setup lang="ts">
+import CallResultSheet from "./CallResultSheet.vue";
+import {
+  automaticCall,
+  automaticObservation,
+  finishAutomaticCall,
+} from "@/services/automatic-call";
 import { foregroundDispatches } from "@/services/foreground";
 import { hasUnfinishedCall } from "@/services/calls";
 defineProps<{
   title: string;
   actionIcon?: string;
   actionLabel?: string;
+  actionPosition?: "left" | "right";
   backIcon?: string;
 }>();
 defineEmits<{ (event: "action"): void }>();

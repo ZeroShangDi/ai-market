@@ -363,6 +363,7 @@ export async function completeCall(
   note = "",
   recordingPath?: string,
   endedAt?: string,
+  userSavesEndedCall = false,
 ) {
   const version = generation;
   const alreadySaved = completedCalls.get(callId);
@@ -375,11 +376,10 @@ export async function completeCall(
       ? ("recording_synced" as const)
       : ("synced" as const);
   if (currentCallId !== callId) throw new Error("当前通话已变更，请重新加载");
+  // The single Save action also records the user's end-of-call assertion.
+  if (userSavesEndedCall && !endedCalls.has(callId)) confirmCallEnded(callId);
   const observed = endedCalls.get(callId);
-  if (!observed)
-    throw new Error(
-      "通话尚未结束，请挂断后再保存；未收到回调时请先人工确认结束",
-    );
+  if (!observed) throw new Error("通话尚未结束，请挂断后点击保存结果");
   if (completing || retrying) throw new Error("正在同步通话，请稍候再保存");
   completing = true;
   recordingPath = observed.recordingPath || recordingPath;

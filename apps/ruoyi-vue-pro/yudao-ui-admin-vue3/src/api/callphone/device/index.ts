@@ -10,6 +10,7 @@ export interface PairedDeviceVO {
 export interface PairingCodeVO {
   id: string
   pairingCode?: string
+  loginSecret?: string
   status: 'pending' | 'claimed' | 'expired' | 'revoked'
   expiresAt: string
   deviceId?: string

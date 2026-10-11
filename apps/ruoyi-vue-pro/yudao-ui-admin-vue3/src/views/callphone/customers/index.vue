@@ -453,6 +453,7 @@
 
 <script setup lang="ts">
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
+import { startDirectCall } from '@/utils/callphone/direct-call'
 import * as CustomerApi from '@/api/callphone/customer'
 import * as PreviewStore from '@/api/callphone/preview-store'
 import * as CustomerStageApi from '@/api/callphone/customer-stage'
@@ -1019,11 +1020,12 @@ function goFollowUp(row: CustomerApi.CustomerVO) {
     query: { ...(previewMode ? { preview: '1' } : {}), customerId: row.id }
   })
 }
-function startCall(row: CustomerApi.CustomerVO) {
-  void router.push({
-    path: previewMode ? '/callphone-preview/outbound-records' : '/callphone/outbound/records',
-    query: { ...(previewMode ? { preview: '1' } : {}), customerId: row.id }
-  })
+async function startCall(row: CustomerApi.CustomerVO) {
+  if (previewMode) {
+    ElMessage.info('预览模式不拨打真实电话')
+    return
+  }
+  await startDirectCall({ customerId: row.id, source: 'customer_detail' })
 }
 function parseOptions(value?: string) {
   try {

@@ -134,7 +134,7 @@
           v-if="activeDispatch.status === 'queued'"
           class="dispatch-hint"
           title="手机接受后才会拨号"
-          description="手机确认后才会读取号码；结束通话后，结果和备注会自动回到这条线索的跟进记录。"
+          description="手机自动接受后会读取号码；结束通话后，结果和备注会自动回到这条线索的跟进记录。"
           type="info"
           :closable="false"
         />
@@ -312,6 +312,7 @@
 </template>
 
 <script setup lang="ts">
+import { startDirectCall } from '@/utils/callphone/direct-call'
 import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
 import { useRoute, useRouter } from 'vue-router'
 import * as LeadApi from '@/api/callphone/lead'
@@ -354,7 +355,7 @@ let leadDispatchPollTimer: ReturnType<typeof setTimeout> | undefined
 let leadDispatchPollGeneration = 0
 const dispatchResultTitle = computed(() => {
   const status = activeDispatch.value?.status
-  if (status === 'queued') return '等待手机接受'
+  if (status === 'queued') return '等待手机执行'
   if (status === 'accepted') {
     if (activeDispatch.value?.callStage === 'completed') return '通话结果已同步'
     if (activeDispatch.value?.callStage === 'dialing') return '手机正在通话'
@@ -369,7 +370,7 @@ const dispatchResultTitle = computed(() => {
 })
 const dispatchResultDescription = computed(() => {
   const status = activeDispatch.value?.status
-  if (status === 'queued') return '请求有效期为 5 分钟，手机确认后才会拨号。'
+  if (status === 'queued') return '请求有效期为 5 分钟，手机自动接受后会拨号。'
   if (status === 'accepted') {
     if (activeDispatch.value?.callStage === 'completed')
       return '通话记录已关联到这条线索的跟进时间线。'
@@ -449,18 +450,12 @@ async function save() {
 }
 async function openDispatch() {
   if (!selectedLead.value) return
-  dispatchVisible.value = true
-  activeDispatch.value = undefined
-  callRequestNote.value = ''
-  callNextFollowUpAt.value = ''
-  try {
-    pairedDevices.value = previewMode
-      ? PreviewStore.previewPairedDevices()
-      : await OutboundApi.getPairedDevices()
-    callDeviceId.value = pairedDevices.value.find((device) => device.status === 'online')?.id || ''
-  } catch (e: any) {
-    ElMessage.error(e?.message || '配对手机加载失败')
+  if (previewMode) {
+    ElMessage.info('预览模式不拨打真实电话')
+    return
   }
+  const result = await startDirectCall({ leadId: selectedLead.value.id, source: 'lead_followup' })
+  if (result) activeDispatch.value = result
 }
 async function sendLeadDispatch() {
   if (!selectedLead.value || !callDeviceId.value) return

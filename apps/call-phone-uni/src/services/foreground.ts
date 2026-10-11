@@ -7,7 +7,9 @@ import {
   onSessionChange,
 } from "@/api/http";
 import { mobileService } from "./mobile";
-import { retryPendingCompletions } from "./calls";
+import { canRunInBackground, onPetChange, reportPetConnection } from "@/modules/mobile-pet";
+import { retryPendingCompletions, hasUnfinishedCall } from "./calls";
+import { acceptNextDispatch } from "./automatic-call";
 import type { Dispatch } from "@/types/mobile";
 
 export const foregroundDispatches = ref<Dispatch[]>([]);
@@ -18,7 +20,7 @@ let timer: ReturnType<typeof setInterval> | undefined;
 let inFlight: Promise<void> | undefined;
 export function refreshDispatches(): Promise<void> {
   if (
-    !visible ||
+    (!visible && !canRunInBackground()) ||
     (!mockEnabled && (!hasAccessToken() || !hasCallphoneDeviceCredential()))
   ) {
     foregroundDispatches.value = [];
@@ -28,7 +30,7 @@ export function refreshDispatches(): Promise<void> {
   const version = generation,
     session = getSessionVersion();
   const current = () =>
-    visible && version === generation && session === getSessionVersion();
+    (visible || canRunInBackground()) && version === generation && session === getSessionVersion();
   inFlight = (async () => {
     try {
       await mobileService.heartbeat();
@@ -45,9 +47,12 @@ export function refreshDispatches(): Promise<void> {
           new Date(item.expires_at).getTime() > Date.now(),
       );
       foregroundError.value = "";
+      reportPetConnection(true, hasUnfinishedCall());
+      if (!mockEnabled) await acceptNextDispatch(foregroundDispatches.value);
     } catch (e) {
       if (!current()) return;
       foregroundDispatches.value = [];
+      reportPetConnection(false);
       foregroundError.value = (e as Error).message || "派发刷新失败，请重试";
     }
   })().finally(() => {
@@ -75,14 +80,24 @@ export function startForeground() {
 }
 export function stopForeground() {
   visible = false;
-  reset();
+  if (!canRunInBackground()) reset();
 }
 onSessionChange(() => {
+  reportPetConnection(false);
   reset();
   if (visible) startForeground();
 });
 export function networkRestored() {
-  if (!visible) return;
+  if (!visible && !canRunInBackground()) return;
   void refreshDispatches();
   void retryPendingCompletions();
 }
+
+onPetChange(() => {
+  if (visible) return;
+  if (!canRunInBackground()) { reset(); return; }
+  if (!timer) {
+    void refreshDispatches();
+    timer = setInterval(() => { void refreshDispatches(); void retryPendingCompletions(); }, dispatchPollMs);
+  }
+});

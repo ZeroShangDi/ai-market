@@ -140,7 +140,11 @@ function nativeCheck(
           reject(
             error("PERMISSION_CHECK_FAILED", "权限检查失败，请检查系统设置"),
           );
-        else resolve(!!(result.data?.isOpen ?? result.data?.status));
+        else {
+          const value = result.data?.isOpen ?? result.data?.status;
+          resolve(value === true || value === 1 || value === "true" || value === "1" ? true
+            : value === false || value === 0 || value === "false" || value === "0" ? false : null);
+        }
       });
     } catch {
       clearTimeout(timer);

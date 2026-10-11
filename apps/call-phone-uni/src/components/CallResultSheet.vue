@@ -1,10 +1,12 @@
 <template>
   <view v-if="visible" class="scrim"
     ><view class="sheet">
-      <text class="sheet-title">确认通话结果</text>
+      <text class="sheet-title">通话结果</text>
       <text class="sheet-help">{{
         dialStarted
-          ? "已开始拨号。请根据实际通话选择结果，插件状态仅供参考。"
+          ? automaticSuggestion
+            ? "已根据通话状态预选结果，如不符可修改。未接通可能是无人接听或拒接。"
+            : "请选择实际通话结果，备注可选。"
           : dialUncertain
             ? "未收到拨号插件确认，请检查本机实际通话状态后选择结果。"
             : "拨号未能启动，请记录实际结果。"
@@ -15,7 +17,7 @@
           :key="item.code"
           class="choice"
           :class="{ selected: chosen === item.code }"
-          @tap="chosen = item.code"
+          @tap="choose(item.code)"
           >{{ item.label }}</view
         ></view
       >
@@ -25,25 +27,10 @@
         placeholder="备注（可选）"
         maxlength="300"
       />
-      <text v-if="!endedAt && !manualEnd" class="sheet-help"
-        >等待通话结束。若系统未回传，请核实电话已挂断后人工确认。</text
+      <text class="sheet-help"
+        >挂断后保存即可；未收到结束回调时，保存同时记录本次通话结束。</text
       >
-      <button
-        v-if="!endedAt && !manualEnd"
-        :disabled="saving"
-        @tap="confirmEnd"
-      >
-        已挂断，人工确认结束
-      </button>
-      <button
-        class="submit"
-        :disabled="
-          saving ||
-          !chosen ||
-          (!endedAt && !manualEnd && (dialStarted || dialUncertain))
-        "
-        @tap="submit"
-      >
+      <button class="submit" :disabled="saving || !chosen" @tap="submit">
         {{ saving ? "保存中…" : "保存结果" }}
       </button>
     </view></view
@@ -51,9 +38,10 @@
 </template>
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
-import { completeCall, confirmCallEnded } from "@/services/calls";
+import { completeCall } from "@/services/calls";
 import { messageOf, getSessionVersion } from "@/api/http";
 import { resultLabels, toast } from "@/ui/format";
+import { suggestCallResult } from "@/services/call-result";
 import type { ResultCode } from "@/types/mobile";
 const props = defineProps<{
   visible: boolean;
@@ -72,54 +60,43 @@ const options = (Object.keys(resultLabels) as ResultCode[]).map((code) => ({
   label: resultLabels[code],
 }));
 const availableOptions = computed(() =>
-  props.dialStarted || props.dialUncertain
+  props.dialStarted ||
+  props.dialUncertain ||
+  automaticSuggestion.value === "connected"
     ? options
     : options.filter((item) => item.code !== "connected"),
 );
 const chosen = ref<ResultCode | "">("");
 const note = ref("");
 const saving = ref(false);
-const manualEnd = ref("");
-async function confirmEnd() {
-  const callId = props.callId;
-  const result = await new Promise<boolean>((resolve) =>
-    uni.showModal({
-      title: "确认电话已结束",
-      content:
-        "请先在系统电话中确认已挂断。确认后将允许保存结果；通话时长以系统回传为准。",
-      success: (result) => resolve(!!result.confirm),
-      fail: () => resolve(false),
-    }),
-  );
-  if (!result || callId !== props.callId) return;
-  try {
-    manualEnd.value = confirmCallEnded(callId);
-  } catch (e) {
-    toast(messageOf(e));
-  }
+const automaticSuggestion = computed(() => suggestCallResult(props));
+const manuallyChosen = ref(false);
+function choose(result: ResultCode) {
+  manuallyChosen.value = true;
+  chosen.value = result;
 }
 watch(
-  () => props.visible,
-  (value) => {
-    if (value) {
-      manualEnd.value = "";
-      saving.value = false;
-      chosen.value = props.suggested || "";
-      note.value = "";
-    }
+  () => [props.callId, props.visible] as const,
+  () => {
+    if (!props.visible) return;
+    manuallyChosen.value = false;
+    saving.value = false;
+    chosen.value = automaticSuggestion.value || "";
+    note.value = "";
   },
+  { immediate: true },
 );
-watch(
-  () => props.suggested,
-  (value) => {
-    if (!chosen.value && value) chosen.value = value;
-  },
-);
+watch(automaticSuggestion, (value) => {
+  if (!manuallyChosen.value) chosen.value = value || "";
+});
 async function submit() {
   if (!chosen.value || saving.value) return;
   saving.value = true;
-  const callId = props.callId, session = getSessionVersion(), resultCode = chosen.value;
-  const current = () => props.callId === callId && session === getSessionVersion();
+  const callId = props.callId,
+    session = getSessionVersion(),
+    resultCode = chosen.value;
+  const current = () =>
+    props.callId === callId && session === getSessionVersion();
   try {
     const state = await completeCall(
       props.callId,
@@ -129,6 +106,7 @@ async function submit() {
       note.value,
       props.recordingPath,
       props.endedAt,
+      true,
     );
     if (!current()) return;
     saving.value = false;
