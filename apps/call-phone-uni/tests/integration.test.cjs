@@ -590,3 +590,42 @@ test('background dispatch polling stays active only while the visible pet is aut
   allowed = false; listener(); pending({ items: [{ id: 'late', status: 'pending', expires_at: '2099-01-01' }] }); await late
   assert.equal(timers.size, 0); assert.equal(dials, 1)
 })
+
+test('runtime permission denial is not reported as successful authorization', async () => {
+  let result = { deniedAlways: ['android.permission.CAMERA'] }
+  const android = load('modules/device-readiness/android.ts', {}, {
+    uni: { getSystemInfoSync: () => ({ platform: 'android' }) },
+    plus: { android: { requestPermissions: (_permissions, done) => done(result) } },
+  })
+  await assert.rejects(android.requestRuntimePermissions(['android.permission.CAMERA']), /永久拒绝/)
+  result = { deniedPresent: ['android.permission.CAMERA'] }
+  await assert.rejects(android.requestRuntimePermissions(['android.permission.CAMERA']), /尚未允许/)
+  result = { granted: ['android.permission.CAMERA'] }
+  await android.requestRuntimePermissions(['android.permission.CAMERA'])
+})
+
+test('unknown Android version cannot imply legacy file access', () => {
+  const android = load('modules/device-readiness/android.ts', {}, {
+    uni: { getSystemInfoSync: () => ({ platform: 'android' }) },
+    plus: { android: { getAttribute: () => undefined } },
+  })
+  assert.equal(android.allFilesGranted(), null)
+})
+
+test('unsupported special settings falls back to the app settings before launching', () => {
+  const launched = []
+  const android = load('modules/device-readiness/android.ts', {}, {
+    uni: { getSystemInfoSync: () => ({ platform: 'android' }) },
+    plus: { android: {
+      getAttribute: () => 33, runtimeMainActivity: () => 'activity',
+      newObject: (_type, action) => ({ action }),
+      invoke: (obj, method, arg) => {
+        if (method === 'resolveActivity') return obj.action === 'android.settings.APPLICATION_DETAILS_SETTINGS' ? {} : null
+        if (method === 'startActivity') launched.push(arg.action)
+        if (method === 'getPackageName') return 'uni.UNID608100'
+      },
+    } },
+  })
+  android.openSystemSettings('files')
+  assert.deepEqual(launched, ['android.settings.APPLICATION_DETAILS_SETTINGS'])
+})

@@ -123,8 +123,8 @@
           <template v-if="panel === 'device'">
             <view class="card-list">
               <ReadinessCard title="悬浮窗权限" :state="stateOf(mobilePet.permission)" :status="checkLabel(stateOf(mobilePet.permission), '已允许')" action="去开启" @action="overlaySettings" />
-              <ReadinessCard title="后台运行" :state="readiness.battery" :status="checkLabel(readiness.battery, '已允许')" action="去设置" :description="readiness.battery !== 'ready' ? '允许后台运行有助于接收消息；部分手机还需在系统设置中开启自启动。' : undefined" @action="systemSettings('battery')" />
-              <ReadinessCard title="手机宠" :state="mobilePet.visible ? 'ready' : mobilePet.enabled ? 'action' : 'unknown'" :status="mobilePet.visible ? '已开启' : mobilePet.enabled ? '待开启权限' : '未开启'" :action="mobilePet.enabled ? '去设置' : '开启'" description="可拖动，点击返回 App，长按关闭。" @action="mobilePet.enabled ? overlaySettings() : togglePet()" />
+              <ReadinessCard title="电池优化" :state="readiness.battery" :status="checkLabel(readiness.battery, '已豁免')" action="去设置" description="此项仅检查电池优化；自启动、后台弹出界面需在手机系统中另行允许。" @action="systemSettings('battery')" />
+              <ReadinessCard title="手机宠" :state="mobilePet.visible ? 'ready' : mobilePet.enabled ? 'action' : 'unknown'" :status="mobilePet.visible ? '已开启' : mobilePet.enabled ? '待开启权限' : '未开启'" :action="mobilePet.enabled ? '去设置' : '开启'" description="可拖动，点击返回 App，长按关闭。" @action="retryPet" />
             </view>
             <text class="group-note">{{ mobilePet.message || '这些功能可按需开启。后台运行效果取决于手机系统设置，清理进程后可能中断。' }}</text>
             <view class="group-actions"><button class="secondary" @tap="checkNative">重新检查</button><button v-if="mobilePet.enabled" class="secondary" @tap="togglePet">关闭手机宠</button></view>
@@ -292,6 +292,9 @@ async function open(value: "account" | "device" | "diagnostics") {
 }
 function checkLabel(state: CheckState, ready = '已就绪') {
   return state === 'ready' ? ready : state === 'action' ? '需设置' : state === 'checking' ? '检查中' : '无法确认';
+}
+async function retryPet() {
+  try { await setMobilePetEnabled(true); } catch (e) { toast(messageOf(e)); }
 }
 async function checkNative() { await Promise.all([refreshReadiness(), refreshMobilePet()]); }
 function systemSettings(kind: 'app' | 'battery') {

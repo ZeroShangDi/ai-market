@@ -5,7 +5,7 @@
         title="工作台"
         action-icon="/static/figma/2-2-imgFrame.svg"
         action-label="扫码连接电脑"
-        action-position="left"
+        action-position="right"
         @action="scanComputer" /><PreviewBanner
     /></view>
     <TabBar current="workbench" />

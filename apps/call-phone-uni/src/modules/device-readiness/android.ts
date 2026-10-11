@@ -17,6 +17,7 @@ export function permissionGranted(permission: string): boolean | null {
 export function allFilesGranted(): boolean | null {
   const a = bridge(); if (!a) return null;
   try {
+    if (!sdkVersion()) return null;
     if (sdkVersion() >= 30) {
       const result = a.invoke('android.os.Environment', 'isExternalStorageManager');
       return typeof result === 'boolean' ? result : null;
@@ -31,7 +32,10 @@ export function openSystemSettings(kind: 'app' | 'files' | 'battery') {
     ? 'android.settings.MANAGE_APP_ALL_FILES_ACCESS_PERMISSION'
     : kind === 'battery' ? 'android.settings.IGNORE_BATTERY_OPTIMIZATION_SETTINGS' : 'android.settings.APPLICATION_DETAILS_SETTINGS');
   if (kind !== 'battery') a.invoke(intent, 'setData', a.invoke('android.net.Uri', 'parse', 'package:' + a.invoke(activity, 'getPackageName')));
-  try { a.invoke(activity, 'startActivity', intent); }
+  try {
+    if (!intent || !a.invoke(intent, 'resolveActivity', a.invoke(activity, 'getPackageManager'))) throw new Error('设置入口不可用');
+    a.invoke(activity, 'startActivity', intent);
+  }
   catch { if (kind !== 'app') openSystemSettings('app'); else throw new Error('无法打开应用设置，请在系统设置中查找 Call Phone'); }
 }
 export function batteryUnrestricted(): boolean | null {
@@ -48,6 +52,11 @@ export function requestRuntimePermissions(permissions: string[]): Promise<void> 
   const a = bridge(); if (!a || !permissions.length) return Promise.resolve();
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error('权限申请未完成，请在“我的”中重试')), 60000);
-    a.requestPermissions(permissions, () => { clearTimeout(timer); resolve(); }, () => { clearTimeout(timer); reject(new Error('无法申请权限，请前往系统应用设置')); });
+    a.requestPermissions(permissions, (result: any) => {
+      clearTimeout(timer);
+      if (result?.deniedAlways?.length) reject(new Error('部分权限已被永久拒绝，请在系统应用设置中手动开启'));
+      else if (result?.deniedPresent?.length) reject(new Error('部分权限尚未允许，可再次申请或前往系统应用设置'));
+      else resolve();
+    }, () => { clearTimeout(timer); reject(new Error('无法申请权限，请前往系统应用设置')); });
   });
 }

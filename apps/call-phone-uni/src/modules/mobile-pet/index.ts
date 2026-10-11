@@ -38,6 +38,7 @@ export async function setMobilePetEnabled(enabled: boolean) {
   uni.setStorageSync(preference, enabled);
   await refreshMobilePet();
   if (enabled && mobilePet.permission === false) openOverlaySettings();
+  else if (enabled && !mobilePet.visible) throw new Error(mobilePet.message || '手机宠未显示，请重新检查权限');
 }
 export function reportPetConnection(connected: boolean, busy = false) {
   onlineAt = connected ? Date.now() : 0;

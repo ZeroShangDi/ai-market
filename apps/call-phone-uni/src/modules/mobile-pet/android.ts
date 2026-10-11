@@ -17,6 +17,7 @@ export function openOverlaySettings() {
   const a = android(), activity = a.runtimeMainActivity();
   const intent = a.newObject('android.content.Intent', 'android.settings.action.MANAGE_OVERLAY_PERMISSION');
   a.invoke(intent, 'setData', a.invoke('android.net.Uri', 'parse', 'package:' + a.invoke(activity, 'getPackageName')));
+  if (!intent || !a.invoke(intent, 'resolveActivity', a.invoke(activity, 'getPackageManager'))) throw new Error('此手机未提供悬浮窗设置入口，请在系统应用设置中开启');
   a.invoke(activity, 'startActivity', intent);
 }
 function ui<T>(work: () => T): Promise<T> {
@@ -46,6 +47,7 @@ export async function showOverlay(onTap: () => void, onClose: () => void) {
     const dp = (value: number) => Math.round(value * density);
     manager = invoke(activity, 'getSystemService', 'window');
     const candidate = a.newObject('android.widget.TextView', activity);
+    if (!candidate || !manager) throw new Error('无法创建手机宠原生视图');
     const background = a.newObject('android.graphics.drawable.GradientDrawable');
     invoke(background, 'setColor', -15309132); // teal companion body
     invoke(background, 'setCornerRadius', dp(22));
@@ -56,6 +58,7 @@ export async function showOverlay(onTap: () => void, onClose: () => void) {
     invoke(candidate, 'setContentDescription', 'Call Phone 手机宠，点击返回，长按关闭');
     const type = Number(a.getAttribute('android.os.Build$VERSION', 'SDK_INT')) >= 26 ? 2038 : 2002;
     params = a.newObject('android.view.WindowManager$LayoutParams', dp(68), dp(68), type, 8 | 32, -3);
+    if (!params) throw new Error('无法创建悬浮窗布局参数');
     a.setAttribute(params, 'gravity', 51); a.setAttribute(params, 'x', dp(12)); a.setAttribute(params, 'y', dp(160));
     let x = 0, y = 0, px = 0, py = 0, down = 0, moved = false;
     listener = a.implements('android.view.View$OnTouchListener', { onTouch(_v: any, event: any) {
@@ -73,9 +76,16 @@ export async function showOverlay(onTap: () => void, onClose: () => void) {
     } });
     invoke(candidate, 'setOnTouchListener', listener);
     invoke(manager, 'addView', candidate, params);
-    if (invoke(candidate, 'isAttachedToWindow') !== true) throw new Error('系统未显示悬浮手机宠，请检查悬浮窗权限');
     view = candidate; label = candidate;
   });
+  // Window attachment completes after addView; checking in the same UI callback can be premature.
+  for (let attempt = 0; attempt < 10; attempt++) {
+    if (current !== generation) throw new Error('手机宠显示已取消');
+    if (view && android().invoke(view, 'isAttachedToWindow') === true) return;
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
+  await hideOverlay();
+  throw new Error('悬浮窗未挂载，请核对系统悬浮窗权限并连接手机查看原生日志');
 }
 export async function hideOverlay() {
   generation++;
