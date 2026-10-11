@@ -5,7 +5,6 @@ const preference = 'callphone.mobile-pet.enabled';
 export const mobilePet = reactive({ enabled: false, visible: false, permission: null as boolean | null, message: '', status: '未连接' });
 let initialized = false, operation = Promise.resolve(), onlineAt = 0;
 let ticker: ReturnType<typeof setInterval> | undefined;
-let blink = false;
 const observers = new Set<() => void>();
 export function onPetChange(fn: () => void) { observers.add(fn); return () => observers.delete(fn); }
 function notify() { observers.forEach(fn => fn()); }
@@ -47,6 +46,6 @@ export function reportPetConnection(connected: boolean, busy = false) {
 }
 async function renderStatus() {
   const text = onlineAt && Date.now() - onlineAt > 15000 ? '连接待确认' : mobilePet.status;
-  try { blink = !blink; await setOverlayText((text === '通话中' ? '◕ ‿ ◕' : blink ? '◕ ◕' : '• •') + '\n' + text); }
+  try { await setOverlayText(text); }
   catch { mobilePet.message = '手机宠显示更新失败'; }
 }

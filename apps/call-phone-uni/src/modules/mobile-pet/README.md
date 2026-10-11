@@ -18,3 +18,15 @@
 ## 真机验收
 
 首次启用 → 系统授权 → 返回后显示；拖动不拨号，点击返回、长按关闭；撤销权限后停止后台轮询。分别测试 Home、锁屏、省电、杀进程、离线恢复。后台拨号仍复用单通话锁与幂等派发；结果未保存时不得接下一个电话。真实系统悬浮窗和锁屏拨号尚未在设备验证。
+
+## 精灵少女形象（2026-10-12）
+
+素材与动画全部保留在本模块。assets/elf-sheet-v2.png 是透明三帧长腿版；appearance.ts 定义待机、眨眼、挥手的播放节奏，Android 使用 AnimationDrawable 播放，不依赖 JavaScript 定时器推进图像。assets/elf-animated.png 是相同节奏的透明 APNG 预览（不是静态 PNG）。初版 elf-sheet.png 保留用于对比。
+
+内置 imagegen 生成素材，随后仅将三帧编排为 APNG。提示词：原创自然系精灵少女，银薄荷长发、绿眼、尖耳、叶冠、白绿叶片服装、透明绿色小翅，等宽三格待机/闭眼/挥手；第二版保持角色一致并将腿部拉长约 25%，透明背景无文字。具体长度是生成目标，不是精确测量保证。
+
+uni-app 将图片打包为 /assets/... URL。原生优先 decodeFile 读取 _www 映射，云打包资源再通过 AssetManager 读取 apps/<appid>/www/assets/...；不依赖 ?inline（实测 App 编译未内嵌）。图片解码及最终显示仍待真机验收。
+
+## 公开项目对照
+
+对照 https://github.com/faysal-X-N/deskpet/blob/main/app/src/main/java/com/deskpet/overlay/PetOverlayService.kt ：该项目使用原生前台 Service、TYPE_APPLICATION_OVERLAY、NOT_FOCUSABLE、NOT_TOUCH_MODAL、TRANSLUCENT 以及 WindowManager.addView。我们的窗口类型和透明格式一致；其额外 LAYOUT_NO_LIMITS 允许出屏，并非显示所必需。主要差距是本项目还没有原生前台 Service。该差距可影响后台生存期，但不能据此断定首次手机宠不显示的根因。不复制第三方代码或素材。

@@ -629,3 +629,29 @@ test('unsupported special settings falls back to the app settings before launchi
   android.openSystemSettings('files')
   assert.deepEqual(launched, ['android.settings.APPLICATION_DETAILS_SETTINGS'])
 })
+
+test('elf animation loads APK assets when no regular bitmap file exists', () => {
+  const frames = [], opened = [], closed = []
+  const appearance = load('modules/mobile-pet/appearance.ts', { './assets/elf-sheet-v2.png': { default: '/assets/elf.png' } }, {
+    plus: { io: { convertLocalFileSystemURL: p => p }, runtime: { appid: '__UNI__D608100' } },
+  })
+  const a = {
+    runtimeMainActivity: () => 'activity', newObject: type => ({ type }),
+    invoke: (obj, method, ...args) => {
+      if (method === 'decodeFile') return null
+      if (method === 'getAssets') return 'assets'
+      if (method === 'open') { opened.push(args[0]); return 'stream' }
+      if (method === 'close') closed.push(obj)
+      if (method === 'decodeStream') return 'bitmap'
+      if (method === 'getWidth') return 2172
+      if (method === 'getHeight') return 724
+      if (method === 'createBitmap') return 'crop'
+      if (method === 'createScaledBitmap') return 'small'
+      if (method === 'addFrame') frames.push(args[1])
+    },
+  }
+  appearance.createElfAnimation(a, 'resources')
+  assert.deepEqual(opened, ['apps/__UNI__D608100/www/assets/elf.png'])
+  assert.deepEqual(closed, ['stream'])
+  assert.deepEqual(frames, [2800,160,2200,650,300,650])
+})
