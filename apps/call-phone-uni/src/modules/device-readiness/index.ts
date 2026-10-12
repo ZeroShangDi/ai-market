@@ -1,11 +1,11 @@
 import { reactive } from 'vue';
 import { phoneCapability } from '@/native/phone';
-import { bridge, permissionGranted, allFilesGranted, batteryUnrestricted, requestRuntimePermissions, openSystemSettings, sdkVersion } from './android';
+import { bridge, permissionGranted, allFilesGranted, batteryUnrestricted, requestRuntimePermissions, openSystemSettings, sdkVersion, permissionDiagnostics } from './android';
 export { openSystemSettings } from './android';
 export type CheckState = 'ready' | 'action' | 'unknown' | 'checking';
 export const readiness = reactive({ phone: 'unknown' as CheckState, camera: 'unknown' as CheckState,
   microphone: 'unknown' as CheckState, files: 'unknown' as CheckState, recording: 'unknown' as CheckState, battery: 'unknown' as CheckState,
-  plugin: 'unknown' as CheckState, error: '', requesting: false });
+  plugin: 'unknown' as CheckState, diagnostic: '', error: '', requesting: false });
 export const stateOf = (value: boolean | null): CheckState => value === null ? 'unknown' : value ? 'ready' : 'action';
 const phonePermissions = ['CALL_PHONE', 'READ_PHONE_STATE', 'READ_CALL_LOG'];
 let checking: Promise<void> | undefined;
@@ -23,6 +23,7 @@ export function refreshReadiness(): Promise<void> {
     readiness.microphone = stateOf(permissionGranted('android.permission.RECORD_AUDIO'));
     readiness.files = stateOf(allFilesGranted());
     readiness.battery = stateOf(batteryUnrestricted());
+    readiness.diagnostic = permissionDiagnostics();
     readiness.plugin = phoneCapability.available() ? 'ready' : 'unknown';
     // Register globally after permissions, so visiting Customers never owns initialization.
     if (readiness.phone === 'ready' && readiness.microphone === 'ready' && !readiness.requesting && !stopPhoneObserver && phoneCapability.observe) {
@@ -39,8 +40,9 @@ export async function requestEssentialPermissions() {
   readiness.requesting = true; readiness.error = '';
   try {
     const names = [...phonePermissions, 'CAMERA', 'RECORD_AUDIO'];
-    if (sdkVersion() < 30) names.push('READ_EXTERNAL_STORAGE');
-    const missing = names.map(name => 'android.permission.' + name).filter(name => permissionGranted(name) === false);
+    const sdk = sdkVersion();
+    if (sdk > 0 && sdk < 30) names.push('READ_EXTERNAL_STORAGE');
+    const missing = names.map(name => 'android.permission.' + name).filter(name => permissionGranted(name) !== true);
     await requestRuntimePermissions(missing);
   } catch (e) { readiness.error = (e as Error).message; }
   finally { readiness.requesting = false; if (checking) await checking; await refreshReadiness(); }

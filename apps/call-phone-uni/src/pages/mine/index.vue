@@ -115,17 +115,20 @@
               <ReadinessCard title="通话插件" :state="readiness.plugin" :status="checkLabel(readiness.plugin)" :description="readiness.plugin !== 'ready' ? '请在安装后的 App 中检查通话插件，浏览器无法使用原生通话能力。' : undefined" />
               <ReadinessCard title="通话结果同步" :state="pendingCompletionCount() ? 'action' : 'ready'" :status="pendingCompletionCount() ? pendingCompletionCount() + ' 条待同步' : '无待处理'" action="重试" @action="retry" />
             </view>
+            <text v-if="readiness.diagnostic" class="group-note">{{ readiness.diagnostic }}</text>
             <text v-if="readiness.error" class="group-note">{{ readiness.error }}</text>
             <view v-for="item in pending" :key="item.key" class="group-note"><text>通话 {{ item.id }}：{{ item.message || '等待同步' }}</text><button v-if="item.failure === 'permanent'" class="secondary" @tap="disposeTask(item.id)">处置无法同步的任务</button></view>
-            <view class="group-actions"><button class="secondary" @tap="checkNative">重新检查</button><button class="secondary" :disabled="testCallBusy" @tap="testCall">测试拨号 10086</button></view>
+            <text class="group-note">电话与通话记录用于拨号及同步结果，相机用于扫码，麦克风用于录音相关能力。申请基础权限后，文件访问和系统自动录音仍需分别设置。</text>
+            <view class="group-actions"><button class="secondary" :disabled="readiness.requesting" @tap="requestEssentialPermissions">申请基础权限</button><button class="secondary" @tap="checkNative">重新检查</button><button class="secondary" :disabled="testCallBusy" @tap="testCall">测试拨号 10086</button></view>
             <text class="group-note">拨号测试：{{ testCallStatus }}</text>
           </template>
           <template v-if="panel === 'device'">
             <view class="card-list">
               <ReadinessCard title="悬浮窗权限" :state="stateOf(mobilePet.permission)" :status="checkLabel(stateOf(mobilePet.permission), '已允许')" action="去开启" @action="overlaySettings" />
               <ReadinessCard title="电池优化" :state="readiness.battery" :status="checkLabel(readiness.battery, '已豁免')" action="去设置" description="此项仅检查电池优化；自启动、后台弹出界面需在手机系统中另行允许。" @action="systemSettings('battery')" />
-              <ReadinessCard title="手机宠" :state="mobilePet.visible ? 'ready' : mobilePet.enabled ? 'action' : 'unknown'" :status="mobilePet.visible ? '已开启' : mobilePet.enabled ? '待开启权限' : '未开启'" :action="mobilePet.enabled ? '去设置' : '开启'" description="可拖动，点击返回 App，长按关闭。" @action="retryPet" />
+              <ReadinessCard title="手机宠" :state="mobilePet.visible ? 'ready' : mobilePet.enabled ? 'action' : 'unknown'" :status="mobilePet.visible ? '已开启' : mobilePet.enabled ? mobilePet.permission === true ? '显示失败' : mobilePet.permission === null ? '权限无法确认' : '需开启权限' : '未开启'" :action="mobilePet.enabled ? '重试显示' : '开启'" :description="mobilePet.message || '可拖动，点击返回 App，长按关闭。'" @action="retryPet" />
             </view>
+            <text v-if="readiness.diagnostic" class="group-note">{{ readiness.diagnostic }}</text>
             <text class="group-note">{{ mobilePet.message || '这些功能可按需开启。后台运行效果取决于手机系统设置，清理进程后可能中断。' }}</text>
             <view class="group-actions"><button class="secondary" @tap="checkNative">重新检查</button><button v-if="mobilePet.enabled" class="secondary" @tap="togglePet">关闭手机宠</button></view>
           </template>
@@ -145,7 +148,7 @@ import {
 import { computed, ref } from "vue";
 import { onShow } from "@dcloudio/uni-app";
 import ReadinessCard from "@/components/ReadinessCard.vue";
-import { readiness, stateOf, refreshReadiness, openSystemSettings, configureFiles, type CheckState } from "@/modules/device-readiness";
+import { readiness, stateOf, refreshReadiness, openSystemSettings, configureFiles, requestEssentialPermissions, type CheckState } from "@/modules/device-readiness";
 import { mobilePet, refreshMobilePet, setMobilePetEnabled, openOverlaySettings } from "@/modules/mobile-pet";
 import MobileHeader from "@/components/MobileHeader.vue";
 import TabBar from "@/components/TabBar.vue";

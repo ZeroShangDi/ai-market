@@ -536,7 +536,7 @@ test('startup requests missing runtime permissions only once and checks again on
   let requested = 0, granted = false
   const permission = load('modules/device-readiness/index.ts', {
     '@/native/phone': { phoneCapability: { available: () => true, recordingConfigured: async () => null } },
-    './android': { bridge: () => ({}), sdkVersion: () => 33, permissionGranted: () => granted, allFilesGranted: () => false, batteryUnrestricted: () => null,
+    './android': { permissionDiagnostics: () => '', bridge: () => ({}), sdkVersion: () => 33, permissionGranted: () => granted, allFilesGranted: () => false, batteryUnrestricted: () => null,
       requestRuntimePermissions: async names => { requested++; assert.ok(names.includes('android.permission.CALL_PHONE')); assert.ok(!names.includes('android.permission.READ_EXTERNAL_STORAGE')); granted = true }, openSystemSettings: () => {} },
   })
   await Promise.all([permission.onApplicationShow(), permission.onApplicationShow()])
@@ -612,7 +612,7 @@ test('unknown Android version cannot imply legacy file access', () => {
   assert.equal(android.allFilesGranted(), null)
 })
 
-test('unsupported special settings falls back to the app settings before launching', () => {
+test('special settings attempts launch despite hidden resolution and falls back on launch failure', () => {
   const launched = []
   const android = load('modules/device-readiness/android.ts', {}, {
     uni: { getSystemInfoSync: () => ({ platform: 'android' }) },
@@ -621,7 +621,10 @@ test('unsupported special settings falls back to the app settings before launchi
       newObject: (_type, action) => ({ action }),
       invoke: (obj, method, arg) => {
         if (method === 'resolveActivity') return obj.action === 'android.settings.APPLICATION_DETAILS_SETTINGS' ? {} : null
-        if (method === 'startActivity') launched.push(arg.action)
+        if (method === 'startActivity') {
+          if (arg.action !== 'android.settings.APPLICATION_DETAILS_SETTINGS') throw new Error('ActivityNotFoundException');
+          launched.push(arg.action)
+        }
         if (method === 'getPackageName') return 'uni.UNID608100'
       },
     } },
@@ -629,6 +632,59 @@ test('unsupported special settings falls back to the app settings before launchi
   android.openSystemSettings('files')
   assert.deepEqual(launched, ['android.settings.APPLICATION_DETAILS_SETTINGS'])
 })
+
+test('runtime checks survive unknown SDK and normalize explicit bridge values', () => {
+  let result = '0';
+  const android = load('modules/device-readiness/android.ts', {}, {
+    uni: { getSystemInfoSync: () => ({ platform: 'android' }) },
+    plus: { android: { getAttribute: () => null, runtimeMainActivity: () => ({}), invoke: () => result } },
+  });
+  assert.equal(android.sdkVersion(), 0);
+  assert.equal(android.permissionGranted('android.permission.CALL_PHONE'), true);
+  result = '-1'; assert.equal(android.permissionGranted('android.permission.CALL_PHONE'), false);
+  result = null; assert.equal(android.permissionGranted('android.permission.CALL_PHONE'), null);
+  assert.equal(android.nativeBoolean('false'), false);
+  assert.equal(android.nativeBoolean('unexpected'), null);
+});
+test('static SDK lookup falls back to imported class and special permission values stay distinct', () => {
+  let value = 'true';
+  const android = load('modules/device-readiness/android.ts', {}, {
+    uni: { getSystemInfoSync: () => ({ platform: 'android' }) },
+    plus: { android: { getAttribute: () => null, importClass: () => ({ SDK_INT: 33 }), invoke: () => value } },
+  });
+  assert.equal(android.sdkVersion(), 33); assert.equal(android.allFilesGranted(), true);
+  value = 'false'; assert.equal(android.allFilesGranted(), false);
+  value = null; assert.equal(android.allFilesGranted(), null);
+});
+test('camera falls back to uni authorization API when native permission probe fails', () => {
+  let cameraAuthorized = 'authorized';
+  const android = load('modules/device-readiness/android.ts', {}, {
+    uni: { getSystemInfoSync: () => ({ platform: 'android' }), getAppAuthorizeSetting: () => ({ cameraAuthorized }) },
+    plus: { android: { runtimeMainActivity: () => ({}), invoke: () => undefined } },
+  });
+  assert.equal(android.permissionGranted('android.permission.CAMERA'), true);
+  cameraAuthorized = 'config error'; assert.equal(android.permissionGranted('android.permission.CAMERA'), false);
+  cameraAuthorized = 'not determined'; assert.equal(android.permissionGranted('android.permission.CAMERA'), null);
+});
+test('unknown runtime permissions can be requested without assuming unknown SDK is legacy Android', async () => {
+  let requested;
+  const permission = load('modules/device-readiness/index.ts', {
+    '@/native/phone': { phoneCapability: { available: () => false, recordingConfigured: async () => null } },
+    './android': { permissionDiagnostics: () => '', bridge: () => ({}), sdkVersion: () => 0, permissionGranted: () => null,
+      allFilesGranted: () => null, batteryUnrestricted: () => null, requestRuntimePermissions: async names => { requested = names }, openSystemSettings: () => {} },
+  });
+  await permission.requestEssentialPermissions();
+  assert.ok(requested.includes('android.permission.CALL_PHONE'));
+  assert.ok(!requested.includes('android.permission.READ_EXTERNAL_STORAGE'));
+  assert.equal(permission.readiness.phone, 'unknown');
+});
+test('empty permission callback cannot claim successful authorization', async () => {
+  const android = load('modules/device-readiness/android.ts', {}, {
+    uni: { getSystemInfoSync: () => ({ platform: 'android' }) },
+    plus: { android: { requestPermissions: (_names, done) => done({}) } },
+  });
+  await assert.rejects(android.requestRuntimePermissions(['android.permission.CAMERA']), /完整授权结果/);
+});
 
 test('elf animation loads APK assets when no regular bitmap file exists', () => {
   const frames = [], opened = [], closed = []
