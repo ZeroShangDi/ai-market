@@ -1,0 +1,4 @@
+{
+  "minSdkVersion": 23,
+  "dependencies": ["com.github.princekin-f:EasyFloat:2.0.4"]
+}

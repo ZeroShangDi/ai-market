@@ -306,7 +306,7 @@ function systemSettings(kind: 'app' | 'battery') {
 async function togglePet() {
   try { await setMobilePetEnabled(!mobilePet.enabled); } catch (e) { toast(messageOf(e)); }
 }
-function overlaySettings() { try { openOverlaySettings(); } catch (e) { toast(messageOf(e)); } }
+async function overlaySettings() { try { await openOverlaySettings(); } catch (e) { toast(messageOf(e)); } }
 function openNativeSettings(kind: "recording" | "files") {
   try {
     kind === "recording"

@@ -1,0 +1,7 @@
+export function getApiVersion(): number { return 0 }
+export function getPermission(): number { return -1 }
+export function execute(command: string, payload: string, callback: (result: string) => void) {
+  callback('{"ok":false,"code":"UNSUPPORTED","message":"桌宠仅支持 Android App","visible":false}')
+}
+export function onOverlayEvent(callback: (event: string) => void) {}
+export function offOverlayEvent() {}

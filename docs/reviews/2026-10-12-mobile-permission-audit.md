@@ -51,13 +51,13 @@
 4. 桌宠 UI 把已启用但未显示一律标成“待开启权限”。实际还可能是 SDK 查询失败、UI 回调超时、图片解码失败、窗口未挂载。现在按权限与显示分别提示，并保留具体错误。
 5. 设置入口之前以 `resolveActivity` 非空作为启动条件。Android 包可见性会影响此类查询，不能把空值直接认定为入口不存在。本次普通应用权限优先使用 `uni.openAppAuthorizeSetting`，特殊权限尝试启动 Intent，抛错时回退应用设置。Native.js 的 void 调用可能静默失败，因此也不能把 startActivity 返回 undefined 当作失败或成功证据。
 
-### 桌宠原实现的结构性问题
+### 桌宠原实现的结构性问题（迁移结果见文末）
 
 审计时旧链路：App.onShow → refreshMobilePet → overlayPermission → showOverlay → runOnUiThread → LinearLayout/ImageView/TextView/AnimationDrawable → WindowManager.addView → isAttachedToWindow。
 
 DCloud 的 Native.js 文档明确说明 uni-app 不支持 UI 相关 API 调用。旧桌宠通过 Native.js 创建、修改 Android 原生 View，属于该限制范围；增加 runOnUiThread 并不会让它成为受支持的实现。源码级 mock 能证明 JS 分支，不能证明原生 UI 可用。这是高优先级兼容性问题，不能将它归因为用户没有开启权限。
 
-长期实现应将悬浮窗、动画、触摸监听、挂载状态和释放迁到本地 UTS Android 插件或原生 Android 插件，向现有 mobile-pet 模块返回明确结果。若要求 Home/锁屏后持续运行，还需单独设计原生 Service 和生命周期；添加 FOREGROUND_SERVICE 声明本身不会创建服务。原生 Service 仍未实现。
+长期实现应将悬浮窗、动画、触摸监听、挂载状态和释放迁到本地 UTS Android 插件或原生 Android 插件，向现有 mobile-pet 模块返回明确结果。若要求 Home/锁屏后持续运行，还需单独设计原生 Service 和生命周期；添加 FOREGROUND_SERVICE 声明本身不会创建服务。后续已接入 EasyFloat UTS/Kotlin 插件，见文末；原生 Service 仍未实现。
 
 ### uni 可配置能力与引导范围
 
@@ -77,14 +77,14 @@ DCloud 的 Native.js 文档明确说明 uni-app 不支持 UI 相关 API 调用�
 
 ### 本次已落地的修改
 
-- device-readiness/android.ts 集中处理 SDK 与普通/特殊权限检测；悬浮权限原生迁移将在后续提交中处理。
+- device-readiness/android.ts 集中处理 SDK 与普通/特殊权限检测；后续桌宠迁移后，悬浮权限改用原生 Settings.canDrawOverlays 查询，独立于业务权限模块。
 - SDK 静态属性读取失败时尝试导入类；普通权限不再等待 SDK 成功，可回退 checkCallingOrSelfPermission，相机/麦克风增加 uni 接口兜底。
 - 空值保留未知；已知返回值规范化；检查失败按项记录诊断，避免只有一个无来源的问号。
 - 未知的基础权限可申请，未知 SDK 不再误走旧存储权限分支；授权回调内容不完整则报告失败。
 - 增加“申请基础权限”按钮和用途说明；设置返回继续复查；桌宠已授权但显示失败时提示重试显示。
 - 保留桌宠显示门槛与真实挂载检查；没有将授权成功冒充窗口显示成功。
 
-权限修复阶段验证：60 项自动化回归、类型检查与 App 资源构建通过。没有签发新 APK、云端打包或升级手机，实机验证仍未完成。
+权限修复阶段验证：60 项自动化回归、类型检查与 App 资源构建通过。后续 EasyFloat 迁移验证见文末；没有签发新 APK、云端打包或升级手机，实机验证仍未完成。
 
 ### 针对这台手机的下一步验证
 
@@ -119,3 +119,13 @@ DCloud 的 Native.js 文档明确说明 uni-app 不支持 UI 相关 API 调用�
 操作顺序：运行最新修复代码并在“我的”重新检查 → 核对系统授权对象是否确实为当前运行的基座应用 → 使用 manifest 的 __UNI__D608100 / uni.UNID608100 和 leven-call 制作自定义调试基座 → 在运行到手机菜单明确选自定义基座重新运行 → 设置该包的普通权限及悬浮窗/所有文件访问 → 核对权限状态和通话插件，再单独验证桌宠原生窗口。标准基座切换到自定义基座可能更换包名，旧应用授权不能假设自动迁移。
 
 自定义基座需包含后续新增的桌宠 UTS 插件，不能保证小米后台或锁屏持续运行。小米自启动和后台弹出页面属于后续后台能力验收，当前前台六项未知应优先定位查询链路。
+
+## 后续落实：EasyFloat 接入（2026-10-12）
+
+已将旧 Native.js UI 替换为 `uni_modules/portable-pet-overlay` 内的 UTS/Kotlin 原生实现，固定 EasyFloat 2.0.4（Apache-2.0）。桌宠控制器独立于 Vue/uni 与业务，通话/连接文字映射移到宿主 `services/pet-status.ts`。迁移与构建说明位于 `apps/call-phone-uni/src/modules/mobile-pet/README.md`。
+
+窗口创建后检查实际挂载，关闭后检查实际卸载；处理创建/桥接超时、权限撤销、连续开关、过期回调、Activity 销毁、低内存、拖动误触与多指取消。原生层无账号、电话或网络依赖，没有加入后台 Service。
+
+验证：58 项宿主/权限回归与 12 项桌宠状态机/桥接回归通过，vue-tsc 通过，App 和 H5 资源构建通过；App 产物包含 UTS 生成 Kotlin 和两个原生 Kotlin 源文件。使用 Kotlin 2.2.0、Android API 35 与真实 EasyFloat 2.0.4 AAR 单独编译原生层通过；9 组手势 JVM 边界用例通过。这不等于完整 APK 原生打包成功，也没有完成小米 14 实机显示/锁屏验证。
+
+需要用包含桌宠 UTS 插件与原有 leven-call 的自定义基座重新安装、运行和授权。WGT 不能给未包含该插件的旧基座增加原生能力。

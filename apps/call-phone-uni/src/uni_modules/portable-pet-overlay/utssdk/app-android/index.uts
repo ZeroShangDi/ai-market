@@ -1,0 +1,18 @@
+import { UTSAndroid } from 'io.dcloud.uts'
+import { PetOverlayNative } from 'dev.portablepet.overlay'
+
+export function getApiVersion(): number { return 1 }
+export function getPermission(): number {
+  return PetOverlayNative.permission(UTSAndroid.getAppContext()).toDouble()
+}
+export function execute(command: string, payload: string, callback: (result: string) => void) {
+  PetOverlayNative.execute(UTSAndroid.getAppContext(), UTSAndroid.getUniActivity(), command, payload, (result: string) => {
+    callback(result)
+  })
+}
+// One registration per JS runtime. The host adapter multiplexes subscribers.
+@UTSJS.keepAlive
+export function onOverlayEvent(callback: (event: string) => void) {
+  PetOverlayNative.setListener((event: string) => { callback(event) })
+}
+export function offOverlayEvent() { PetOverlayNative.clearListener() }

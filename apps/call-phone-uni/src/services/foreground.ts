@@ -7,7 +7,8 @@ import {
   onSessionChange,
 } from "@/api/http";
 import { mobileService } from "./mobile";
-import { canRunInBackground, onPetChange, reportPetConnection } from "@/modules/mobile-pet";
+import { isPetActive as canRunInBackground, onPetChange } from "@/modules/mobile-pet";
+import { reportPetConnection } from "./pet-status";
 import { retryPendingCompletions, hasUnfinishedCall } from "./calls";
 import { acceptNextDispatch } from "./automatic-call";
 import type { Dispatch } from "@/types/mobile";

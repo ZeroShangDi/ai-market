@@ -6,7 +6,7 @@ const root = path.resolve(__dirname, '../src')
 // Exercise actual TypeScript modules using uni/native adapters supplied by each test.
 function load(file, mocks = {}, globals = {}) {
   const code = ts.transpileModule(fs.readFileSync(path.join(root, file), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 } }).outputText
-  mocks = { '@/modules/mobile-pet': { canRunInBackground: () => false, onPetChange: () => {}, reportPetConnection: () => {} }, vue: { reactive: value => value, ref: value => ({ value }) }, './vault': { readQueue: () => undefined, writeQueue: () => true }, '@/services/vault': { saveDevice: () => {}, verifyDeviceStorage: () => {} }, '@/native/secure-store': { secureStore: { available: () => false } }, ...mocks }
+  mocks = { './pet-status': { reportPetConnection: () => {} }, '@/modules/mobile-pet': { isPetActive: () => false, onPetChange: () => {}, reportPetConnection: () => {} }, vue: { reactive: value => value, ref: value => ({ value }) }, './vault': { readQueue: () => undefined, writeQueue: () => true }, '@/services/vault': { saveDevice: () => {}, verifyDeviceStorage: () => {} }, '@/native/secure-store': { secureStore: { available: () => false } }, ...mocks }
   const exports = {}
   vm.runInNewContext(code, { exports, require(id) { if (id in mocks) return mocks[id]; throw new Error('Unmocked dependency: ' + id) }, console, setTimeout, clearTimeout, Date, Math, Error, AbortController, ...globals }, { filename: file })
   return exports
@@ -561,22 +561,10 @@ test('phone plugin never treats missing or string false recording status as enab
   data = { isOpen: 'false' }; assert.equal(await plugin.phoneCapability.recordingConfigured(), false)
   data = { isOpen: true }; assert.equal(await plugin.phoneCapability.recordingConfigured(), true)
 })
-test('mobile pet gates background eligibility on real overlay and handles revoke/disable', async () => {
-  let permission = false, shown = 0, hidden = 0, opened = 0, listener
-  const timers = new Set(), saved = new Map()
-  const pet = load('modules/mobile-pet/index.ts', { './android': {
-    overlayPermission: () => permission, openOverlaySettings: () => { opened++ }, showOverlay: async (_tap, close) => { shown++; listener = close }, hideOverlay: async () => { hidden++ }, setOverlayText: async () => {}, bringToFront: () => {},
-  } }, { uni: { getStorageSync: key => saved.get(key), setStorageSync: (key, value) => saved.set(key, value) }, setInterval: fn => { timers.add(fn); return fn }, clearInterval: fn => timers.delete(fn) })
-  await pet.setMobilePetEnabled(true); assert.equal(opened, 1); assert.equal(pet.canRunInBackground(), false)
-  permission = true; await pet.refreshMobilePet(); assert.equal(shown, 1); assert.equal(pet.canRunInBackground(), true)
-  permission = false; await pet.refreshMobilePet(); assert.equal(pet.canRunInBackground(), false); assert.equal(timers.size, 0)
-  permission = true; await pet.refreshMobilePet(); listener(); await pet.setMobilePetEnabled(false)
-  assert.equal(pet.mobilePet.enabled, false); assert.equal(pet.mobilePet.visible, false); assert.equal(timers.size, 0); assert.ok(hidden >= 2)
-})
 test('background dispatch polling stays active only while the visible pet is authorized', async () => {
   const timers = new Set(); let allowed = true, listener, dials = 0, pending
   const foreground = load('services/foreground.ts', {
-    '@/modules/mobile-pet': { canRunInBackground: () => allowed, onPetChange: fn => { listener = fn }, reportPetConnection: () => {} },
+    '@/modules/mobile-pet': { isPetActive: () => allowed, onPetChange: fn => { listener = fn }, reportPetConnection: () => {} },
     '@/config': { mockEnabled: false, dispatchPollMs: 3000 },
     '@/api/http': { getSessionVersion: () => 1, hasAccessToken: () => true, hasCallphoneDeviceCredential: () => true, onSessionChange: () => {} },
     './mobile': { mobileService: { heartbeat: async () => true, dispatches: () => new Promise(resolve => { pending = resolve }) } },
@@ -685,29 +673,3 @@ test('empty permission callback cannot claim successful authorization', async ()
   });
   await assert.rejects(android.requestRuntimePermissions(['android.permission.CAMERA']), /完整授权结果/);
 });
-
-test('elf animation loads APK assets when no regular bitmap file exists', () => {
-  const frames = [], opened = [], closed = []
-  const appearance = load('modules/mobile-pet/appearance.ts', { './assets/elf-sheet-v2.png': { default: '/assets/elf.png' } }, {
-    plus: { io: { convertLocalFileSystemURL: p => p }, runtime: { appid: '__UNI__D608100' } },
-  })
-  const a = {
-    runtimeMainActivity: () => 'activity', newObject: type => ({ type }),
-    invoke: (obj, method, ...args) => {
-      if (method === 'decodeFile') return null
-      if (method === 'getAssets') return 'assets'
-      if (method === 'open') { opened.push(args[0]); return 'stream' }
-      if (method === 'close') closed.push(obj)
-      if (method === 'decodeStream') return 'bitmap'
-      if (method === 'getWidth') return 2172
-      if (method === 'getHeight') return 724
-      if (method === 'createBitmap') return 'crop'
-      if (method === 'createScaledBitmap') return 'small'
-      if (method === 'addFrame') frames.push(args[1])
-    },
-  }
-  appearance.createElfAnimation(a, 'resources')
-  assert.deepEqual(opened, ['apps/__UNI__D608100/www/assets/elf.png'])
-  assert.deepEqual(closed, ['stream'])
-  assert.deepEqual(frames, [2800,160,2200,650,300,650])
-})
