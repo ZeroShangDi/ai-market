@@ -1,0 +1,6 @@
+# Combine with compose.local.yml to expose only the API on the Tailscale interface.
+# Set CALLPHONE_TAILSCALE_IP to this computer's IPv4 address from `tailscale ip -4`.
+services:
+  server:
+    ports:
+      - "${CALLPHONE_TAILSCALE_IP:?请设置本电脑的 Tailscale IPv4 地址}:48080:48080"

@@ -32,6 +32,22 @@ Docker 会启动 MySQL、Redis，并通过多阶段镜像构建 Yudao 后端。�
 docker compose -f compose.local.yml down
 ```
 
+## 使用 Tailscale 扫码配对
+
+电脑和手机的 Tailscale 均连接到同一网络后，在本目录运行：
+
+```sh
+CALLPHONE_TAILSCALE_IP=100.87.254.68 docker compose \
+  -f compose.local.yml -f compose.tailscale.yml \
+  up -d --no-deps --no-build server
+```
+
+将 `100.87.254.68` 换成本电脑 Tailscale 显示的 IPv4 地址（也可用 `tailscale ip -4` 查询）。此命令复用已构建的后端镜像，仅重新创建 API 容器；本机 `127.0.0.1:48080` 入口继续保留，MySQL 和 Redis 仍只监听本机。如果已使用其他 Compose 覆盖文件，例如局域网端口配置，应在命令中保留那些 `-f` 参数，再追加 `-f compose.tailscale.yml`。覆盖文件中的绑定 IP 必须仍属于本机，旧局域网 IP 已失效时应移除或更新对应映射，否则容器会启动失败。
+
+在 PC「电脑与配对」的「手机可访问的服务器地址」填写 `http://100.87.254.68:48080`，不添加 `/admin-api` 或其他路径，然后创建新的二维码并用手机 App 扫描。已有待配对二维码需先取消或等待过期，再更换服务地址。
+
+可先在手机浏览器打开 `http://100.87.254.68:48080/actuator/health`，确认返回 `"status":"UP"` 后再扫码。后续重建后端也需携带 `CALLPHONE_TAILSCALE_IP` 和 `compose.tailscale.yml`；只使用基础配置或一键启动脚本重建会移除 Tailscale 端口映射。
+
 ## 已知边界
 
 - 页面预览用明确标记的样例数据，并保存在当前浏览器 localStorage；它可检查客户、跟进和线索池到领取、跟进、转化/归档的界面操作串联。真实业务数据仍需后端正常启动、登录和完成迁移后使用。
