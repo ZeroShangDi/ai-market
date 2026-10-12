@@ -129,3 +129,13 @@ DCloud 的 Native.js 文档明确说明 uni-app 不支持 UI 相关 API 调用�
 验证：58 项宿主/权限回归与 12 项桌宠状态机/桥接回归通过，vue-tsc 通过，App 和 H5 资源构建通过；App 产物包含 UTS 生成 Kotlin 和两个原生 Kotlin 源文件。使用 Kotlin 2.2.0、Android API 35 与真实 EasyFloat 2.0.4 AAR 单独编译原生层通过；9 组手势 JVM 边界用例通过。这不等于完整 APK 原生打包成功，也没有完成小米 14 实机显示/锁屏验证。
 
 需要用包含桌宠 UTS 插件与原有 leven-call 的自定义基座重新安装、运行和授权。WGT 不能给未包含该插件的旧基座增加原生能力。
+
+## HBuilderX CLI 云打包实测（2026-10-12 16:37）
+
+在用户安装并登录 HBuilderX 5.26 后，已通过官方 `cli pack --config` 成功生成 Android 自定义调试基座，文件为 `apps/call-phone-uni/dist/debug/android_debug.apk`（约 17 MB）。本次使用公共测试证书，关闭广告。自定义基座不支持安心打包，HBuilderX 自动转为普通云打包；可重复执行的 `npm run pack:android:debug` 已明确配置 `safemode:false`，避免反复提示。
+
+APK 检查确认：包名 `uni.UNID608100`、版本 1.0.6/104、minSdkVersion 23；DEX 含 PetOverlayNative、PetGesture、UTS IndexKt 与 EasyFloat 类，APK 内含精灵素材。清单含悬浮窗、电话、通话记录和麦克风权限。
+
+电脑 USB 枚举发现小米设备（USB 名称 Mi 11），但 HBuilderX 与 adb 调试设备列表为空，重启 adb 后仍未识别。本次已验证完整原生云打包成功，尚未完成手机安装与实际权限/显示验收。
+
+依据：[App 真机运行说明](https://en.uniapp.dcloud.io/tutorial/run/run-app.html)、[原生插件配置与自定义基座](https://zh.uniapp.dcloud.io/plugin/native-plugin)。
