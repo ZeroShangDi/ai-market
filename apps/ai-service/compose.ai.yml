@@ -1,0 +1,22 @@
+# Merge after ../ruoyi-vue-pro/compose.local.yml. All relative paths use that first file's directory.
+services:
+  ai-service:
+    profiles: [ai]
+    build:
+      context: ../ai-service
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file:
+      - ../ai-service/.env.local
+    environment:
+      AI_BIND_HOST: 0.0.0.0
+    expose: ["48081"]
+    volumes:
+      - yudao-local-ai:/service/data
+    mem_limit: 512m
+    stop_grace_period: 20s
+  server:
+    environment:
+      AI_SERVICE_URL: http://ai-service:48081
+volumes:
+  yudao-local-ai:

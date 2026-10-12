@@ -11,7 +11,7 @@
       <view class="ai-entry" role="button" aria-label="打开 AI 助手" @tap="openAssistant">
         <view class="ai-mark">✦</view>
         <view class="ai-entry-copy">
-          <view class="ai-entry-title">AI 助手<text class="ai-entry-tag">预览</text></view>
+          <view class="ai-entry-title">AI 助手<text v-if="mockEnabled" class="ai-entry-tag">预览</text></view>
           <text class="ai-entry-description">理清客户需求，让每次跟进更从容</text>
           <text class="ai-entry-link">{{ hasConversation ? '继续对话' : '开始对话' }} <text>→</text></text>
         </view>
@@ -29,11 +29,13 @@ import TabBar from "@/components/TabBar.vue";
 import PreviewBanner from "@/components/PreviewBanner.vue";
 import { computed } from "vue";
 import { aiChat } from "@/services/ai-chat";
+import { mockEnabled } from "@/config";
+import { ensureSession } from "@/services/session";
 import { hasUnfinishedCall } from "@/services/calls";
 const hasConversation = computed(() => aiChat.state.conversations.some(item => item.messages.length));
 function openAssistant() {
   if (hasUnfinishedCall()) return toast("请先完成当前通话并保存结果");
-  uni.navigateTo({ url: "/pages/ai-chat/index" });
+  if (ensureSession()) uni.navigateTo({ url: "/pages/ai-chat/index" });
 }
 async function scanComputer() {
   try {

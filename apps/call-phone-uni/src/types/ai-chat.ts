@@ -8,6 +8,8 @@ export interface ChatMessage {
   created_at: string;
   request_id?: string;
   error_message?: string;
+  /** Optimistic messages have not yet been acknowledged by the server. */
+  local?: boolean;
 }
 export interface ChatConversation {
   id: string;
@@ -37,4 +39,16 @@ export type ChatStreamEvent = EventBase & (
 /** Transport owns network/SSE parsing; views only receive complete, typed events. */
 export interface ChatTransport {
   stream(request: ChatStreamRequest, onEvent: (event: ChatStreamEvent) => void): { cancel(): void };
+}
+
+export interface ChatPage<T> { items: T[]; next_cursor: string | null; }
+export type ConversationSummary = Pick<ChatConversation, 'id' | 'title' | 'updated_at'>;
+export interface ChatRequestState { request_id: string; conversation_id: string; status: 'running' | 'complete' | 'cancelled' | 'failed'; assistant_message_id: string; }
+export interface ChatRepository {
+  create(key: string): Promise<ConversationSummary>;
+  list(cursor?: string): Promise<ChatPage<ConversationSummary>>;
+  messages(id: string, cursor?: string): Promise<ChatPage<ChatMessage> & { active_request_id: string | null; busy?: boolean }>;
+  remove(id: string): Promise<{ deleted: boolean }>;
+  status(id: string): Promise<ChatRequestState>;
+  cancel(id: string): Promise<ChatRequestState>;
 }

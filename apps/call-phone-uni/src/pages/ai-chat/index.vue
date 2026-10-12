@@ -9,6 +9,9 @@
       </view>
       <scroll-view class="message-scroll" scroll-y :scroll-top="scrollTop" :scroll-with-animation="false"
         @scroll="onScroll" @touchmove="followLatest = false" @wheel="followLatest = false" @scrolltolower="followLatest = true">
+        <view v-if="state.error" class="error-note">{{ state.error }}<view role="button" @tap="aiChat.initialize()">刷新会话</view></view>
+        <view v-if="state.loading" class="conversation-note">正在加载会话…</view>
+        <view v-if="state.messageCursor && !state.generating && !state.recovering" class="latest-row"><view role="button" @tap="aiChat.loadOlderMessages()">查看更早消息</view></view>
         <view v-if="!active?.messages.length" class="welcome">
           <view class="welcome-mark">✦</view>
           <text class="welcome-eyebrow">你的工作伙伴</text>
@@ -24,13 +27,14 @@
           </view>
         </view>
         <view v-else class="messages">
-          <text class="conversation-note">AI 助手 · 演示对话</text>
+          <text class="conversation-note">{{ mockEnabled ? 'AI 助手 · 演示对话' : 'AI 助手' }}</text>
           <view v-for="message in active.messages" :key="message.id" class="message-item">
             <TChatMessage :chat-id="message.id" :role="message.role" :placement="message.role === 'user' ? 'right' : 'left'"
               :name="message.role === 'assistant' ? 'AI 助手' : undefined" :status="message.status" animation="dots" variant="base"
               :content="message.role === 'user' ? [{ type: 'text', data: message.content }] : undefined">
               <template #content>
-                <TChatMarkdown v-if="message.content" :content="message.content"
+                <text v-if="message.role === 'user'" class="user-message-text">{{ message.content }}</text>
+                <TChatMarkdown v-else-if="message.content" :content="message.content"
                   :streaming="{ hasNextChunk: message.status === 'streaming', tail: true }" />
                 <text v-if="message.status === 'error'" class="error-note">{{ message.error_message }}</text>
                 <text v-if="message.status === 'stop' && !message.content" class="stopped-empty">已停止生成</text>
@@ -38,7 +42,7 @@
               <template #actionbar>
                 <view v-if="message.status !== 'pending' && message.status !== 'streaming'" class="message-actions">
                   <view v-if="message.content" role="button" aria-label="复制回复" @tap="copy(message.content)"><TIcon name="copy" size="16px" />复制</view>
-                  <view v-if="message.id === lastMessageId && !state.generating" role="button" aria-label="重新生成" @tap="retry(message.id)"><TIcon name="refresh" size="16px" />重新生成</view>
+                  <view v-if="message.id === lastMessageId && !state.generating && !state.recovering" role="button" aria-label="重新生成" @tap="retry(message.id)"><TIcon name="refresh" size="16px" />重新生成</view>
                   <text v-if="message.status === 'stop' && message.content" class="stopped-note">已停止</text>
                 </view>
               </template>
@@ -49,20 +53,20 @@
       </scroll-view>
       <view v-if="!followLatest && active?.messages.length" class="latest-row"><view role="button" @tap="jumpToLatest">↓ 回到最新消息</view></view>
       <view class="composer" :class="{ 'keyboard-open': keyboardOpen }">
-        <TChatSender :value="active?.draft || ''" :loading="state.generating" placeholder="输入问题，聊聊你的想法…"
+        <TChatSender :value="active?.draft || ''" :loading="state.generating || state.recovering" placeholder="输入问题，聊聊你的想法…"
           :render-presets="[{ name: 'send', type: 'icon' }]" :textarea-props="{ autosize: { minHeight: 48, maxHeight: 176 } }"
           :adjust-position="false" :auto-rise-with-keyboard="false" @update:value="updateDraft" @send="onSend"
           @stop="stop" @keyboardheightchange="keyboardChanged">
           <template #footer-prefix><text class="composer-label">✦ AI 助手</text></template>
         </TChatSender>
-        <text class="preview-note">演示模式 · 回复为模拟内容，未连接 AI 服务</text>
+        <text class="preview-note">{{ mockEnabled ? '演示模式 · 回复为模拟内容' : 'AI 回复仅供参考 · 不会自动读取客户资料' }}</text>
       </view>
     </view>
     <TPopup :visible="historyVisible" placement="bottom" :close-btn="true" :z-index="28" :overlay-props="{ zIndex: 27 }"
       @visible-change="historyVisible = $event.visible">
       <view class="history-panel">
         <text class="history-title">会话历史</text>
-        <text class="history-subtitle">本次预览期间保留，关闭应用后清空</text>
+        <text class="history-subtitle">{{ mockEnabled ? '本次预览期间保留，关闭应用后清空' : '会话保存在当前工作区，仅本人可见' }}</text>
         <view class="history-new" role="button" @tap="newChat"><TIcon name="add" size="18px" />开始新会话</view>
         <scroll-view class="history-list" scroll-y>
           <view v-if="!history.length" class="history-empty">还没有会话，先聊一个问题吧</view>
@@ -72,6 +76,7 @@
             </view>
             <view class="history-delete" role="button" aria-label="删除会话" @tap="deleteChat(item.id)"><TIcon name="delete" size="18px" /></view>
           </view>
+          <view v-if="state.nextCursor" class="history-new" role="button" @tap="aiChat.loadMoreConversations()">加载更多会话</view>
         </scroll-view>
       </view>
     </TPopup>
@@ -89,6 +94,8 @@ import TPopup from '@tdesign/uniapp/popup/popup.vue';
 import '@tdesign/uniapp/theme.css';
 import MobileHeader from '@/components/MobileHeader.vue';
 import { aiChat } from '@/services/ai-chat';
+import { mockEnabled } from '@/config';
+import { ensureSession } from '@/services/session';
 import { automaticCall } from '@/services/automatic-call';
 import { hasUnfinishedCall } from '@/services/calls';
 import { toast, when } from '@/ui/format';
@@ -99,14 +106,14 @@ const keyboardHeight = ref(0), webHeight = ref(0);
 const keyboardOpen = computed(() => keyboardHeight.value > 0);
 const pageStyle = computed(() => ({ height: webHeight.value ? `${webHeight.value}px` : `calc(100vh - ${keyboardHeight.value}px)` }));
 const lastMessageId = computed(() => active.value?.messages.at(-1)?.id);
-const history = computed(() => state.conversations.filter(item => item.messages.length).slice().sort((a, b) => b.updated_at.localeCompare(a.updated_at)));
+const history = computed(() => state.conversations.filter(item => !mockEnabled || item.messages.length).slice().sort((a, b) => b.updated_at.localeCompare(a.updated_at)));
 const suggestions = [
   { title: '写一段跟进话术', description: '自然开场，让沟通更顺畅', prompt: '帮我写一段客户跟进话术', icon: 'chat', tone: 'blue' },
   { title: '理清客户需求', description: '梳理现状，找到下一步', prompt: '如何分析客户的当前意向？', icon: 'user', tone: 'purple' },
   { title: '安排今天的工作', description: '排好优先级，从容推进', prompt: '帮我安排今天的跟进工作', icon: 'calendar', tone: 'green' },
 ];
 
-if (!active.value) aiChat.newConversation();
+
 let lastScrollTop = 0;
 async function jumpToLatest() {
   followLatest.value = true;
@@ -127,22 +134,22 @@ function onScroll(event: { detail: { scrollTop: number; scrollHeight: number } }
   // User gestures pause following; scrolltolower restores it at the end.
 }
 function updateDraft(value: string) { if (active.value) active.value.draft = value; }
-function send(value: string) {
+async function send(value: string) {
   if (hasUnfinishedCall()) return toast('请先完成当前通话并保存结果');
   if (Array.from(value.trim()).length > 2000) return toast('单条问题最多 2000 字');
-  if (aiChat.send(value)) { followLatest.value = true; void jumpToLatest(); }
+  if (await aiChat.send(value)) { followLatest.value = true; void jumpToLatest(); }
 }
 function onSend(event: { value: string }) { send(event.value); }
-function retry(id: string) {
+async function retry(id: string) {
   if (hasUnfinishedCall()) return toast('请先完成当前通话并保存结果');
-  if (aiChat.retry(id)) { followLatest.value = true; void jumpToLatest(); }
+  if (await aiChat.retry(id)) { followLatest.value = true; void jumpToLatest(); }
 }
 function copy(content: string) { uni.setClipboardData({ data: content, fail: () => toast('复制失败，请重试') }); }
-function newChat() { aiChat.newConversation(); historyVisible.value = false; followLatest.value = true; scrollTop.value = 0; lastScrollTop = 0; uni.hideKeyboard(); }
+async function newChat() { await aiChat.newConversation(); historyVisible.value = false; followLatest.value = true; scrollTop.value = 0; lastScrollTop = 0; uni.hideKeyboard(); }
 function openHistory() { uni.hideKeyboard(); historyVisible.value = true; }
-function selectChat(id: string) { aiChat.select(id); historyVisible.value = false; void jumpToLatest(); }
+async function selectChat(id: string) { await aiChat.select(id); historyVisible.value = false; void jumpToLatest(); }
 function deleteChat(id: string) {
-  uni.showModal({ title: '删除会话', content: '删除后无法恢复，确认删除这段对话？', success: result => { if (result.confirm) aiChat.remove(id); } });
+  uni.showModal({ title: '删除会话', content: '删除后无法恢复，确认删除这段对话？', success: result => { if (result.confirm) void aiChat.remove(id); } });
 }
 function keyboardChanged(event: { height: number }) {
   keyboardHeight.value = Math.max(0, event.height);
@@ -159,15 +166,15 @@ window.addEventListener('resize', resizeWebViewport);
 resizeWebViewport();
 // #endif
 watch(automaticCall, call => { if (call) { historyVisible.value = false; stop(); uni.hideKeyboard(); } });
-onShow(() => { if (active.value?.messages.length) void jumpToLatest(); });
-onHide(() => { stop(); historyVisible.value = false; keyboardHeight.value = 0; clearTimeout(scrollTimer); });
+onShow(() => { if (!ensureSession()) return; void aiChat.resume().then(() => { if (active.value?.messages.length) void jumpToLatest(); }); });
+onHide(() => { aiChat.suspend(); historyVisible.value = false; keyboardHeight.value = 0; clearTimeout(scrollTimer); });
 onBackPress(() => {
   if (hasUnfinishedCall()) { toast('请先完成当前通话并保存结果'); return true; }
   if (historyVisible.value) { historyVisible.value = false; return true; }
   return false;
 });
 onUnload(() => {
-  stop(); clearTimeout(scrollTimer);
+  aiChat.suspend(); clearTimeout(scrollTimer);
   // #ifdef H5
   window.visualViewport?.removeEventListener('resize', resizeWebViewport);
   window.removeEventListener('resize', resizeWebViewport);
@@ -208,6 +215,7 @@ onUnload(() => {
 .message-item { margin-bottom: 24px; }
 .message-actions { display: flex; gap: 16px; align-items: center; padding-top: 12px; color: #929bad; font-size: 11px; }
 .message-actions view { display: flex; gap: 5px; align-items: center; min-height: 30px; }
+.user-message-text { white-space: pre-wrap; word-break: break-word; }
 .error-note { display: block; color: #c45050; font-size: 13px; margin-top: 8px; }.stopped-empty { color: #929bad; font-size: 13px; }.stopped-note { color: #a3aaba; font-size: 11px; }
 .chat-bottom { height: 12px; }
 .latest-row { height: 0; position: relative; display: flex; justify-content: center; z-index: 2; }

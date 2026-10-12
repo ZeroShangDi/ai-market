@@ -1,0 +1,38 @@
+server:
+  port: ${AI_PORT:48081}
+  address: ${AI_BIND_HOST:127.0.0.1}
+  compression:
+    enabled: false
+  error:
+    include-message: never
+spring:
+  application:
+    name: callphone-ai-service
+  datasource:
+    url: ${AI_DATABASE_URL:jdbc:h2:file:./data/chat;DB_CLOSE_ON_EXIT=FALSE}
+    username: ${AI_DATABASE_USER:sa}
+    password: ${AI_DATABASE_PASSWORD:}
+  mvc:
+    async:
+      request-timeout: 210000
+ai:
+  internal-token: ${AI_INTERNAL_TOKEN:}
+  storage-key: ${AI_STORAGE_KEY:}
+  api-key: ${AI_MODEL_API_KEY:}
+  base-url: ${AI_MODEL_BASE_URL:https://api.deepseek.com}
+  model: ${AI_MODEL_NAME:deepseek-flash}
+  completions-path: ${AI_MODEL_COMPLETIONS_PATH:/chat/completions}
+  thinking-mode: ${AI_MODEL_THINKING:disabled}
+  max-output-tokens: ${AI_MAX_OUTPUT_TOKENS:1024}
+  max-context-messages: ${AI_MAX_CONTEXT_MESSAGES:12}
+  max-context-chars: ${AI_MAX_CONTEXT_CHARS:12000}
+  max-reply-chars: 32000
+  max-concurrent: ${AI_MAX_CONCURRENT:8}
+  requests-per-minute: ${AI_REQUESTS_PER_MINUTE:10}
+  stream-usage: ${AI_MODEL_STREAM_USAGE:true}
+  generation-seconds: ${AI_GENERATION_SECONDS:180}
+logging:
+  level:
+    org.springframework.ai: OFF
+    org.springframework.web: WARN
+    reactor.netty: OFF

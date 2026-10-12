@@ -12,7 +12,7 @@ function load(file, mocks = {}, globals = {}) {
   return exports;
 }
 const preview = load('ai-chat-preview');
-const { createChatController } = load('ai-chat', { vue, './ai-chat-preview': preview });
+const { createChatController } = load('ai-chat', { vue, './ai-chat-preview': preview, './ai-chat-remote': {}, '@/config': { mockEnabled: true }, '@/api/http': { onSessionChange() {}, onDeviceChange() {} } });
 function harness() {
   const requests = [];
   const transport = { stream(request, callback) {
@@ -27,25 +27,25 @@ function harness() {
   };
   return { ...controller, requests, emit };
 }
-test('stop invalidates late events and switching preserves partial replies and drafts', () => {
+test('stop invalidates late events and switching preserves partial replies and drafts', async () => {
   const h = harness();
-  h.send('分析客户');
+  await h.send('分析客户');
   h.emit(0, { type: 'delta', delta: '部分回复' });
   h.active.value.draft = '下一轮问题';
   const old = h.active.value;
-  h.newConversation();
+  await h.newConversation();
   assert.equal(h.requests[0].cancelled, true);
   assert.equal(h.state.generating, false);
   assert.equal(old.messages[1].status, 'stop');
   h.emit(0, { type: 'completed', content: '旧请求的延迟全文', finish_reason: 'stop' });
   assert.equal(old.messages[1].content, '部分回复');
-  h.select(old.id);
+  await h.select(old.id);
   assert.equal(h.active.value.draft, '下一轮问题');
 });
-test('sequence deduplication, request isolation and final snapshot avoid duplicate content', () => {
+test('sequence deduplication, request isolation and final snapshot avoid duplicate content', async () => {
   const h = harness();
-  assert.equal(h.send('你好'), true);
-  assert.equal(h.send('重复点击'), false);
+  assert.equal(await h.send('你好'), true);
+  assert.equal(await h.send('重复点击'), false);
   h.emit(0, { type: 'started', user_message_id: '100', assistant_message_id: '101' });
   h.emit(0, { type: 'delta', delta: 'A' });
   h.emit(0, { type: 'delta', delta: '重复', sequence: 2 });
@@ -55,34 +55,34 @@ test('sequence deduplication, request isolation and final snapshot avoid duplica
   assert.equal(h.active.value.messages[1].content, '完整校准正文');
   assert.equal(h.active.value.messages[1].status, 'complete');
 });
-test('regenerating the last answer replaces it without duplicating the user message', () => {
-  const h = harness(); h.send('跟进话术');
+test('regenerating the last answer replaces it without duplicating the user message', async () => {
+  const h = harness(); await h.send('跟进话术');
   h.emit(0, { type: 'started', user_message_id: '100', assistant_message_id: '101' });
   h.emit(0, { type: 'failed', code: 'AI_UNAVAILABLE', message: '暂时不可用' });
   assert.equal(h.active.value.messages[1].error_message, '暂时不可用');
-  assert.equal(h.retry('101'), true);
+  assert.equal(await h.retry('101'), true);
   assert.equal(h.active.value.messages.length, 2);
   assert.equal(h.requests[1].request.retry_of, '101');
   assert.notEqual(h.requests[0].request.request_id, h.requests[1].request.request_id);
   h.emit(1, { type: 'started', user_message_id: '100', assistant_message_id: '101' });
   assert.equal(h.active.value.messages[0].id, '100');
   h.emit(1, { type: 'completed', content: '新回复', finish_reason: 'stop' });
-  h.send('继续');
-  assert.equal(h.retry('101'), false);
+  await h.send('继续');
+  assert.equal(await h.retry('101'), false);
   h.stop();
 });
-test('empty and overlong messages are rejected, deletion cancels the active request', () => {
+test('empty and overlong messages are rejected, deletion cancels the active request', async () => {
   const h = harness();
-  assert.equal(h.send('  '), false);
-  assert.equal(h.send('a'.repeat(2001)), false);
+  assert.equal(await h.send('  '), false);
+  assert.equal(await h.send('a'.repeat(2001)), false);
   assert.equal(h.state.conversations.length, 0);
-  h.send('你好'); const id = h.state.activeId; h.remove(id);
+  await h.send('你好'); const id = h.state.activeId; await h.remove(id);
   assert.equal(h.requests[0].cancelled, true);
   assert.equal(h.active.value.messages.length, 0);
   h.emit(0, { type: 'delta', delta: '删除后迟到' });
   assert.equal(h.active.value.messages.length, 0);
 });
-test('preview transport emits one terminal event and clears the timer on cancel', () => {
+test('preview transport emits one terminal event and clears the timer on cancel', async () => {
   const timers = new Map(); let id = 0;
   const p = load('ai-chat-preview', {}, { setTimeout: fn => { timers.set(++id, fn); return id; }, clearTimeout: timer => timers.delete(timer) });
   const events = [];

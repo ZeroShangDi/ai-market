@@ -6,7 +6,7 @@ set -eu
 # would fail on a clean install. The remaining versioned migrations are safe
 # against that baseline: table migrations use CREATE TABLE IF NOT EXISTS, and
 # menu migrations guard their inserts.
-for version in $(seq 3 57); do
+for version in $(seq 3 58); do
   case "$version" in
     7|8) continue ;;
   esac

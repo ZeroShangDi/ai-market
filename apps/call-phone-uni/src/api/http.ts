@@ -8,6 +8,11 @@ let refreshing: Promise<void> | undefined;
 let sessionVersion = 0;
 let deviceVersion = 0;
 const sessionObservers = new Set<() => void>();
+const deviceObservers = new Set<() => void>();
+export function onDeviceChange(observer: () => void) {
+  deviceObservers.add(observer);
+  return () => { deviceObservers.delete(observer); };
+}
 export const getSessionVersion = () => sessionVersion;
 export function onSessionChange(observer: () => void) {
   sessionObservers.add(observer);
@@ -37,10 +42,12 @@ export function hasAccessToken() {
 export function setCallphoneDeviceCredential(id: string, key: string) {
   callphoneDevice = { id, key };
   deviceVersion++;
+  deviceObservers.forEach(observer => observer());
 }
 export function clearCallphoneDeviceCredential() {
   callphoneDevice = undefined;
   deviceVersion++;
+  deviceObservers.forEach(observer => observer());
 }
 export function hasCallphoneDeviceCredential() {
   return !!callphoneDevice;
@@ -349,4 +356,18 @@ export async function downloadRecording(path: string): Promise<string> {
       );
     throw e;
   }
+}
+
+/** Capture an authenticated stream's identity without persisting credentials or exposing them to views. */
+export function streamContext(key: string) {
+  if (!accessToken || !callphoneDevice) throw error("AUTH_REQUIRED", "请先扫码连接电脑");
+  if (!connectionSettings().serviceUrl) throw error("API_NOT_CONFIGURED", "请先扫码连接电脑");
+  const version = sessionVersion, device = deviceVersion;
+  const current = () => assertSession(version, device);
+  return {
+    url: connectionSettings().serviceUrl,
+    headers: () => { current(); return headers(key); },
+    current,
+    refresh: async () => { current(); await refreshSession(); current(); },
+  };
 }
