@@ -115,3 +115,33 @@ test('bridge cannot report successful cleanup while a window remains visible', a
   const h = transport((_cmd, _payload, done) => done(result(true)));
   await assert.rejects(h.adapter.hide(), /尚未关闭/); await assert.rejects(h.adapter.dispose(), /尚未释放/);
 });
+test('elf action catalog references complete transparent atlas cells and returns non-idle clips to idle', () => {
+  const appearance = load('appearance', { require: name => ({ default: name }) });
+  const { elfSheets, elfActions, elfFrames } = appearance;
+  assert.equal(elfActions.length, 12);
+  assert.equal(new Set(elfActions.map(action => action.id)).size, 12);
+  assert.equal(elfActions[0].id, 'idle');
+  assert.equal(elfActions[0].repeats, 0);
+  assert.equal(elfFrames, elfActions[0].frames);
+  for (const sheet of elfSheets) {
+    const png = fs.readFileSync(path.join(__dirname, '../src/modules/mobile-pet', sheet.image));
+    assert.equal(png.subarray(1, 4).toString(), 'PNG');
+    assert.equal(png[25], 6, 'atlas must retain PNG RGBA transparency');
+    assert.equal(png.readUInt32BE(16) % sheet.columns, 0);
+    assert.equal(png.readUInt32BE(20) % sheet.rows, 0);
+    assert.equal(png.readUInt32BE(16) / sheet.columns, png.readUInt32BE(20) / sheet.rows);
+  }
+  const covered = new Set();
+  for (const action of elfActions) {
+    const sheet = elfSheets[action.sheet];
+    assert.ok(sheet);
+    assert.equal(action.frames.length, 6);
+    if (action.id !== 'idle') assert.equal(action.repeats, 3);
+    for (const frame of action.frames) {
+      assert.ok(frame.cell >= 0 && frame.cell < sheet.columns * sheet.rows);
+      assert.ok(frame.duration >= 50 && frame.duration <= 60000);
+      covered.add(action.sheet + ':' + frame.cell);
+    }
+  }
+  assert.equal(covered.size, 72, 'every generated frame is assigned to exactly one action');
+});

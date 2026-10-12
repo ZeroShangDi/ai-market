@@ -1,6 +1,6 @@
 import * as native from '@/uni_modules/portable-pet-overlay';
 import { createNativePetAdapter } from './transport';
-import { elfSheet, elfFrames } from './appearance';
+import { elfSheets, elfFrames, elfActions } from './appearance';
 
 export const petAdapter = createNativePetAdapter(() => {
   if (typeof plus === 'undefined' || uni.getSystemInfoSync().platform !== 'android') {
@@ -8,10 +8,15 @@ export const petAdapter = createNativePetAdapter(() => {
   }
   return native;
 }, () => {
-  const relative = elfSheet.replace(/^\//, '');
+  const sheets = elfSheets.map(sheet => {
+    const relative = sheet.image.replace(/^\//, '');
+    return {
+      imagePath: plus.io.convertLocalFileSystemURL('_www/' + relative),
+      assetPath: 'apps/' + plus.runtime.appid + '/www/' + relative,
+      columns: sheet.columns, rows: sheet.rows,
+    };
+  });
   return {
-    imagePath: plus.io.convertLocalFileSystemURL('_www/' + relative),
-    assetPath: 'apps/' + plus.runtime.appid + '/www/' + relative,
-    columns: 3, frames: elfFrames, sizeDp: 104,
+    ...sheets[0], frames: elfFrames, sheets, actions: elfActions, sizeDp: 104,
   };
 });

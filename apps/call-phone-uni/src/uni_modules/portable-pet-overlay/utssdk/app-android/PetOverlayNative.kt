@@ -2,6 +2,7 @@ package dev.portablepet.overlay
 
 import android.app.Activity
 import android.app.Application
+import android.animation.ValueAnimator
 import android.content.Context
 import android.content.Intent
 import android.content.ComponentCallbacks
@@ -21,14 +22,20 @@ import android.view.Gravity
 import android.view.WindowManager
 import android.view.View
 import android.view.ViewConfiguration
+import android.view.HapticFeedbackConstants
+import android.view.MotionEvent
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
+import android.widget.ProgressBar
+import android.widget.ScrollView
 import com.lzf.easyfloat.EasyFloat
 import com.lzf.easyfloat.enums.ShowPattern
 import com.lzf.easyfloat.enums.SidePattern
 import org.json.JSONObject
 import java.lang.ref.WeakReference
+import java.util.concurrent.Executors
+import org.json.JSONArray
 
 /** Native UI ownership only. No accounts, network, phone calls, app IDs, or preference keys. */
 object PetOverlayNative {
@@ -47,6 +54,22 @@ object PetOverlayNative {
     private var width = 0
     private var height = 0
     private var requested = false
+    private var statusText = ""
+    private var progress: ProgressBar? = null
+    private var holdAnimator: ValueAnimator? = null
+    private var holdReady: Runnable? = null
+    private var returnToIdle: Runnable? = null
+    private var menu: LinearLayout? = null
+    private var collapsedPosition: IntArray? = null
+    private var petSize = 0
+    private var petHeight = 0
+    private var selection = 0L
+    private val decoder = Executors.newSingleThreadExecutor()
+    private var sheets = emptyList<JSONObject>()
+    private var actions = emptyList<Action>()
+    private val clips = linkedMapOf<String, AnimationDrawable>()
+    private data class Action(val id: String, val label: String, val group: String, val sheet: Int,
+        val frames: JSONArray, val repeats: Int)
 
     @JvmStatic fun permission(context: Context?): Int = try {
         if (context == null) -1 else if (Settings.canDrawOverlays(context)) 1 else 0
@@ -91,7 +114,8 @@ object PetOverlayNative {
                     "text" -> {
                         val text = JSONObject(payload).optString("text", "")
                         require(text.length <= 80) { "INVALID_TEXT" }
-                        label?.text = text
+                        statusText = text
+                        if (holdAnimator == null) label?.text = text
                         safe(reply, result(true))
                     }
                     "settings" -> {
@@ -131,11 +155,15 @@ object PetOverlayNative {
         require(text.length <= 80) { "INVALID_TEXT" }
         val density = activity.resources.displayMetrics.density
         fun dp(value: Int) = (value * density).toInt().coerceAtLeast(1)
-        width = dp(size); height = dp(size + 24)
+        width = dp(size); height = dp(size + 27)
+        petSize = width; petHeight = height; statusText = text
+        configureActions(options)
         val drawable = decodeAnimation(activity, options)
+        actions.firstOrNull()?.let { clips[it.id] = drawable }
         val layout = LinearLayout(activity).apply {
             orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER
-            contentDescription = "桌宠，点击返回应用，长按关闭"
+            isClickable = true // Consume DOWN so a stationary hold receives its matching UP.
+            contentDescription = "桌宠，点击返回应用，长按选择表情和动作"
         }
         val portrait = ImageView(activity).apply {
             scaleType = ImageView.ScaleType.FIT_CENTER
@@ -149,6 +177,12 @@ object PetOverlayNative {
             background = GradientDrawable().apply { setColor(Color.rgb(22, 101, 52)); cornerRadius = dp(10).toFloat() }
         }
         layout.addView(caption, LinearLayout.LayoutParams(width, dp(24)))
+        val holdProgress = ProgressBar(activity, null, android.R.attr.progressBarStyleHorizontal).apply {
+            max = 1000; visibility = View.INVISIBLE
+            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+        }
+        layout.addView(holdProgress, LinearLayout.LayoutParams(width, dp(3)))
+        progress = holdProgress
         root = layout; image = portrait; label = caption; animation = drawable
         owner = WeakReference(activity); requested = true
         register(activity.application)
@@ -172,22 +206,27 @@ object PetOverlayNative {
                 createResult { created, message, _ ->
                     main.post {
                         if (current == generation && pending != null) {
-                            if (created && visible()) { animation?.start(); clamp(); finish(true) }
+                            if (created && visible()) {
+                                animation?.start(); clamp(); finish(true)
+                            }
                             else { finish(false, "CREATE_FAILED", message ?: "悬浮窗创建失败"); remove("CREATE_FAILED") }
                         }
                     }
                 }
                 touchEvent { _, motion ->
+                    if (menu != null) return@touchEvent
                     val action = gesture.accept(motion.actionMasked, motion.rawX, motion.rawY, motion.eventTime)
+                    if (motion.actionMasked == MotionEvent.ACTION_DOWN) startHold(gesture)
+                    if (!gesture.canHold()) cancelHold()
                     if (action != PetGesture.NONE) main.post {
                         if (current == generation) {
-                            if (action == PetGesture.CLOSE) { if (remove("CLOSED")) event("closed") }
+                            if (action == PetGesture.MENU) openActionMenu()
                             else try { bringToFront(activity.applicationContext) }
                             catch (e: Exception) { event("error", "OPEN_APP_FAILED", e.message ?: "请点击桌面图标返回应用") }
                         }
                     }
                 }
-                drag { _, _ -> gesture.markDragged() }
+                drag { _, _ -> gesture.markDragged(); cancelHold() }
                 dragEnd { clamp() }
             }.show()
     }
@@ -205,13 +244,15 @@ object PetOverlayNative {
         require(!assetPath.startsWith('/') && !assetPath.split('/').contains("..")) { "INVALID_ASSET_PATH" }
         val columns = options.getInt("columns")
         require(columns in 1..16) { "INVALID_COLUMNS" }
+        val rows = options.optInt("rows", 1)
+        require(rows in 1..16) { "INVALID_ROWS" }
         val frames = options.getJSONArray("frames")
         require(frames.length() in 1..64) { "INVALID_FRAMES" }
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         BitmapFactory.decodeFile(path, bounds)
         val useAsset = bounds.outWidth <= 0
         if (useAsset && assetPath.isNotEmpty()) context.assets.open(assetPath).use { BitmapFactory.decodeStream(it, null, bounds) }
-        require(bounds.outWidth > 0 && bounds.outHeight > 0 && bounds.outWidth % columns == 0 &&
+        require(bounds.outWidth > 0 && bounds.outHeight > 0 && bounds.outWidth % columns == 0 && bounds.outHeight % rows == 0 &&
             bounds.outWidth.toLong() * bounds.outHeight <= 8_388_608L) { "INVALID_IMAGE_DIMENSIONS" }
         val bitmap = if (useAsset) context.assets.open(assetPath).use { BitmapFactory.decodeStream(it) }
             else BitmapFactory.decodeFile(path)
@@ -222,15 +263,175 @@ object PetOverlayNative {
             for (i in 0 until frames.length()) {
                 val frame = frames.getJSONObject(i)
                 val cell = frame.getInt("cell"); val duration = frame.getInt("duration")
-                require(cell in 0 until columns && duration in 50..60000) { "INVALID_FRAME" }
+                require(cell in 0 until columns * rows && duration in 50..60000) { "INVALID_FRAME" }
                 val drawable = cells.getOrPut(cell) {
-                    val crop = Bitmap.createBitmap(bitmap, cell * bitmap.width / columns, 0, bitmap.width / columns, bitmap.height)
+                    val crop = Bitmap.createBitmap(bitmap, (cell % columns) * (bitmap.width / columns),
+                        (cell / columns) * (bitmap.height / rows), bitmap.width / columns, bitmap.height / rows)
                     BitmapDrawable(context.resources, Bitmap.createScaledBitmap(crop, 256, 256, true))
                 }
                 addFrame(drawable, duration)
             }
         }
         // Bitmap references are released with drawables; never recycle a bitmap still used by a View.
+    }
+
+    private fun configureActions(options: JSONObject) {
+        val sourceSheets = options.optJSONArray("sheets") ?: return
+        val sourceActions = options.getJSONArray("actions")
+        require(sourceSheets.length() in 1..8 && sourceActions.length() in 1..24) { "INVALID_ACTIONS" }
+        val parsedSheets = (0 until sourceSheets.length()).map { sourceSheets.getJSONObject(it) }
+        val parsedActions = (0 until sourceActions.length()).map { i ->
+            val value = sourceActions.getJSONObject(i)
+            val id = value.getString("id")
+            val label = value.getString("label")
+            val group = value.getString("group")
+            val sheet = value.getInt("sheet")
+            val frames = value.getJSONArray("frames")
+            val repeats = value.getInt("repeats")
+            require(id.matches(Regex("[a-z][a-z0-9_-]{0,23}")) && label.length in 1..12 &&
+                group.length in 1..12 && sheet in parsedSheets.indices && frames.length() in 1..64 &&
+                repeats in 0..6) { "INVALID_ACTION" }
+            val columns = parsedSheets[sheet].getInt("columns")
+            val rows = parsedSheets[sheet].optInt("rows", 1)
+            require(columns in 1..16 && rows in 1..16) { "INVALID_GRID" }
+            for (f in 0 until frames.length()) {
+                require(frames.getJSONObject(f).getInt("cell") in 0 until columns * rows &&
+                    frames.getJSONObject(f).getInt("duration") in 50..60000) { "INVALID_FRAME" }
+            }
+            require((id == "idle") == (repeats == 0)) { "INVALID_REPEAT" }
+            Action(id, label, group, sheet, frames, repeats)
+        }
+        require(parsedActions.first().id == "idle" && parsedActions.map { it.id }.distinct().size == parsedActions.size) {
+            "INVALID_IDLE_ACTION"
+        }
+        require(parsedSheets[parsedActions.first().sheet].getString("imagePath") == options.getString("imagePath") &&
+            parsedActions.first().frames.toString() == options.getJSONArray("frames").toString()) { "INVALID_IDLE_SOURCE" }
+        sheets = parsedSheets; actions = parsedActions
+    }
+
+    private fun startHold(gesture: PetGesture) {
+        cancelHold()
+        progress?.visibility = View.VISIBLE
+        holdAnimator = ValueAnimator.ofInt(0, 1000).apply {
+            duration = PetGesture.HOLD_MS
+            addUpdateListener { progress?.progress = it.animatedValue as Int }
+            start()
+        }
+        holdReady = Runnable {
+            if (gesture.canHold() && visible()) {
+                label?.text = "松开选择动作"
+                root?.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+            }
+        }.also { main.postDelayed(it, PetGesture.HOLD_MS) }
+    }
+
+    private fun cancelHold() {
+        holdAnimator?.cancel(); holdAnimator = null
+        holdReady?.let { main.removeCallbacks(it) }; holdReady = null
+        progress?.visibility = View.INVISIBLE; progress?.progress = 0
+        label?.text = statusText
+    }
+
+    private fun playAction(action: Action) {
+        val context = root?.context?.applicationContext ?: return
+        returnToIdle?.let { main.removeCallbacks(it) }; returnToIdle = null
+        val current = generation
+        val request = ++selection
+        fun applyClip(drawable: AnimationDrawable) {
+            if (current != generation || request != selection || !visible()) return
+            animation?.stop(); image?.setImageDrawable(drawable); animation = drawable
+            // Keep idle plus at most two other decoded clips; do not decode all 72 cells at startup.
+            clips.remove(action.id); clips[action.id] = drawable
+            while (clips.size > 3) clips.keys.firstOrNull { it != "idle" && it != action.id }?.let { clips.remove(it) }
+            drawable.stop(); drawable.selectDrawable(0); drawable.start()
+            if (action.repeats > 0) {
+                var length = 0L
+                for (i in 0 until action.frames.length()) length += action.frames.getJSONObject(i).getLong("duration")
+                returnToIdle = Runnable {
+                    if (current == generation && request == selection) actions.firstOrNull()?.let { playAction(it) }
+                }.also { main.postDelayed(it, length * action.repeats) }
+            }
+        }
+        val cached = clips[action.id]
+        if (cached != null) { applyClip(cached); return }
+        val options = JSONObject(sheets[action.sheet].toString()).put("frames", action.frames)
+        decoder.execute {
+            try {
+                val drawable = decodeAnimation(context, options)
+                main.post { applyClip(drawable) }
+            } catch (e: Exception) {
+                main.post {
+                    if (current == generation && request == selection) {
+                        event("error", "ACTION_DECODE_FAILED", "动作加载失败，请重试：" + (e.message ?: "素材不可用"))
+                        actions.firstOrNull()?.let { playAction(it) }
+                    }
+                }
+            }
+        }
+    }
+
+    private fun openActionMenu() {
+        val layout = root ?: return
+        if (menu != null || !visible()) return
+        cancelHold()
+        if (actions.isEmpty()) { event("error", "NO_ACTIONS", "当前角色尚未配置动作"); return }
+        val density = layout.resources.displayMetrics.density
+        fun dp(value: Int) = (value * density).toInt().coerceAtLeast(1)
+        val location = IntArray(2)
+        (layout.parent as? View)?.getLocationOnScreen(location)
+        collapsedPosition = intArrayOf(location[0], location[1] - statusBarHeight(layout.context))
+        val metrics = layout.resources.displayMetrics
+        width = dp(252).coerceAtMost(metrics.widthPixels)
+        val panelHeight = dp(292).coerceAtMost((metrics.heightPixels - petHeight - statusBarHeight(layout.context)).coerceAtLeast(dp(100)))
+        height = petHeight + panelHeight
+        val panel = LinearLayout(layout.context).apply {
+            orientation = LinearLayout.VERTICAL; setPadding(dp(8), 0, dp(8), 0)
+            background = GradientDrawable().apply { setColor(Color.rgb(247, 250, 247)); cornerRadius = dp(16).toFloat() }
+            elevation = dp(4).toFloat()
+        }
+        fun text(value: String, size: Float = 12f) = TextView(layout.context).apply {
+            this.text = value; textSize = size; gravity = Gravity.CENTER
+            setTextColor(Color.rgb(35, 65, 46))
+        }
+        panel.addView(text("选择表情和动作", 14f), LinearLayout.LayoutParams(-1, dp(36)))
+        val content = LinearLayout(layout.context).apply { orientation = LinearLayout.VERTICAL }
+        for (group in actions.map { it.group }.distinct()) {
+            content.addView(text(group), LinearLayout.LayoutParams(-1, dp(24)))
+            for (row in actions.filter { it.group == group }.chunked(3)) {
+                val buttons = LinearLayout(layout.context)
+                for (action in row) {
+                    val button = text(action.label).apply {
+                        background = GradientDrawable().apply { setColor(Color.rgb(225, 238, 228)); cornerRadius = dp(8).toFloat() }
+                        contentDescription = "播放" + action.label + "动画"
+                        isFocusable = true
+                        setOnClickListener { closeActionMenu(); playAction(action) }
+                    }
+                    buttons.addView(button, LinearLayout.LayoutParams(0, dp(44), 1f).apply { setMargins(dp(3), dp(3), dp(3), dp(3)) })
+                }
+                repeat(3 - row.size) { buttons.addView(View(layout.context), LinearLayout.LayoutParams(0, dp(44), 1f)) }
+                content.addView(buttons)
+            }
+        }
+        val scroll = ScrollView(layout.context).apply { addView(content) }
+        panel.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
+        panel.addView(text("收起").apply { isFocusable = true; setOnClickListener { closeActionMenu() } }, LinearLayout.LayoutParams(-1, dp(44)))
+        menu = panel; layout.addView(panel, LinearLayout.LayoutParams(width, panelHeight))
+        image?.setOnClickListener { closeActionMenu() }
+        EasyFloat.dragEnable(false, TAG)
+        EasyFloat.updateFloat(TAG, (location[0] - (width - petSize) / 2).coerceAtLeast(0), collapsedPosition!![1].coerceAtLeast(0))
+        layout.post { if (root === layout && menu === panel) clamp() }
+    }
+
+    private fun closeActionMenu() {
+        val panel = menu ?: return
+        root?.removeView(panel); menu = null
+        image?.apply { setOnClickListener(null); isClickable = false }
+        width = petSize; height = petHeight
+        EasyFloat.dragEnable(true, TAG)
+        collapsedPosition?.let { EasyFloat.updateFloat(TAG, it[0].coerceAtLeast(0), it[1].coerceAtLeast(0)) }
+        collapsedPosition = null
+        val layout = root
+        layout?.post { if (root === layout) clamp() }
     }
 
     private fun bringToFront(context: Context) {
@@ -259,6 +460,11 @@ object PetOverlayNative {
 
     private fun remove(reason: String): Boolean {
         generation++
+        selection++
+        cancelHold()
+        returnToIdle?.let { main.removeCallbacks(it) }; returnToIdle = null
+        menu?.let { root?.removeView(it) }; menu = null; collapsedPosition = null
+        actions = emptyList(); sheets = emptyList(); clips.clear()
         requested = false
         animation?.stop()
         timeout?.let { main.removeCallbacks(it) }; timeout = null
@@ -275,7 +481,7 @@ object PetOverlayNative {
         val removed = view?.isAttachedToWindow != true
         if (removed) {
             image?.setImageDrawable(null)
-            root = null; image = null; label = null; animation = null
+            root = null; image = null; label = null; animation = null; progress = null
             owner.clear(); unregister()
         } else event("error", "REMOVE_FAILED", "悬浮窗关闭失败，请返回应用重试")
         safe(previous, result(false, reason, "桌宠显示已取消"))

@@ -126,7 +126,7 @@
             <view class="card-list">
               <ReadinessCard title="悬浮窗权限" :state="stateOf(mobilePet.permission)" :status="checkLabel(stateOf(mobilePet.permission), '已允许')" action="去开启" @action="overlaySettings" />
               <ReadinessCard title="电池优化" :state="readiness.battery" :status="checkLabel(readiness.battery, '已豁免')" action="去设置" description="此项仅检查电池优化；自启动、后台弹出界面需在手机系统中另行允许。" @action="systemSettings('battery')" />
-              <ReadinessCard title="手机宠" :state="mobilePet.visible ? 'ready' : mobilePet.enabled ? 'action' : 'unknown'" :status="mobilePet.visible ? '已开启' : mobilePet.enabled ? mobilePet.permission === true ? '显示失败' : mobilePet.permission === null ? '权限无法确认' : '需开启权限' : '未开启'" :action="mobilePet.enabled ? '重试显示' : '开启'" :description="mobilePet.message || '可拖动，点击返回 App，长按关闭。'" @action="retryPet" />
+              <ReadinessCard title="手机宠" :state="mobilePet.visible ? 'ready' : mobilePet.enabled ? 'action' : 'unknown'" :status="mobilePet.visible ? '已开启' : mobilePet.enabled ? mobilePet.permission === true ? '显示失败' : mobilePet.permission === null ? '权限无法确认' : '需开启权限' : '未开启'" :action="mobilePet.enabled ? '重试显示' : '开启'" :description="mobilePet.message || '可拖动，点击返回 App，长按选择表情和动作。'" @action="retryPet" />
             </view>
             <text v-if="readiness.diagnostic" class="group-note">{{ readiness.diagnostic }}</text>
             <text class="group-note">{{ mobilePet.message || '这些功能可按需开启。后台运行效果取决于手机系统设置，清理进程后可能中断。' }}</text>
