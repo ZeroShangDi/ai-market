@@ -56,6 +56,12 @@ importers:
       '@dcloudio/uni-quickapp-webview':
         specifier: 3.0.0-5020420260813003
         version: 3.0.0-5020420260813003(postcss@8.5.28)(rollup@4.64.0)(vue@3.5.43(typescript@4.9.5))
+      '@tdesign/uniapp':
+        specifier: ^0.10.3
+        version: 0.10.3
+      '@tdesign/uniapp-chat':
+        specifier: ^0.3.0
+        version: 0.3.0
       crypto-js:
         specifier: 4.2.0
         version: 4.2.0
@@ -1521,6 +1527,11 @@ packages:
 
   '@sinonjs/fake-timers@8.1.0':
     resolution: {integrity: sha512-OAPJUAtgeINhh/TAlUID4QTs53Njm7xzddaVlEs/SXwgtiD1tW22zAB/W1wdqfrpmikgaWQ9Fw6Ws+hsiRm5Vg==}
+
+  '@tdesign/uniapp-chat@0.3.0':
+    resolution: {integrity: sha512-NFfIosPVdP/tMHTmB2xwfhtvoXojfHBeFFxcQVS4gOXvThf71/xFWFBnJdqDYWj9fKwbZx4p/Owa65zZOj7k1g==}
+  '@tdesign/uniapp@0.10.3':
+    resolution: {integrity: sha512-daIhyOyIQXsoV2yyU3iIuccCN7RaQ9SNvbet5JabaQmYspdVBpe55LEEHMCAI9KB4uS0OeZaEUVSQhGVQkaXEA==}
 
   '@tootallnate/once@1.1.2':
     resolution: {integrity: sha512-RbzJvlNzmRq5c3O09UipeuXno4tA1FE6ikOjxZK0tuxVv3412l64l5t1W5pj4+rJq9vpkm/kwiR07aZXnsKPxw==}
@@ -5955,6 +5966,9 @@ snapshots:
   '@sinonjs/fake-timers@8.1.0':
     dependencies:
       '@sinonjs/commons': 1.8.6
+
+  '@tdesign/uniapp-chat@0.3.0': {}
+  '@tdesign/uniapp@0.10.3': {}
 
   '@tootallnate/once@1.1.2': {}
 

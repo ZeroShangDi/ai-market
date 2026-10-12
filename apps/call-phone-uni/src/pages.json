@@ -7,6 +7,13 @@
       }
     },
     {
+      "path": "pages/ai-chat/index",
+      "style": {
+        "navigationStyle": "custom",
+        "app-plus": { "softinputMode": "adjustNothing", "bounce": "none" }
+      }
+    },
+    {
       "path": "pages/customers/index",
       "style": {
         "navigationStyle": "custom"

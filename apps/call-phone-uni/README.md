@@ -4,6 +4,8 @@ Vue 3 + TypeScript + uni-app 工程。页面依据 Figma 移动端画板 `2:2`�
 
 ## 启动
 
+工作台新增 AI 助手预览卡片，进入独立会话页后隐藏底部导航。使用 TDesign Chat 组件，当前为模拟增量回复；历史与草稿仅在内存保留。流式 API、鉴权和恢复约定见 [AI 会话契约](../../docs/modules/mobile-ai-chat-contract.md)，后端与真实网络适配器尚未实现。
+
 ```sh
 pnpm install
 cp .env.development.example .env.development

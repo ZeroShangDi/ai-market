@@ -3,7 +3,7 @@
     ><view class="mobile-header"
       ><view class="header-row">
         <view v-if="actionIcon && actionPosition === 'left'" class="header-action" role="button" :aria-label="actionLabel" @tap="$emit('action')"><image :src="actionIcon" /></view>
-        <view v-if="backIcon" class="header-back" @tap="back"
+        <view v-if="backIcon" class="header-back" role="button" aria-label="返回" @tap="back"
           ><image :src="backIcon"
         /></view>
         <text class="header-title" :class="{ detail: backIcon }">{{
@@ -45,12 +45,13 @@ import {
 } from "@/services/automatic-call";
 import { foregroundDispatches } from "@/services/foreground";
 import { hasUnfinishedCall } from "@/services/calls";
-defineProps<{
+const props = defineProps<{
   title: string;
   actionIcon?: string;
   actionLabel?: string;
   actionPosition?: "left" | "right";
   backIcon?: string;
+  backFallback?: string;
 }>();
 defineEmits<{ (event: "action"): void }>();
 function openDispatches() {
@@ -64,7 +65,7 @@ function back() {
     return;
   }
   uni.navigateBack({
-    fail: () => uni.reLaunch({ url: "/pages/customers/index" }),
+    fail: () => uni.reLaunch({ url: props.backFallback || "/pages/customers/index" }),
   });
 }
 </script>
