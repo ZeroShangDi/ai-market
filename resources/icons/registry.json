@@ -1,0 +1,30 @@
+{
+  "fallback": "unknown",
+  "icons": {
+    "unknown": { "source": "ri:question-line", "label": "未知图标" },
+    "ai": { "source": "ri:sparkling-2-fill", "label": "AI 助手" },
+    "app-ai": { "file": "custom/app-ai.svg", "colorMode": "original", "label": "AI 对话" },
+    "app-phone": { "file": "custom/app-phone.png", "colorMode": "original", "label": "拨号" },
+    "brand-assistant": { "file": "custom/brand-assistant.svg", "colorMode": "original", "label": "统子哥" },
+    "pending": { "source": "ri:chat-3-line", "label": "继续处理" },
+    "phone": { "source": "ri:phone-line", "label": "拨号" },
+    "home": { "source": "ri:home-5-line", "label": "工作台" },
+    "home-active": { "source": "ri:home-5-fill", "label": "工作台" },
+    "apps": { "source": "ri:apps-line", "label": "应用" },
+    "apps-active": { "source": "ri:apps-fill", "label": "应用" },
+    "user": { "source": "ri:user-3-line", "label": "我的" },
+    "user-active": { "source": "ri:user-3-fill", "label": "我的" },
+    "scan": { "source": "ri:qr-scan-2-line", "label": "扫码" },
+    "chevron-right": { "source": "ri:arrow-right-s-line", "label": "展开" },
+    "chevron-left": { "source": "ri:arrow-left-s-line", "label": "返回" },
+    "arrow-right": { "source": "ri:arrow-right-line", "label": "前往" },
+    "search": { "source": "ri:search-line", "label": "搜索" },
+    "history": { "source": "ri:history-line", "label": "历史" },
+    "wechat": { "source": "ri:wechat-fill", "label": "微信", "colorMode": "original", "defaultColor": "#07C160" },
+    "settings": { "source": "ri:settings-3-line", "label": "设置" },
+    "notification": { "source": "ri:notification-3-line", "label": "通知" },
+    "close": { "source": "ri:close-line", "label": "关闭" },
+    "add": { "source": "ri:add-line", "label": "添加" },
+    "check": { "source": "ri:check-line", "label": "完成" }
+  }
+}

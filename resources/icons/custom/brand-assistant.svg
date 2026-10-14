@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024" fill="none">
+  <defs><linearGradient id="brand-bg" x1="80" y1="60" x2="920" y2="1000" gradientUnits="userSpaceOnUse"><stop stop-color="#3B60E5"/><stop offset="1" stop-color="#5541B6"/></linearGradient></defs>
+  <rect width="1024" height="1024" fill="url(#brand-bg)"/>
+  <path d="M234 362c0-65.2 52.8-118 118-118h320c65.2 0 118 52.8 118 118v253c0 65.2-52.8 118-118 118H414l-142 79v-111c-24-21.6-38-52.5-38-86V362Z" fill="white"/>
+  <rect x="372" y="409" width="61" height="81" rx="30.5" fill="#4659CA"/>
+  <rect x="591" y="409" width="61" height="81" rx="30.5" fill="#4659CA"/>
+  <path d="M420 560c50 62 134 62 184 0" stroke="#4659CA" stroke-width="28" stroke-linecap="round"/>
+  <path d="M780 147c7.2 43 21.8 57.7 65 65-43.2 7.3-57.8 22-65 65-7.3-43-22-57.7-65-65 43-7.3 57.7-22 65-65Z" fill="#9BF0D5"/>
+</svg>
