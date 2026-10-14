@@ -42,6 +42,8 @@ Android 代码可用 `pnpm build:app` 编译；真机需用 HBuilderX 安装含 
 
 个人证书安心打包使用 `pnpm pack:android:release`，要求 HBuilderX 已登录。命令先生成共享离线图标，再调用 HBuilderX 编译与打包。签名配置文件为项目根目录 `.android-signing.local.json`，填写 `certfile`（证书路径）、`certalias`（别名）、`certpassword`（证书密码）和 `storepassword`（证书库密码）。此文件已被 Git 忽略，密码不要提交到仓库。脚本固定使用 `safemode:true`、`iscustom:false` 和自有证书，临时配置仅当前用户可读，并在结束时删除。`pack:android:debug` 生成公共证书自定义调试基座，使用传统云打包。
 
+安心打包并非完全离线：业务前端代码和私有证书在本机处理，原生模块配置、应用图标和本地原生插件仍需交给 DCloud 生成原生包。本项目的桌宠 `portable-pet-overlay` 会生成 Android Kotlin 插件代码，属于原生编译材料。涉及重新上传时须先确认上传范围；不得将“前端代码不上传”解释为“任何源码都不上传”。参见 [DCloud 安心打包说明](https://uniapp.dcloud.io/tutorial/build/SafePack)。
+
 2026-10-13 本机已补齐签名配置并实际调用个人证书安心打包，资源编译成功，23:30:56 已提交至 DCloud 云端。云端原生包于 2026-10-14 00:27 下载至 `dist/cache/apk`，本地状态通道出现 RPC 超时，正式 APK 未自动输出。随后复用本次下载的原生包与 `dist/cache/wgt` 中的编译资源，使用 HBuilderX 自带 zipalign/apksigner 完成本地资源合并和个人证书签名，生成 `dist/release/apk/call-phone-1.0.6-ai-20261014.apk`（约 23.6 MB）。
 
 APK 已通过 v1/v2 签名和 16 KB ZIP 对齐验证；签名与现有 1.0.6 正式 APK 一致。已逐文件核对 AI 页面资源，并确认所有原生 dex/so 与本次云端原生包完全一致；包含通话插件和桌宠模块。包名为 `uni.UNID608100`，版本仍为 `1.0.6`（104）。APK SHA256：`205ce4311c2d91e243a6394029d8ddfd8ee518587fe5ea6331562a8362d864b8`。尚未在手机安装验证实际 AI 流式显示。
