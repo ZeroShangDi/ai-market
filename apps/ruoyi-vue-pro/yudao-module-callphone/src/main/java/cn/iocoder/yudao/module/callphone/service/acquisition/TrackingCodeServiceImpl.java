@@ -136,7 +136,7 @@ public class TrackingCodeServiceImpl implements TrackingCodeService {
                         .last("FOR UPDATE")));
         if (matches.size() != 1) return Optional.empty();
 
-        TrackingCodeDO code = matches.getFirst();
+        TrackingCodeDO code = matches.get(0);
         if (!"active".equals(code.getStatus()) || code.getLandingUrl() == null || code.getLandingUrl().isBlank()) {
             return Optional.empty();
         }
