@@ -2,11 +2,9 @@
   <view class="header-space"
     ><view class="mobile-header"
       ><view class="header-row">
-        <view v-if="actionIcon && actionPosition === 'left'" class="header-action" role="button" :aria-label="actionLabel" @tap="$emit('action')"><image :src="actionIcon" /></view>
-        <view v-if="backIcon" class="header-back" role="button" aria-label="返回" @tap="back"
-          ><image :src="backIcon"
-        /></view>
-        <text class="header-title" :class="{ detail: backIcon }">{{
+        <view v-if="(actionIcon || actionIconName) && actionPosition === 'left'" class="header-action" role="button" :aria-label="actionLabel" @tap="$emit('action')"><AppIcon v-if="actionIconName" :name="actionIconName" :size="20" color="#1a1f2e" /><image v-else :src="actionIcon" /></view>
+        <view v-if="backIcon || backIconName" class="header-back" role="button" aria-label="返回" @tap="back"><AppIcon v-if="backIconName" :name="backIconName" :size="20" color="#1a1f2e" /><image v-else :src="backIcon" /></view>
+        <text class="header-title" :class="{ detail: backIcon || backIconName }">{{
           title
         }}</text>
         <view
@@ -17,13 +15,14 @@
           >等待拨号 {{ foregroundDispatches.length }}</view
         >
         <view
-          v-if="actionIcon && actionPosition !== 'left'"
+          v-if="(actionIcon || actionIconName) && actionPosition !== 'left'"
           class="header-action"
           role="button"
           :aria-label="actionLabel"
           @tap="$emit('action')"
-          ><image :src="actionIcon"
-        /></view> </view></view
+          ><AppIcon v-if="actionIconName" :name="actionIconName" :size="20" color="#1a1f2e" /><image v-else :src="actionIcon" /></view>
+        <view v-if="actionText" class="header-text-action" :class="{ disabled: actionDisabled }" role="button" :aria-label="actionLabel || actionText" :aria-disabled="actionDisabled" @tap="!actionDisabled && $emit('action')">{{ actionText }}</view>
+        </view></view
   ></view>
   <CallResultSheet
     v-if="automaticCall"
@@ -38,6 +37,7 @@
 </template>
 <script setup lang="ts">
 import CallResultSheet from "./CallResultSheet.vue";
+import AppIcon from "./AppIcon.vue";
 import {
   automaticCall,
   automaticObservation,
@@ -48,22 +48,29 @@ import { hasUnfinishedCall } from "@/services/calls";
 const props = defineProps<{
   title: string;
   actionIcon?: string;
+  actionIconName?: string;
   actionLabel?: string;
+  actionText?: string;
+  actionDisabled?: boolean;
+  interceptBack?: boolean;
   actionPosition?: "left" | "right";
   backIcon?: string;
+  backIconName?: string;
   backFallback?: string;
 }>();
-defineEmits<{ (event: "action"): void }>();
+const emit = defineEmits<{ (event: "action"): void; (event: "back"): void }>();
 function openDispatches() {
   if (hasUnfinishedCall())
     return uni.showToast({ title: "请先完成当前通话", icon: "none" });
-  uni.reLaunch({ url: "/pages/customers/index" });
+  if (getCurrentPages().at(-1)?.route === "pages/customers/index") return;
+  uni.navigateTo({ url: "/pages/customers/index" });
 }
 function back() {
   if (hasUnfinishedCall()) {
     uni.showToast({ title: "请先完成当前通话并保存结果", icon: "none" });
     return;
   }
+  if (props.interceptBack) { emit('back'); return; }
   uni.navigateBack({
     fail: () => uni.reLaunch({ url: props.backFallback || "/pages/customers/index" }),
   });
@@ -77,6 +84,8 @@ function back() {
   background: #e8f0ff;
   border-radius: 12px;
 }
+.header-text-action { padding: 10px 0 10px 8px; font-size: 14px; font-weight: 500; color: #294fdb; flex-shrink: 0; }
+.header-text-action.disabled { opacity: .4; }
 .header-space {
   height: calc(
     52px + max(var(--status-bar-height, 0px), env(safe-area-inset-top, 0px))

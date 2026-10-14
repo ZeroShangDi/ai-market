@@ -3,9 +3,7 @@
     ><view class="wrap">
       <MobileHeader title="我的" /><PreviewBanner />
       <view class="license"
-        ><text class="edition">{{
-          bootstrap?.license?.edition || "Call Phone"
-        }}</text
+        ><text class="edition">统子哥</text
         ><text>{{ licenseText }}</text
         ><text>{{ pairedText }}</text
         ><image src="/static/figma/2-112-imgFrame.svg"

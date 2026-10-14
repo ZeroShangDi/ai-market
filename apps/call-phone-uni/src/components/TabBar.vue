@@ -6,13 +6,11 @@
         :key="tab.path"
         class="tab"
         :class="{ active: current === tab.key }"
+        role="button"
+        :aria-label="tab.label"
         @tap="go(tab.path)"
       >
-        <image
-          class="tab-icon"
-          :src="current === tab.key ? tab.activeIcon : tab.icon"
-          mode="aspectFit"
-        />
+        <AppIcon :name="current === tab.key ? tab.activeIcon : tab.icon" :size="20" :color="current === tab.key ? '#294fdb' : '#636e82'" />
         <text>{{ tab.label }}</text>
       </view>
     </view></view
@@ -20,31 +18,33 @@
 </template>
 <script setup lang="ts">
 import { hasUnfinishedCall } from "@/services/calls";
-defineProps<{ current: "workbench" | "customers" | "mine" }>();
+import AppIcon from "./AppIcon.vue";
+const props = defineProps<{ current: "workbench" | "apps" | "mine" }>();
 const tabs = [
   {
     key: "workbench",
     label: "工作台",
     path: "/pages/index/index",
-    icon: "/static/figma/2-20-imgFrame5.svg",
-    activeIcon: "/static/figma/2-2-imgFrame1.svg",
+    icon: "home",
+    activeIcon: "home-active",
   },
   {
-    key: "customers",
-    label: "客户",
-    path: "/pages/customers/index",
-    icon: "/static/figma/2-2-imgFrame2.svg",
-    activeIcon: "/static/figma/2-20-imgFrame6.svg",
+    key: "apps",
+    label: "应用",
+    path: "/pages/apps/index",
+    icon: "apps",
+    activeIcon: "apps-active",
   },
   {
     key: "mine",
     label: "我的",
     path: "/pages/mine/index",
-    icon: "/static/figma/2-2-imgFrame3.svg",
-    activeIcon: "/static/figma/2-112-imgFrame7.svg",
+    icon: "user",
+    activeIcon: "user-active",
   },
 ];
 function go(path: string) {
+  if (tabs.find(tab => tab.path === path)?.key === props.current) return;
   if (hasUnfinishedCall()) {
     uni.showToast({ title: "请先完成当前通话并保存结果", icon: "none" });
     return;

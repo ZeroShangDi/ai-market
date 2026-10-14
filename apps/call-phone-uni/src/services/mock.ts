@@ -18,7 +18,7 @@ const calls: CallRecord[] = [
 let pending = true
 const dispatch: Dispatch = { id: '801', customer_id: '101', customer_name: '张先生', phone_display: '138 **** 8000', requested_by: '电脑端', expires_at: iso(new Date(Date.now() + 3600000)), status: 'queued' }
 export const mock = {
-  bootstrap: async (): Promise<Bootstrap> => ({ user: { id: '1', name: '演示账户' }, workspace: { id: '1', name: '演示工作区' }, device: { id: '1', paired: true, paired_computer: '办公室电脑' }, license: { edition: 'Call Phone 个人版', status: 'active', expires_at: '2027-03-01T00:00:00.000Z' } }),
+  bootstrap: async (): Promise<Bootstrap> => ({ user: { id: '1', name: '演示账户' }, workspace: { id: '1', name: '演示工作区' }, device: { id: '1', paired: true, paired_computer: '办公室电脑' }, license: { edition: '统子哥 个人版', status: 'active', expires_at: '2027-03-01T00:00:00.000Z' } }),
   claimPairing: async (_pairingCode: string, displayName: string, _platform: 'android' | 'ios') => ({ device_id: '1', display_name: displayName }),
   customers: async (scope: Scope, page = 1): Promise<Page<Customer>> => { const list = scope === 'today' ? customers.slice(0, 4) : scope === 'recent' ? customers.slice(0, 5) : customers; return { items: page === 1 ? list : [], total: list.length } },
   customer: async (id: string): Promise<Customer> => { const item = customers.find(c => c.id === id); if (!item) throw new Error('客户不存在'); return { ...item, calls: id === '101' ? calls : [] } },

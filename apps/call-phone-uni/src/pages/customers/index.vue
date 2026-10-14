@@ -2,7 +2,9 @@
   <view class="page"
     ><view class="wrap">
       <MobileHeader
-        title="客户"
+        title="拨号"
+        back-icon-name="chevron-left"
+        back-fallback="/pages/apps/index"
         action-icon="/static/figma/2-20-imgFrame.svg"
         action-label="刷新客户"
         @action="load(true)"
@@ -100,7 +102,7 @@
         @tap="load(false)"
         >加载失败，点击重试</text
       > </view
-    ><TabBar current="customers" /><CallResultSheet
+    ><CallResultSheet
       :visible="!!activeCall && !launching"
       :call-id="activeCall?.callId || ''"
       :started-at="activeCall?.startedAt || ''"
@@ -123,7 +125,6 @@ import {
   onBackPress,
 } from "@dcloudio/uni-app";
 import MobileHeader from "@/components/MobileHeader.vue";
-import TabBar from "@/components/TabBar.vue";
 import PreviewBanner from "@/components/PreviewBanner.vue";
 import CallResultSheet from "@/components/CallResultSheet.vue";
 import { mobileService } from "@/services/mobile";

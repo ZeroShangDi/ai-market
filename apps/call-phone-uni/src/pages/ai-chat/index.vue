@@ -1,6 +1,6 @@
 <template>
   <view class="chat-page" :style="pageStyle">
-    <MobileHeader title="AI 助手" back-icon="/static/figma/2-71-imgFrame.svg" back-fallback="/pages/index/index"
+    <MobileHeader title="AI 对话" back-icon="/static/figma/2-71-imgFrame.svg" back-fallback="/pages/index/index"
       action-icon="/static/ai-chat/history.svg" action-label="会话历史" @action="openHistory" />
     <view class="chat-shell">
       <view class="conversation-bar">
@@ -14,9 +14,9 @@
         <view v-if="state.messageCursor && !state.generating && !state.recovering" class="latest-row"><view role="button" @tap="aiChat.loadOlderMessages()">查看更早消息</view></view>
         <view v-if="!active?.messages.length" class="welcome">
           <view class="welcome-mark">✦</view>
-          <text class="welcome-eyebrow">你的工作伙伴</text>
-          <view class="welcome-title"><text>每一次沟通，</text><text>都可以更有把握</text></view>
-          <view class="welcome-description"><text>从客户分析到跟进话术，</text><text>把问题交给我，一起找到下一步。</text></view>
+          <text class="welcome-eyebrow">你的私人助理</text>
+          <view class="welcome-title"><text>有问题，有想法，</text><text>一起找到下一步</text></view>
+          <view class="welcome-description"><text>写作、梳理、日常规划，</text><text>把事情理清，把工作推进。</text></view>
           <view class="suggestions">
             <view v-for="suggestion in suggestions" :key="suggestion.prompt" class="suggestion" role="button"
               :aria-label="suggestion.prompt" @tap="send(suggestion.prompt)">
@@ -27,10 +27,10 @@
           </view>
         </view>
         <view v-else class="messages">
-          <text class="conversation-note">{{ mockEnabled ? 'AI 助手 · 演示对话' : 'AI 助手' }}</text>
+          <text class="conversation-note">{{ mockEnabled ? '统子哥 · 演示对话' : '统子哥' }}</text>
           <view v-for="message in active.messages" :key="message.id" class="message-item">
             <TChatMessage :chat-id="message.id" :role="message.role" :placement="message.role === 'user' ? 'right' : 'left'"
-              :name="message.role === 'assistant' ? 'AI 助手' : undefined" :status="message.status" animation="dots" variant="base"
+              :name="message.role === 'assistant' ? '统子哥' : undefined" :status="message.status" animation="dots" variant="base"
               :content="message.role === 'user' ? [{ type: 'text', data: message.content }] : undefined">
               <template #content>
                 <text v-if="message.role === 'user'" class="user-message-text">{{ message.content }}</text>
@@ -57,7 +57,7 @@
           :render-presets="[{ name: 'send', type: 'icon' }]" :textarea-props="{ autosize: { minHeight: 48, maxHeight: 176 } }"
           :adjust-position="false" :auto-rise-with-keyboard="false" @update:value="updateDraft" @send="onSend"
           @stop="stop" @keyboardheightchange="keyboardChanged">
-          <template #footer-prefix><text class="composer-label">✦ AI 助手</text></template>
+          <template #footer-prefix><text class="composer-label">✦ 统子哥</text></template>
         </TChatSender>
         <text class="preview-note">{{ mockEnabled ? '演示模式 · 回复为模拟内容' : 'AI 回复仅供参考 · 不会自动读取客户资料' }}</text>
       </view>
@@ -85,7 +85,7 @@
 
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue';
-import { onBackPress, onHide, onShow, onUnload } from '@dcloudio/uni-app';
+import { onBackPress, onHide, onLoad, onShow, onUnload } from '@dcloudio/uni-app';
 import TChatMessage from '@tdesign/uniapp-chat/chat-message/chat-message.vue';
 import TChatMarkdown from '@tdesign/uniapp-chat/chat-markdown/chat-markdown.vue';
 import TChatSender from '@tdesign/uniapp-chat/chat-sender/chat-sender.vue';
@@ -101,6 +101,8 @@ import { hasUnfinishedCall } from '@/services/calls';
 import { toast, when } from '@/ui/format';
 
 const { state, active, stop } = aiChat;
+const requestedConversation = ref('');
+onLoad(query => { requestedConversation.value = String(query?.conversation || ''); });
 const historyVisible = ref(false), scrollTop = ref(0), followLatest = ref(true);
 const keyboardHeight = ref(0), webHeight = ref(0);
 const keyboardOpen = computed(() => keyboardHeight.value > 0);
@@ -117,9 +119,9 @@ const pageStyle = computed(() => {
 const lastMessageId = computed(() => active.value?.messages.at(-1)?.id);
 const history = computed(() => state.conversations.filter(item => !mockEnabled || item.messages.length).slice().sort((a, b) => b.updated_at.localeCompare(a.updated_at)));
 const suggestions = [
-  { title: '写一段跟进话术', description: '自然开场，让沟通更顺畅', prompt: '帮我写一段客户跟进话术', icon: 'chat', tone: 'blue' },
-  { title: '理清客户需求', description: '梳理现状，找到下一步', prompt: '如何分析客户的当前意向？', icon: 'user', tone: 'purple' },
-  { title: '安排今天的工作', description: '排好优先级，从容推进', prompt: '帮我安排今天的跟进工作', icon: 'calendar', tone: 'green' },
+  { title: '起草一封邮件', description: '说清目的，表达得体', prompt: '帮我起草一封工作邮件，先问我收件人和邮件目的', icon: 'chat', tone: 'blue' },
+  { title: '整理一段内容', description: '提炼重点，理清结构', prompt: '帮我整理一段内容，提炼重点，先让我提供原文', icon: 'user', tone: 'purple' },
+  { title: '安排今天的工作', description: '排好优先级，从容推进', prompt: '帮我安排今天的工作，先问我需要处理哪些事情', icon: 'calendar', tone: 'green' },
 ];
 
 
@@ -175,7 +177,19 @@ window.addEventListener('resize', resizeWebViewport);
 resizeWebViewport();
 // #endif
 watch(automaticCall, call => { if (call) { historyVisible.value = false; stop(); uni.hideKeyboard(); } });
-onShow(() => { if (!ensureSession()) return; void aiChat.resume().then(() => { if (active.value?.messages.length) void jumpToLatest(); }); });
+onShow(() => {
+  if (!ensureSession()) return;
+  void aiChat.resume().then(async () => {
+    if (!state.initialized || !state.visible) return;
+    if (requestedConversation.value) {
+      const id = requestedConversation.value;
+      requestedConversation.value = '';
+      if (state.conversations.some(item => item.id === id)) await aiChat.select(id);
+      else toast('这段对话已不可访问，请从会话历史选择');
+    }
+    if (active.value?.messages.length) void jumpToLatest();
+  });
+});
 onHide(() => { aiChat.suspend(); historyVisible.value = false; keyboardHeight.value = 0; clearTimeout(scrollTimer); });
 onBackPress(() => {
   if (hasUnfinishedCall()) { toast('请先完成当前通话并保存结果'); return true; }

@@ -7,6 +7,18 @@
       }
     },
     {
+      "path": "pages/apps/index",
+      "style": {
+        "navigationStyle": "custom"
+      }
+    },
+    {
+      "path": "pages/apps/manage",
+      "style": {
+        "navigationStyle": "custom"
+      }
+    },
+    {
       "path": "pages/ai-chat/index",
       "style": {
         "navigationStyle": "custom",
@@ -40,7 +52,7 @@
   ],
   "globalStyle": {
     "navigationBarTextStyle": "black",
-    "navigationBarTitleText": "Call Phone",
+    "navigationBarTitleText": "统子哥",
     "backgroundColor": "#f7f8fc",
     "navigationStyle": "custom",
     "app-plus": {
