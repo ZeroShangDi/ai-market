@@ -9,6 +9,7 @@
       </view>
       <scroll-view class="message-scroll" scroll-y :scroll-top="scrollTop" :scroll-with-animation="false"
         @scroll="onScroll" @touchmove="followLatest = false" @wheel="followLatest = false" @scrolltolower="followLatest = true">
+        <AgentTaskPanel :conversation-id="state.activeId" :visible="pageVisible" />
         <view v-if="state.error" class="error-note">{{ state.error }}<view role="button" @tap="aiChat.initialize()">刷新会话</view></view>
         <view v-if="state.loading" class="conversation-note">正在加载会话…</view>
         <view v-if="state.messageCursor && !state.generating && !state.recovering" class="latest-row"><view role="button" @tap="aiChat.loadOlderMessages()">查看更早消息</view></view>
@@ -93,6 +94,7 @@ import TIcon from '@tdesign/uniapp/icon/icon.vue';
 import TPopup from '@tdesign/uniapp/popup/popup.vue';
 import '@tdesign/uniapp/theme.css';
 import MobileHeader from '@/components/MobileHeader.vue';
+import AgentTaskPanel from '@/components/AgentTaskPanel.vue';
 import { aiChat } from '@/services/ai-chat';
 import { mockEnabled } from '@/config';
 import { ensureSession } from '@/services/session';
@@ -101,6 +103,7 @@ import { hasUnfinishedCall } from '@/services/calls';
 import { toast, when } from '@/ui/format';
 
 const { state, active, stop } = aiChat;
+const pageVisible = ref(false);
 const requestedConversation = ref('');
 onLoad(query => { requestedConversation.value = String(query?.conversation || ''); });
 const historyVisible = ref(false), scrollTop = ref(0), followLatest = ref(true);
@@ -156,7 +159,7 @@ async function retry(id: string) {
   if (await aiChat.retry(id)) { followLatest.value = true; void jumpToLatest(); }
 }
 function copy(content: string) { uni.setClipboardData({ data: content, fail: () => toast('复制失败，请重试') }); }
-async function newChat() { await aiChat.newConversation(); historyVisible.value = false; followLatest.value = true; scrollTop.value = 0; lastScrollTop = 0; uni.hideKeyboard(); }
+async function newChat() { await aiChat.newConversation(true); historyVisible.value = false; followLatest.value = true; scrollTop.value = 0; lastScrollTop = 0; uni.hideKeyboard(); }
 function openHistory() { uni.hideKeyboard(); historyVisible.value = true; }
 async function selectChat(id: string) { await aiChat.select(id); historyVisible.value = false; void jumpToLatest(); }
 function deleteChat(id: string) {
@@ -179,6 +182,7 @@ resizeWebViewport();
 watch(automaticCall, call => { if (call) { historyVisible.value = false; stop(); uni.hideKeyboard(); } });
 onShow(() => {
   if (!ensureSession()) return;
+  pageVisible.value = true;
   void aiChat.resume().then(async () => {
     if (!state.initialized || !state.visible) return;
     if (requestedConversation.value) {
@@ -190,13 +194,14 @@ onShow(() => {
     if (active.value?.messages.length) void jumpToLatest();
   });
 });
-onHide(() => { aiChat.suspend(); historyVisible.value = false; keyboardHeight.value = 0; clearTimeout(scrollTimer); });
+onHide(() => { pageVisible.value = false; aiChat.suspend(); historyVisible.value = false; keyboardHeight.value = 0; clearTimeout(scrollTimer); });
 onBackPress(() => {
   if (hasUnfinishedCall()) { toast('请先完成当前通话并保存结果'); return true; }
   if (historyVisible.value) { historyVisible.value = false; return true; }
   return false;
 });
 onUnload(() => {
+  pageVisible.value = false;
   aiChat.suspend(); clearTimeout(scrollTimer);
   // #ifdef H5
   window.visualViewport?.removeEventListener('resize', resizeWebViewport);

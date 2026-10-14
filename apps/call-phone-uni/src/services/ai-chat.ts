@@ -29,10 +29,10 @@ export function createChatController(transport: ChatTransport = previewChatTrans
     state.conversations = []; state.activeId = ''; state.loading = false; state.error = '';
     state.initialized = false; state.nextCursor = null; state.messageCursor = null;
   }
-  async function newConversation() {
+  async function newConversation(force = false) {
     if (state.loading) return false;
     stop(); state.error = '';
-    const empty = state.conversations.find(item => !item.messages.length && !item.draft);
+    const empty = !force && state.conversations.find(item => !item.messages.length && !item.draft);
     if (empty) { state.activeId = empty.id; state.messageCursor = null; return true; }
     const identity = epoch, operation = ++navigation;
     state.loading = true;

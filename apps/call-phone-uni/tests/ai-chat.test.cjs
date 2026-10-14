@@ -96,3 +96,9 @@ test('preview transport emits one terminal event and clears the timer on cancel'
   assert.equal(events.at(-1).finish_reason, 'cancelled');
   assert.equal(events.at(-1).content, events[1].delta);
 });
+test('explicit new conversation creates a fresh identity even when the previous conversation only contains server tasks', async () => {
+  const h = harness(); await h.newConversation(); const oldId = h.state.activeId;
+  assert.equal(h.active.value.messages.length, 0);
+  await h.newConversation(true);
+  assert.notEqual(h.state.activeId, oldId); assert.equal(h.state.conversations.length, 2);
+});
