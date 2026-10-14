@@ -11,7 +11,9 @@ public final class Protocol {
     public record Send(@NotBlank @Pattern(regexp="[a-fA-F0-9-]{36}") String request_id,
                        @NotBlank @Pattern(regexp="[0-9]{1,19}") String conversation_id,
                        @NotBlank @Size(max=4000) String content,
-                       @Pattern(regexp="[0-9]{1,19}") String retry_of) {}
+                       @Pattern(regexp="[0-9]{1,19}") String retry_of, Boolean web_search) {
+        public Send(String request_id,String conversation_id,String content,String retry_of) { this(request_id,conversation_id,content,retry_of,false); }
+    }
     public static final class Problem extends RuntimeException {
         public final String code;
         public final int status;

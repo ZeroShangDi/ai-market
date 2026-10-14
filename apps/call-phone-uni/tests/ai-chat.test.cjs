@@ -55,6 +55,13 @@ test('sequence deduplication, request isolation and final snapshot avoid duplica
   assert.equal(h.active.value.messages[1].content, '完整校准正文');
   assert.equal(h.active.value.messages[1].status, 'complete');
 });
+test('search progress follows the active request and clears on stop or completion',async()=>{
+ const h=harness();await h.send('联网查询');assert.equal(h.requests[0].request.web_search,true);
+ h.emit(0,{type:'activity',stage:'searching'});assert.match(h.state.activity,/联网搜索/);
+ h.stop();assert.equal(h.state.activity,'');h.emit(0,{type:'activity',stage:'searching'});assert.equal(h.state.activity,'');
+ h.state.webSearch=false;await h.send('普通问题');assert.equal(h.requests[1].request.web_search,false);
+ h.emit(1,{type:'activity',stage:'answering'});h.emit(1,{type:'completed',content:'答案',finish_reason:'stop'});assert.equal(h.state.activity,'');
+});
 test('regenerating the last answer replaces it without duplicating the user message', async () => {
   const h = harness(); await h.send('跟进话术');
   h.emit(0, { type: 'started', user_message_id: '100', assistant_message_id: '101' });

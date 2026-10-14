@@ -58,10 +58,20 @@ class AgentFollowUpServiceTest {
         FollowUpTaskDO row = captured.getValue(); assertEquals(id, row.getId()); assertEquals(7L, row.getOwnerUserId());
         assertEquals(1L, row.getTenantId()); assertEquals("pending", row.getStatus());
         assertEquals("encrypted:跟进方案", row.getTitleCiphertext()); assertEquals("encrypted:确认需求", row.getContentCiphertext());
-        assertEquals("2026-10-15T02:00", row.getDueAt().toString());
+        assertEquals(java.time.OffsetDateTime.parse("2026-10-15T10:00:00+08:00").toInstant(),
+                row.getDueAt().atZone(java.time.ZoneId.systemDefault()).toInstant());
         var receipt = ArgumentCaptor.forClass(AgentFollowUpReceiptDO.class); verify(receipts).insert(receipt.capture());
         assertEquals(id, receipt.getValue().getFollowUpTaskId()); assertEquals(taskId, receipt.getValue().getAgentTaskId());
         verify(transactions).execute(any());
+    }
+    @Test void proposalTimeMatchesBusinessApiTimestampInShanghaiTimezone() {
+        var previous=java.util.TimeZone.getDefault(); java.util.TimeZone.setDefault(java.util.TimeZone.getTimeZone("Asia/Shanghai"));
+        try {
+            service.confirm(taskId,task("awaiting_confirmation"),actor);
+            var captured=ArgumentCaptor.forClass(FollowUpTaskDO.class); verify(followUps).insert(captured.capture());
+            var expected=java.time.OffsetDateTime.parse("2026-10-15T10:00:00+08:00").toInstant().toEpochMilli();
+            assertEquals(expected,captured.getValue().getDueAt().atZone(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli());
+        } finally {java.util.TimeZone.setDefault(previous);}
     }
 
     @Test void committedReceiptReconcilesCancelledTaskWithoutRepeatingBusinessWrite() {

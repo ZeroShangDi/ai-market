@@ -20,7 +20,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
-import java.time.ZoneOffset;
+import java.time.ZoneId;
 
 /** The model proposes. An authenticated user and business transaction perform the write. */
 @Service
@@ -72,7 +72,7 @@ public class AgentFollowUpService {
         String content = text(proposal.path("content"), 2000, false);
         LocalDateTime dueAt;
         try { dueAt = OffsetDateTime.parse(text(proposal.path("due_at"), 64, true))
-                .withOffsetSameInstant(ZoneOffset.UTC).toLocalDateTime(); }
+                .atZoneSameInstant(ZoneId.systemDefault()).toLocalDateTime(); }
         catch (java.time.DateTimeException e) { throw invalidTask(); }
         String encryptedTitle = crypto.encrypt(title.trim());
         String encryptedContent = crypto.encrypt(content);

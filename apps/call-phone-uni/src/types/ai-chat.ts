@@ -24,6 +24,7 @@ export interface ChatStreamRequest {
   content: string;
   /** Regeneration replaces this assistant answer, without duplicating the user turn. */
   retry_of?: string;
+  web_search?: boolean;
 }
 interface EventBase {
   request_id: string;
@@ -33,6 +34,7 @@ interface EventBase {
 export type ChatStreamEvent = EventBase & (
   | { type: 'started'; user_message_id: string; assistant_message_id: string }
   | { type: 'delta'; assistant_message_id: string; delta: string }
+  | { type: 'activity'; assistant_message_id: string; stage: 'searching' | 'answering' }
   | { type: 'completed'; assistant_message_id: string; content: string; finish_reason: 'stop' | 'cancelled' }
   | { type: 'failed'; assistant_message_id: string; code: string; message: string }
 );

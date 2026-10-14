@@ -11,6 +11,13 @@ import tempfile
 import zipfile
 
 
+def distributable(relative):
+    """Native UTS source is compiled into the baseline, never a runtime web asset."""
+    return (relative.parts[0] != 'uni_modules'
+            and not any(part.startswith('.') for part in relative.parts)
+            and relative.suffix.lower() not in {'.kt', '.uts', '.swift', '.java', '.map', '.pem', '.p12', '.jks', '.keystore'})
+
+
 def run(*args):
     result = subprocess.run([str(arg) for arg in args], capture_output=True, text=True)
     if result.returncode:
@@ -27,6 +34,8 @@ def main():
     repo = Path(__file__).resolve().parent.parent
     project = repo / 'apps/call-phone-uni'
     baseline, assets, output = map(lambda value: Path(value).resolve(), [args.baseline, args.assets, args.output])
+    if output.exists():
+        raise RuntimeError('输出文件已存在，请使用新的路径，保留原包')
     hx = Path('/Applications/HBuilderX.app/Contents/HBuilderX/plugins')
     java, tools = hx / 'amazon-corretto/bin/java', hx / 'app-safe-pack'
     signer = tools / 'apksigner.jar'
@@ -42,9 +51,17 @@ def main():
         run(java, '-jar', tools / 'apktool.jar', 'd', '-s', '-f', '-o', decoded, baseline)
         www = decoded / 'assets/apps' / manifest['id'] / 'www'
         runtime = json.loads((www / 'manifest.json').read_text())
+        if runtime['id'] != manifest['id'] or int(runtime['version']['code']) > int(version['code']):
+            raise RuntimeError('基准 AppID 不同或目标版本低于基准包')
         runtime['version'] = version
         shutil.rmtree(www)
-        shutil.copytree(assets, www)
+        www.mkdir(parents=True)
+        for file in assets.rglob('*'):
+            relative = file.relative_to(assets)
+            if file.is_file() and distributable(relative):
+                dest = www / relative
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(file, dest)
         (www / 'manifest.json').write_text(json.dumps(runtime, ensure_ascii=False, separators=(',', ':')))
         config = decoded / 'apktool.yml'
         text = config.read_text()
@@ -74,8 +91,11 @@ def main():
             raise RuntimeError('APK ZIP 完整性检查失败')
         prefix = 'assets/apps/' + manifest['id'] + '/www/'
         for file in assets.rglob('*'):
-            if file.is_file() and file.name != 'manifest.json' and file.read_bytes() != new.read(prefix + file.relative_to(assets).as_posix()):
+            relative = file.relative_to(assets)
+            if file.is_file() and distributable(relative) and relative.as_posix() != 'manifest.json' and file.read_bytes() != new.read(prefix + relative.as_posix()):
                 raise RuntimeError('APK 中 App 资源与本次构建不一致')
+        if any(not distributable(Path(name.removeprefix(prefix))) for name in new.namelist() if name.startswith(prefix) and not name.endswith('/')):
+            raise RuntimeError('APK 中出现不应分发的原生源码或私有文件')
     run(tools / 'zipalign/zipalign', '-c', '-P', '16', '4', output)
     print(f'已生成 {output}\n版本 {version["name"]}（{version["code"]}），原生代码和证书与基准一致。')
     print('SHA256: ' + hashlib.sha256(output.read_bytes()).hexdigest())

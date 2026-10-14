@@ -24,6 +24,23 @@ public class MobileAiRelay {
     private final HttpClient client=HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(3)).followRedirects(HttpClient.Redirect.NEVER).build();
     private final Semaphore connections=new Semaphore(16);
     private final ObjectMapper json=new ObjectMapper();
+    public static final class ConversationFailure extends RuntimeException {
+        public final int status;
+        public ConversationFailure(int status) { super("Conversation access failed"); this.status=status; }
+    }
+    /** Task association must refer to a conversation owned by this authenticated employee. */
+    public void requireConversation(String conversation,String tenant,String user,String device) {
+        if(conversation==null || !conversation.matches("[1-9][0-9]{0,18}")) throw new ConversationFailure(403);
+        if(internalToken==null || internalToken.length()<32) throw new ConversationFailure(503);
+        try {
+            var request=HttpRequest.newBuilder(URI.create(serviceUrl.replaceAll("/+$","")+"/internal/v1/ai/conversations/"+conversation+"/messages?limit=1"))
+                .timeout(Duration.ofSeconds(10)).header("Authorization","Bearer "+internalToken)
+                .header("X-AI-Tenant",tenant).header("X-AI-User",user).header("X-AI-Device",device).GET().build();
+            int status=client.send(request,HttpResponse.BodyHandlers.discarding()).statusCode();
+            if(status!=200) throw new ConversationFailure(status==403 || status==404?403:503);
+        } catch(InterruptedException e) { Thread.currentThread().interrupt(); throw new ConversationFailure(503); }
+        catch(IOException | IllegalArgumentException e) { throw new ConversationFailure(503); }
+    }
     public void forward(String method,String path,String cursor,String limit,String body,String key,
                         String tenant,String user,String device,HttpServletResponse response) throws IOException {
         response.setHeader("Cache-Control","no-store");

@@ -4,6 +4,8 @@
 
 模型调用使用 Spring AI 1.1.8 的单个模型库，不启用 Yudao AI 模块，也不引入向量库、MCP、绘图和工作流。首版支持 Chat Completions 协议兼容服务；其他供应商协议以后通过 `ModelGateway` 扩展。
 
+手机发送 `web_search: true` 时，由内部桥接调用 Agent 服务的真实 WebSearch；未传或为 false 时保留原有普通对话。手机默认开启联网，问题无需实时资料时可直接回答。搜索中 / 正在回答通过 `activity` SSE 展示；实际搜索来源附在正文，随历史和幂等回放一起保存。联网失败明确报错，不自动退回普通回答。联网开关也参与请求幂等校验，不能用相同 UUID 更改模式。
+
 ## 本地配置
 
 在项目根目录执行：
@@ -43,6 +45,8 @@ python3 apps/ai-service/scripts/run-local.py
 需要 Java 21 和 Maven。本机服务默认只监听 `127.0.0.1:48081`。直接运行的客户后端设置 `AI_SERVICE_URL=http://127.0.0.1:48081`，并加载其 `.env.local`。如果后端在 Docker 中而 AI 服务在宿主机，请使用正确的容器到宿主机地址和受限网络入口。
 
 ## Compose 部署
+
+同时启用联网和资料任务：先运行 `python3 scripts/configure-agent-local.py --provider deepseek --require-model`，再使用 `apps/ruoyi-vue-pro/script/callphone-local-up.sh`。脚本配置三方一致的内部 token、启动 AI 和 Agent、执行 v59 待办回执迁移，并保留现有数据库。单独使用下面仅 AI 的部署命令不会启动联网服务；完整 Compose 需再合并 `compose.agent.yml` 并启用 `--profile agent`。
 
 在项目根目录执行：
 
@@ -86,3 +90,5 @@ npm --prefix apps/call-phone-uni run build:app
 ```
 
 服务测试使用本地模型替身和真实 HTTP SSE，不消耗供应商额度。实际 API key 和 Android 真机的增量输出、后台停止、网络切换仍需联调。
+
+完整本地联调：`python3 scripts/ai-feature-live-smoke.py --exercise`。使用真实模型、真实扫码会话、合成客户和本地业务数据库，检查联网来源、历史回放、任务报告、手动确认、唯一回执及 PC 待办时间；结束清理合成业务记录，保留审计。可用 `--chat-only` / `--task-only` 单独重验。此验收会产生模型费用，不能代替 Android 真机交互验收。

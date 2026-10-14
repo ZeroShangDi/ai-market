@@ -36,7 +36,7 @@
               <template #content>
                 <text v-if="message.role === 'user'" class="user-message-text">{{ message.content }}</text>
                 <TChatMarkdown v-else-if="message.content" :content="message.content"
-                  :streaming="{ hasNextChunk: message.status === 'streaming', tail: true }" />
+                  :streaming="{ hasNextChunk: message.status === 'streaming', tail: true }" @click="handleMarkdownClick" />
                 <text v-if="message.status === 'error'" class="error-note">{{ message.error_message }}</text>
                 <text v-if="message.status === 'stop' && !message.content" class="stopped-empty">已停止生成</text>
               </template>
@@ -52,13 +52,20 @@
           <view id="chat-bottom" class="chat-bottom" />
         </view>
       </scroll-view>
+      <text v-if="state.generating && state.activity" class="stream-activity">{{ state.activity }}</text>
       <view v-if="!followLatest && active?.messages.length" class="latest-row"><view role="button" @tap="jumpToLatest">↓ 回到最新消息</view></view>
       <view class="composer" :class="{ 'keyboard-open': keyboardOpen }">
         <TChatSender :value="active?.draft || ''" :loading="state.generating || state.recovering" placeholder="输入问题，聊聊你的想法…"
           :render-presets="[{ name: 'send', type: 'icon' }]" :textarea-props="{ autosize: { minHeight: 48, maxHeight: 176 } }"
           :adjust-position="false" :auto-rise-with-keyboard="false" @update:value="updateDraft" @send="onSend"
           @stop="stop" @keyboardheightchange="keyboardChanged">
-          <template #footer-prefix><text class="composer-label">✦ 统子哥</text></template>
+          <template #footer-prefix>
+            <view class="composer-tools"><text class="composer-label">✦ 统子哥</text>
+              <view v-if="!mockEnabled" class="web-toggle" :class="{ active: state.webSearch }" role="button"
+                :aria-label="state.webSearch ? '关闭联网搜索' : '开启联网搜索'" :aria-pressed="state.webSearch"
+                @tap="!state.generating && !state.recovering && (state.webSearch = !state.webSearch)">联网{{ state.webSearch ? ' · 已开启' : '' }}</view>
+            </view>
+          </template>
         </TChatSender>
         <text class="preview-note">{{ mockEnabled ? '演示模式 · 回复为模拟内容' : 'AI 回复仅供参考 · 不会自动读取客户资料' }}</text>
       </view>
@@ -101,6 +108,7 @@ import { ensureSession } from '@/services/session';
 import { automaticCall } from '@/services/automatic-call';
 import { hasUnfinishedCall } from '@/services/calls';
 import { toast, when } from '@/ui/format';
+import { handleMarkdownClick } from '@/ui/chat-markdown';
 
 const { state, active, stop } = aiChat;
 const pageVisible = ref(false);
@@ -251,6 +259,10 @@ onUnload(() => {
 .composer { flex-shrink: 0; padding: 8px 16px calc(10px + env(safe-area-inset-bottom)); background: #f7f8fc; }
 .composer.keyboard-open { padding-bottom: 8px; }
 .composer-label { font-size: 11px; color: #8290b2; }
+.composer-tools { display: flex; align-items: center; gap: 10px; }
+.web-toggle { padding: 5px 9px; border: 1px solid #e0e6f2; border-radius: 12px; color: #8290b2; font-size: 11px; }
+.web-toggle.active { color: #365ccc; background: #edf2ff; border-color: #cbd8fc; }
+.stream-activity { padding: 0 20px 4px; color: #7181a6; font-size: 11px; }
 .preview-note { display: block; font-size: 10px; text-align: center; color: #9aa3b5; margin-top: 10px; }
 :deep(.t-chat-sender) { margin: 0; border: 1px solid #e0e6f2; border-radius: 20px; box-shadow: 0 4px 16px rgba(31,52,99,.035); padding: 14px 0 10px; }
 :deep(.t-chat-message) { margin-bottom: 0; }

@@ -12,9 +12,10 @@ export function createSseParser(onEvent: (event: ChatStreamEvent) => void) {
           || typeof event.assistant_message_id !== 'string') throw new Error('AI 服务返回的事件格式不正确');
         if (event.type === 'started' && typeof event.user_message_id !== 'string'
           || event.type === 'delta' && typeof event.delta !== 'string'
+          || event.type === 'activity' && !['searching', 'answering'].includes(event.stage)
           || event.type === 'completed' && (typeof event.content !== 'string' || !['stop', 'cancelled'].includes(event.finish_reason))
           || event.type === 'failed' && (typeof event.code !== 'string' || typeof event.message !== 'string')
-          || !['started', 'delta', 'completed', 'failed'].includes(event.type)) throw new Error('AI 服务返回的事件内容不正确');
+          || !['started', 'delta', 'activity', 'completed', 'failed'].includes(event.type)) throw new Error('AI 服务返回的事件内容不正确');
         onEvent(event);
       }
       eventName = ''; eventId = ''; data = [];

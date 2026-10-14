@@ -53,7 +53,7 @@
             <button v-if="taskIsActive(task) && !taskNeedsReceipt(task)" size="mini" :disabled="taskState.busyIds.includes(task.id)" @tap="cancel(task.id)">取消任务</button>
           </view>
           <view v-if="artifactTaskId === task.id && artifact" class="artifact-result">
-            <text class="artifact-copy">{{ artifact.content }}</text>
+            <TChatMarkdown :content="artifact.content" @click="handleMarkdownClick" />
             <view class="agent-links"><button size="mini" @tap="saveArtifact">保存文件</button><button size="mini" @tap="copyArtifact">复制内容</button></view>
           </view>
         </view>
@@ -64,6 +64,8 @@
 
 <script setup lang="ts">
 import { computed, onUnmounted, ref, watch } from 'vue';
+import TChatMarkdown from '@tdesign/uniapp-chat/chat-markdown/chat-markdown.vue';
+import { handleMarkdownClick } from '@/ui/chat-markdown';
 import { mobileApi } from '@/api/mobile';
 import { onSessionChange, onDeviceChange } from '@/api/http';
 import { aiTasks, taskIsActive, taskNeedsReceipt, utf8Size, validateTaskAttachment } from '@/services/ai-task';

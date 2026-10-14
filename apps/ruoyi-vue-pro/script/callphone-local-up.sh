@@ -24,12 +24,28 @@ esac
 ROOT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 cd "$ROOT_DIR"
 
+if [ ! -f ../ai-service/.env.local ]; then
+  echo 'Configure apps/ai-service/.env.local and its model API key before starting AI features.' >&2
+  exit 1
+fi
+compose() {
+  set -- -f ../ai-service/compose.ai.yml -f ../ai-service/compose.agent.yml "$@"
+  if [ -f compose.app-update.yml ]; then
+    set -- -f compose.app-update.yml "$@"
+  fi
+  if [ -n "${CALLPHONE_TAILSCALE_IP:-}" ]; then
+    set -- -f compose.tailscale.yml "$@"
+  fi
+  docker compose -f compose.local.yml --profile ai --profile agent "$@"
+}
+
 if [ ! -f .env.local ]; then
   umask 077
   printf 'CALLPHONE_PII_ENCRYPTION_KEY=%s\nCALLPHONE_RECORDING_STORAGE_PATH=/yudao-server/data/callphone/recordings\nCALLPHONE_CORE_ALLOWED_HOSTS=\n' "$(openssl rand -base64 32)" > .env.local
   chmod 600 .env.local
   echo 'Created a local-only encryption key in .env.local. Back it up securely; losing it makes encrypted customer fields and recordings unreadable.'
 fi
+python3 ../../scripts/configure-agent-local.py --require-model
 
 docker_ready() {
   docker info >/dev/null 2>&1 &
@@ -62,9 +78,9 @@ if ! docker_ready; then
 fi
 
 echo 'Starting MySQL and Redis; waiting for their health checks...'
-docker compose -f compose.local.yml up -d --wait --wait-timeout 240 mysql redis
+compose up -d --wait --wait-timeout 240 mysql redis
 
-echo 'Applying idempotent Call Phone v44 through v58 migrations...'
+echo 'Applying idempotent Call Phone v44 through v59 migrations...'
 for migration in "$ROOT_DIR"/yudao-module-callphone/src/main/resources/sql/mysql/callphone-v44-*.sql \
                  "$ROOT_DIR"/yudao-module-callphone/src/main/resources/sql/mysql/callphone-v45-*.sql \
                  "$ROOT_DIR"/yudao-module-callphone/src/main/resources/sql/mysql/callphone-v46-*.sql \
@@ -79,15 +95,16 @@ for migration in "$ROOT_DIR"/yudao-module-callphone/src/main/resources/sql/mysql
                  "$ROOT_DIR"/yudao-module-callphone/src/main/resources/sql/mysql/callphone-v55-*.sql \
                  "$ROOT_DIR"/yudao-module-callphone/src/main/resources/sql/mysql/callphone-v56-*.sql \
                  "$ROOT_DIR"/yudao-module-callphone/src/main/resources/sql/mysql/callphone-v57-*.sql \
-                 "$ROOT_DIR"/yudao-module-callphone/src/main/resources/sql/mysql/callphone-v58-*.sql; do
+                 "$ROOT_DIR"/yudao-module-callphone/src/main/resources/sql/mysql/callphone-v58-*.sql \
+                 "$ROOT_DIR"/yudao-module-callphone/src/main/resources/sql/mysql/callphone-v59-*.sql; do
   [ -f "$migration" ] || continue
-  docker compose -f compose.local.yml exec -T mysql sh -c \
+  compose exec -T mysql sh -c \
     'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysql --protocol=socket --default-character-set=utf8mb4 -uroot "$MYSQL_DATABASE"' \
     < "$migration"
 done
 
 echo 'Building and starting the Yudao API; waiting for MySQL and Redis health checks...'
-docker compose -f compose.local.yml up -d --build --wait --wait-timeout 240
+compose up -d --build --wait --wait-timeout 240
 
 echo 'MySQL and Redis are healthy. Waiting for the Yudao API...'
 attempt=0
@@ -96,7 +113,7 @@ until curl --fail --silent --connect-timeout 1 --max-time 2 http://127.0.0.1:480
   attempt=$((attempt + 1))
   if [ "$attempt" -ge 60 ]; then
     echo 'The database and cache are healthy, but the API did not become healthy within 120 seconds.' >&2
-    docker compose -f compose.local.yml ps
+    compose ps
     echo 'Inspect startup logs with: docker compose -f compose.local.yml logs --tail=100 server' >&2
     exit 1
   fi
@@ -105,6 +122,7 @@ done
 
 echo 'Local services are ready:'
 echo '  API:   http://127.0.0.1:48080'
+echo '  AI chat and Agent task services: running on the private Compose network'
 echo '  MySQL: 127.0.0.1:13306'
 echo '  Redis: 127.0.0.1:16379'
 

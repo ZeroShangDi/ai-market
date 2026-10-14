@@ -6,7 +6,12 @@ import java.util.List;
 /** Provider protocol stays outside conversation and request state management. */
 public interface ModelGateway {
     record Turn(String role, String content) {}
-    record Chunk(String text, int inputTokens, int outputTokens) {}
+    record Chunk(String text, int inputTokens, int outputTokens, String activity) {
+        public Chunk(String text, int inputTokens, int outputTokens) { this(text,inputTokens,outputTokens,null); }
+    }
     void checkAvailable();
     Flux<Chunk> stream(List<Turn> turns);
+    default Flux<Chunk> stream(List<Turn> turns, boolean webSearch, Protocol.Actor actor) {
+        return webSearch?Flux.error(new Protocol.Problem("WEB_CHAT_UNAVAILABLE","联网服务尚未配置",503)):stream(turns);
+    }
 }

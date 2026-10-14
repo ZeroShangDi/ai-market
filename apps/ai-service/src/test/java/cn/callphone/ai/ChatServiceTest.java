@@ -21,6 +21,7 @@ class ChatServiceTest {
     Flux<ModelGateway.Chunk> output;
     boolean available=true;
     List<ModelGateway.Turn> turns;
+    boolean webRequested;
     @BeforeEach void setup() {
         var ds=new DriverManagerDataSource("jdbc:h2:mem:"+UUID.randomUUID()+";DB_CLOSE_DELAY=-1","sa","");
         Flyway.configure().dataSource(ds).load().migrate(); db=new JdbcTemplate(ds);
@@ -30,6 +31,7 @@ class ChatServiceTest {
         var model=new ModelGateway() {
             public void checkAvailable() {if(!available) throw new Problem("AI_UNAVAILABLE","未配置",503);}
             public Flux<Chunk> stream(List<Turn> history) {calls.incrementAndGet();turns=history;return output;}
+            public Flux<Chunk> stream(List<Turn> history,boolean web,Actor identity) { assertEquals(actor,identity); webRequested=web; return stream(history); }
         };
         service=new ChatService(db,new TransactionTemplate(new DataSourceTransactionManager(ds)),cipher,model,settings); service.recover();
     }
@@ -37,6 +39,14 @@ class ChatServiceTest {
     String conversation() {return (String)service.create(actor,UUID.randomUUID().toString()).get("id");}
     Send input(String conv,String content) {return new Send(UUID.randomUUID().toString(),conv,content,null);}
     List<Map<String,Object>> finish(Send input) {return service.send(actor,input,input.request_id()).map(e->e.data()).filter(Objects::nonNull).collectList().block(Duration.ofSeconds(5));}
+    @Test void webModeIsIdempotentAndSearchProgressNeverPollutesPersistedAnswer() {
+        output=Flux.just(new ModelGateway.Chunk("",0,0,"searching"),new ModelGateway.Chunk("联网回答及来源",2,3));
+        var input=new Send(UUID.randomUUID().toString(),conversation(),"联网查询",null,true);
+        var events=finish(input); assertTrue(webRequested);
+        assertEquals(List.of("started","activity","delta","completed"),events.stream().map(e->e.get("type")).toList());
+        assertEquals("联网回答及来源",events.getLast().get("content")); finish(input); assertEquals(1,calls.get());
+        assertThrows(Problem.class,()->finish(new Send(input.request_id(),input.conversation_id(),input.content(),null,false)));
+    }
     @Test void duplicateGenerationUsesOneProviderCallAndConflictsAreRejected() {
         var input=input(conversation(),"问题"); var events=finish(input);
         assertEquals(List.of("started","delta","completed"),events.stream().map(e->e.get("type")).toList());

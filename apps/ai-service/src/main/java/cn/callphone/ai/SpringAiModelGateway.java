@@ -1,6 +1,7 @@
 package cn.callphone.ai;
 
 import org.springframework.stereotype.Component;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.ai.openai.OpenAiChatModel;
 import org.springframework.ai.openai.OpenAiChatOptions;
 import org.springframework.ai.openai.api.OpenAiApi;
@@ -16,7 +17,14 @@ import static cn.callphone.ai.Protocol.*;
 public final class SpringAiModelGateway implements ModelGateway {
     private final AiSettings settings;
     private volatile OpenAiChatModel client;
-    public SpringAiModelGateway(AiSettings settings) { this.settings=settings; }
+    private final WebChatGateway web;
+    public SpringAiModelGateway(AiSettings settings) { this(settings,null); }
+    @Autowired public SpringAiModelGateway(AiSettings settings,WebChatGateway web) { this.settings=settings; this.web=web; }
+    @Override public Flux<Chunk> stream(List<Turn> turns, boolean webSearch, Protocol.Actor actor) {
+        if(!webSearch) return stream(turns);
+        if(web==null) return Flux.error(new Protocol.Problem("WEB_CHAT_UNAVAILABLE","联网服务尚未配置",503));
+        return web.stream(turns,actor);
+    }
     @Override public void checkAvailable() {
         if (settings.apiKey()==null || settings.apiKey().isBlank() || settings.model()==null || settings.model().isBlank())
             throw new Problem("AI_UNAVAILABLE", "AI 服务尚未配置，请联系管理员",503);

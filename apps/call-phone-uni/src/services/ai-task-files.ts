@@ -1,5 +1,6 @@
 import type { AgentArtifact, AgentAttachment } from '@/types/ai-task';
 import { validateTaskAttachment } from './ai-task';
+import { chooseAndroidTaskAttachment } from './ai-task-android-file';
 
 export async function chooseTaskAttachment(): Promise<AgentAttachment | undefined> {
   // #ifdef H5
@@ -24,6 +25,7 @@ export async function chooseTaskAttachment(): Promise<AgentAttachment | undefine
   });
   // #endif
   // #ifdef APP-PLUS
+  if (typeof plus !== 'undefined' && plus.os.name === 'Android') return chooseAndroidTaskAttachment();
   if (typeof plus !== 'undefined' && typeof uni.chooseFile === 'function') return new Promise((resolve, reject) => {
     uni.chooseFile({ count: 1, type: 'all', extension: ['txt', 'md'], success: result => {
       const file = (Array.isArray(result.tempFiles) ? result.tempFiles[0] : result.tempFiles) as { path?: string; name?: string; size: number } | undefined;

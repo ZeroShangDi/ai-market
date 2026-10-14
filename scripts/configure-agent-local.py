@@ -37,21 +37,25 @@ def update_env(path, additions):
 def configure(root, provider=None):
     agent_path = root / 'apps/agent-service/.env.local'
     backend_path = root / 'apps/ruoyi-vue-pro/.env.local'
+    ai_path = root / 'apps/ai-service/.env.local'
     agent, backend = read_env(agent_path), read_env(backend_path)
-    provider = provider or agent.get('AGENT_PROVIDER', 'anthropic')
+    ai = read_env(ai_path)
+    default_provider = 'deepseek' if ai.get('AI_MODEL_BASE_URL', '').rstrip('/') == 'https://api.deepseek.com' else 'anthropic'
+    provider = provider or agent.get('AGENT_PROVIDER', default_provider)
     if provider not in ('anthropic', 'deepseek'):
         raise ValueError('AGENT_PROVIDER must be anthropic or deepseek.')
-    left, right = agent.get('AGENT_INTERNAL_TOKEN'), backend.get('AGENT_INTERNAL_TOKEN')
-    if left and right and left != right:
+    existing = {values.get('AGENT_INTERNAL_TOKEN') for values in (agent, backend, ai) if values.get('AGENT_INTERNAL_TOKEN')}
+    if len(existing) > 1:
         raise ValueError('AGENT_INTERNAL_TOKEN differs; align existing configuration before retrying.')
-    token = left or right or secrets.token_urlsafe(32)
+    token = next(iter(existing), None) or secrets.token_urlsafe(32)
     if len(token) < 32:
         raise ValueError('AGENT_INTERNAL_TOKEN must contain at least 32 characters.')
     update_env(agent_path, {
         'AGENT_INTERNAL_TOKEN': token,
         'AGENT_PROVIDER': provider,
         'ANTHROPIC_API_KEY': agent.get('ANTHROPIC_API_KEY', ''),
-        'DEEPSEEK_API_KEY': agent.get('DEEPSEEK_API_KEY', ''),
+        'DEEPSEEK_API_KEY': agent.get('DEEPSEEK_API_KEY') or (ai.get('AI_MODEL_API_KEY', '')
+                             if provider == 'deepseek' and ai.get('AI_MODEL_BASE_URL', '').rstrip('/') == 'https://api.deepseek.com' else ''),
         'AGENT_BIND_HOST': agent.get('AGENT_BIND_HOST', '127.0.0.1'),
         'AGENT_PORT': agent.get('AGENT_PORT', '48082'),
         'AGENT_DATA_DIR': agent.get('AGENT_DATA_DIR', '.data'),
@@ -60,14 +64,23 @@ def configure(root, provider=None):
         'AGENT_INTERNAL_TOKEN': token,
         'AGENT_SERVICE_URL': backend.get('AGENT_SERVICE_URL', 'http://127.0.0.1:48082'),
     })
+    if ai_path.exists():
+        update_env(ai_path, {'AGENT_INTERNAL_TOKEN': token,
+                            'AGENT_SERVICE_URL': ai.get('AGENT_SERVICE_URL', 'http://127.0.0.1:48082')})
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--provider', choices=['anthropic', 'deepseek'])
+    parser.add_argument('--require-model', action='store_true')
     args = parser.parse_args()
     try:
-        configure(Path(__file__).resolve().parents[1], args.provider)
+        root = Path(__file__).resolve().parents[1]
+        configure(root, args.provider)
+        values = read_env(root / 'apps/agent-service/.env.local')
+        field = 'DEEPSEEK_API_KEY' if values.get('AGENT_PROVIDER') == 'deepseek' else 'ANTHROPIC_API_KEY'
+        if args.require_model and not values.get(field):
+            raise ValueError(f'Set {field} in apps/agent-service/.env.local before starting Agent features.')
     except ValueError as reason:
         raise SystemExit(str(reason))
-    print('Prepared ignored Agent/backend configuration. Set the selected provider API key in apps/agent-service/.env.local to enable live execution.')
+    print('Prepared matching ignored Agent/backend/AI configuration; an existing official DeepSeek key is reused when available.')

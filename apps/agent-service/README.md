@@ -1,6 +1,6 @@
 # Agent 执行原型
 
-独立 Node.js 服务，接入官方 Claude Agent SDK。现有 Java 业务服务验证租户、员工、配对设备和客户权限后，传入可信客户快照。手机不能直连此内部接口。会话 ID 用作当前执行身份内的任务关联，首版尚未另行核验聊天服务中的会话记录归属。
+独立 Node.js 服务，接入官方 Claude Agent SDK。现有 Java 业务服务验证租户、员工、配对设备、聊天会话归属和客户权限后，传入可信客户快照。手机不能直连此内部接口。
 
 首条任务：读取 `.txt` / `.md` 资料，查询绑定客户快照，生成可下载的 Markdown 跟进建议，提出可选待办。SDK 仅能调用三个内置进程 MCP 工具：`read_attachment`、`query_customer`、`submit_report`；业务待办由 Java 在用户确认后创建，再回传持久化回执。
 
@@ -28,6 +28,10 @@ npm start
 默认只监听 `127.0.0.1:48082`。可配置 `AGENT_BIND_HOST`、`AGENT_PORT` 和 `AGENT_DATA_DIR`。Docker 镜像只在受限内部网络使用，数据挂载 `/data`；容器以非 root 用户执行。不返回 CORS。
 
 ## 内部契约
+
+联网对话使用 POST `/internal/v1/agent/chat/stream`，同样要求内部凭据和可信身份。输入 `{turns:[{role,content}]}`，返回 SSE `activity(searching|answering)`、`chunk(text)`、`usage(input_tokens,output_tokens)`、`done` 或 `error`。只允许内置 `WebSearch`，不允许读取文件、Shell、客户查询或业务写入；每次运行隔离 HOME/配置并在结束后删除。最多 6 轮、2048 输出 tokens、170 秒、两条并行请求；15 秒心跳，断开即取消上游。真实搜索结果中提取的 HTTP(S) 来源附在 Markdown 正文并由 AI 服务保存。搜索无可核对来源或未正常结束时明确失败，不切换为无来源回答。
+
+DeepSeek 的原生 WebSearch 通过官方 Anthropic 兼容层及 Agent SDK 执行，会产生额外模型请求；普通离线对话仍走 AI 服务原有接口。依据：[DeepSeek Claude Code / Agent SDK 接入](https://api-docs.deepseek.com/quick_start/agent_integrations/claude_code/)。
 
 前缀 `/internal/v1/agent/tasks`。每次请求必须包含 `Authorization: Bearer <AGENT_INTERNAL_TOKEN>` 和可信的数字 `X-AI-Tenant`、`X-AI-User`、`X-AI-Device`。租户允许 `0`（与现有服务一致），用户、设备、会话、客户及待办 ID 必须为正数。所有业务 ID 在 JSON 中返回十进制字符串，任务 ID 是 UUID。
 
@@ -63,7 +67,7 @@ npm run check
 npm test
 ```
 
-23 个离线测试使用显式注入 `engine=test` 的执行器，覆盖认证和身份隔离、幂等冲突与快照刷新、校验、缺失备注与明确空值区分、任务生命周期、报告、确认回执、取消释放执行槽及排队容量、防止迟到产物、超时、关闭等待写入结束、重启状态与未提交目录、真实磁盘写失败后的确认重试、真实执行器缺少密钥或依赖、提供方配置与凭据隔离、SDK 调用参数隔离、第二专家扩展和实际 SDK MCP 工具发现。测试不会请求付费模型 API。
+29 个离线测试使用显式注入 `engine=test` 的执行器，覆盖认证和身份隔离、幂等冲突与快照刷新、校验、缺失备注与明确空值区分、任务生命周期、报告、确认回执、取消释放执行槽及排队容量、防止迟到产物、超时、关闭等待写入结束、重启状态与未提交目录、真实磁盘写失败后的确认重试、真实执行器缺少密钥或依赖、提供方配置与凭据隔离、SDK 调用参数隔离、第二专家扩展和实际 SDK MCP 工具发现。测试不会请求付费模型 API。
 
 提交前审查修复：初次保存中断遗留的空目录或仅临时文件目录不阻断重启，已提交的损坏 JSON 仍明确报错；取消排队任务立即释放队列容量；确认回执先保存新副本再更新内存，相同回执重试也重新持久化，磁盘失败不会被误报为已保存成功。
 
@@ -72,3 +76,5 @@ npm test
 2026-10-14 另行完成真实 DeepSeek API 的虚构资料联调，实际读取工具、报告提交、持久化待确认状态和产物读取均成功；未连接真实业务数据库。联调发现并修复可选备注被补成空字符串的问题。[验证记录与样例](../../docs/reviews/2026-10-14-agent-deepseek-validation.md)。需重复真实模型测试时，从仓库根目录显式运行 `node --env-file=apps/agent-service/.env.local scripts/agent-model-smoke.mjs`，会产生模型费用，不属于 npm test。
 
 依据官方文档：[自定义 MCP 工具](https://code.claude.com/docs/en/agent-sdk/custom-tools)、[SDK TypeScript](https://code.claude.com/docs/en/agent-sdk/typescript)。固定依赖版本见锁文件。
+
+2026-10-15 完成真实手机范围 API → 联网回答/来源保存 → 资料任务 → 手动确认 → MySQL/PC 待办连续验收。修复任务控制连接过期后的提交失败与业务时间转换；[完整验收及展示类型](../../docs/reviews/2026-10-15-ai-online-validation.md)。

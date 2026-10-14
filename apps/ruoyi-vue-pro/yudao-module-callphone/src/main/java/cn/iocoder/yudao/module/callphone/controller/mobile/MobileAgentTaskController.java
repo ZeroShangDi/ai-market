@@ -8,10 +8,12 @@ import cn.iocoder.yudao.module.callphone.controller.app.outbound.CallPhoneMobile
 import cn.iocoder.yudao.module.callphone.service.agent.AgentActor;
 import cn.iocoder.yudao.module.callphone.service.agent.AgentFollowUpService;
 import cn.iocoder.yudao.module.callphone.service.agent.AgentTaskRelay;
+import cn.iocoder.yudao.module.callphone.service.ai.MobileAiRelay;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import jakarta.annotation.Resource;
+import lombok.extern.slf4j.Slf4j;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -28,12 +30,14 @@ import static cn.iocoder.yudao.framework.common.exception.util.ServiceExceptionU
 
 /** Authenticated mobile adapter. Tasks are owned by the independent execution service. */
 @RestController
+@Slf4j
 @RequestMapping("/api/v1/mobile/ai/tasks")
 @PreAuthorize("@ss.hasPermission('callphone:ai:chat')")
 public class MobileAgentTaskController {
     @Resource private CallPhoneMobileController devices;
     @Resource private AgentTaskRelay relay;
     @Resource private AgentFollowUpService followUps;
+    @Resource private MobileAiRelay chat;
     private final ObjectMapper json = new ObjectMapper();
 
     @PostMapping
@@ -41,6 +45,7 @@ public class MobileAgentTaskController {
     public ResponseEntity<JsonNode> create(HttpServletRequest request, @RequestBody JsonNode input) {
         AgentActor actor = actor(request);
         ObjectNode body = validateCreate(input);
+        chat.requireConversation(body.path("conversation_id").asText(),actor.tenantId().toString(),actor.userId().toString(),actor.deviceId());
         Long customerId = AgentFollowUpService.numericId(body.path("customer_id"));
         body.set("customer_snapshot", followUps.customerSnapshot(customerId, actor));
         return ok(relay.request("POST", "", body, body.path("request_id").asText(), actor));
@@ -51,6 +56,7 @@ public class MobileAgentTaskController {
     public ResponseEntity<JsonNode> list(HttpServletRequest request, @RequestParam("conversation_id") String conversationId) {
         AgentActor actor = actor(request);
         AgentFollowUpService.numericId(json.getNodeFactory().textNode(conversationId));
+        chat.requireConversation(conversationId,actor.tenantId().toString(),actor.userId().toString(),actor.deviceId());
         JsonNode result = relay.request("GET", "?conversation_id=" + conversationId, null, null, actor);
         JsonNode items = result.path("data").path("items");
         if (items.isArray()) {
@@ -180,9 +186,20 @@ public class MobileAgentTaskController {
     @ExceptionHandler(Exception.class)
     @ApiAccessLog(requestEnable = false, responseEnable = false)
     public ResponseEntity<?> failure(Exception reason) {
+        if (!(reason instanceof AgentTaskRelay.Failure) && !(reason instanceof MobileAiRelay.ConversationFailure)
+                && !(reason instanceof cn.iocoder.yudao.framework.common.exception.ServiceException)
+                && !(reason instanceof org.springframework.security.access.AccessDeniedException)) {
+            StackTraceElement origin = reason.getStackTrace().length == 0 ? null : reason.getStackTrace()[0];
+            // Never log exception messages: database/validation errors can contain private input.
+            log.warn("AI task failure type={} origin={}", reason.getClass().getSimpleName(),
+                    origin == null ? "unknown" : origin.getClassName() + "." + origin.getMethodName());
+        }
         int status = 503; String code = "AGENT_UNAVAILABLE", message = "任务服务暂时不可用";
         if (reason instanceof AgentTaskRelay.Failure relayFailure) {
             status = relayFailure.status; code = relayFailure.code; message = relayFailure.getMessage();
+        } else if (reason instanceof MobileAiRelay.ConversationFailure unavailable) {
+            status = unavailable.status; code = status == 403 ? "FORBIDDEN" : "AI_UNAVAILABLE";
+            message = status == 403 ? "当前会话不可用，请重新打开会话" : "会话服务暂时不可用，请稍后重试";
         } else if (reason instanceof cn.iocoder.yudao.framework.common.exception.ServiceException service) {
             status = 403; code = "FORBIDDEN"; message = "当前账号无权使用 AI 任务";
             if (service.getCode().equals(cn.iocoder.yudao.module.callphone.enums.ErrorCodeConstants.DEVICE_NOT_ONLINE.getCode())) {

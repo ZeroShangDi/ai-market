@@ -38,6 +38,7 @@ async function waitFor(request, id, statuses = ['awaiting_confirmation', 'failed
 test('HTTP lifecycle stores independent task/report and confirms durable receipt idempotently', async t => {
   const { request, dataDir } = await fixture(t); const taskInput = input();
   const created = await request('', 'POST', taskInput); assert.equal(created.status, 200); assert.equal(created.data.engine, 'test');
+  assert.equal(created.headers.get('connection'), 'close');
   const task = await waitFor(request, taskInput.request_id); assert.equal(task.status, 'awaiting_confirmation');
   assert.equal(task.customer_id, '40'); assert.equal(task.summary, '资料已整理'); assert.equal(task.proposal.title, '沟通报价');
   assert.equal('attachment' in task, false); assert.equal('customer_snapshot' in task, false);

@@ -1,0 +1,76 @@
+import type { AgentAttachment } from '@/types/ai-task';
+import { validateTaskAttachment, utf8Size } from './ai-task';
+
+let choosing = false;
+interface AndroidFileBridge {
+  runtimeMainActivity(): any;
+  importClass(value: unknown): any;
+  invoke(receiver: unknown, method: string, ...args: unknown[]): any;
+  newObject(className: string, ...args: unknown[]): any;
+}
+/** Android Storage Access Framework needs no broad storage permission. */
+export function chooseAndroidTaskAttachment(): Promise<AgentAttachment | undefined> {
+  if (choosing) return Promise.reject(new Error('文件选择器已打开，请先完成选择'));
+  if (typeof plus === 'undefined' || !plus.android) return Promise.reject(new Error('系统文件选择器不可用，请使用粘贴资料'));
+  choosing = true;
+  return new Promise((resolve, reject) => {
+    const android = plus.android as unknown as AndroidFileBridge;
+    let activity: any;
+    try { activity = android.runtimeMainActivity(); if (!activity) throw new Error('Activity unavailable'); android.importClass(activity); }
+    catch { choosing = false; reject(new Error('系统文件选择器不可用，请使用粘贴资料')); return; }
+    const previous = activity.onActivityResult;
+    const requestCode = 41263;
+    let settled = false;
+    let deadline: ReturnType<typeof setTimeout> | undefined;
+    const restore = () => { clearTimeout(deadline); choosing = false; if (activity.onActivityResult === handler) activity.onActivityResult = previous; };
+    function handler(code: number, resultCode: number, result: any) {
+      if (code !== requestCode) { if (typeof previous === 'function') previous.call(activity, code, resultCode, result); return; }
+      if (settled) return;
+      settled = true;
+      restore();
+      if (resultCode !== -1 || !result) { resolve(undefined); return; }
+      let cursor: any, stream: any, reader: any;
+      try {
+        const uri = android.invoke(result, 'getData');
+        if (!uri) throw new Error('文件地址无法读取，请重新选择');
+        const resolver = android.invoke(activity, 'getContentResolver');
+        cursor = android.invoke(resolver, 'query', uri, null, null, null, null);
+        let name = '', size = -1;
+        if (cursor && android.invoke(cursor, 'moveToFirst')) {
+          const nameColumn = Number(android.invoke(cursor, 'getColumnIndex', '_display_name'));
+          const sizeColumn = Number(android.invoke(cursor, 'getColumnIndex', '_size'));
+          if (nameColumn >= 0) name = String(android.invoke(cursor, 'getString', nameColumn) || '');
+          if (sizeColumn >= 0 && !android.invoke(cursor, 'isNull', sizeColumn)) size = Number(android.invoke(cursor, 'getLong', sizeColumn));
+        }
+        if (!/\.(txt|md)$/i.test(name)) throw new Error('请选择 TXT 或 Markdown 文本资料');
+        if (!Number.isFinite(size) || size < 0) throw new Error('无法确认文件大小，请保存到本机后重选，或使用粘贴资料');
+        if (size > 65536) throw new Error('资料最多 64 KiB，请缩减内容');
+        stream = android.invoke(resolver, 'openInputStream', uri);
+        if (!stream) throw new Error('文件无法读取，请使用粘贴资料');
+        const decoder = android.newObject('java.io.InputStreamReader', stream, 'UTF-8');
+        reader = android.newObject('java.io.BufferedReader', decoder);
+        if (!reader) throw new Error('文本读取器不可用，请使用粘贴资料');
+        const lines: string[] = []; let line: any, length = 0;
+        while ((line = android.invoke(reader, 'readLine')) !== null) {
+          if (line === undefined) throw new Error('文本读取失败，请使用粘贴资料');
+          const value = String(line); length += utf8Size(value) + 1;
+          if (length > 65537) throw new Error('资料最多 64 KiB，请缩减内容');
+          lines.push(value);
+        }
+        const attachment = { name, content: lines.join('\n') };
+        if (attachment.content.includes('\uFFFD')) throw new Error('文件不是可靠的 UTF-8 文本，请转换编码或粘贴资料');
+        validateTaskAttachment(attachment); resolve(attachment);
+      } catch (reason) { reject(reason instanceof Error ? reason : new Error('文件读取失败，请使用粘贴资料')); }
+      finally { for (const handle of [reader, stream, cursor]) if (handle) { try { android.invoke(handle, 'close'); } catch { /* Already closed by the reader. */ } } }
+    }
+    try {
+      activity.onActivityResult = handler;
+      const intent = android.newObject('android.content.Intent', 'android.intent.action.OPEN_DOCUMENT');
+      if (!intent) throw new Error('Intent unavailable');
+      android.invoke(intent, 'addCategory', 'android.intent.category.OPENABLE');
+      android.invoke(intent, 'setType', '*/*');
+      deadline = setTimeout(() => { settled = true; restore(); reject(new Error('文件选择超时，请重新选择或粘贴资料')); }, 300000);
+      android.invoke(activity, 'startActivityForResult', intent, requestCode);
+    } catch { settled = true; restore(); reject(new Error('系统文件选择器无法打开，请使用粘贴资料')); }
+  });
+}

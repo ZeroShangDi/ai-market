@@ -178,7 +178,7 @@ public final class ChatService {
         String content=input.content().strip();
         if(content.isEmpty() || content.codePointCount(0,content.length())>2000) throw invalid("单条问题需为 1–2000 字");
         owned(actor,input.conversation_id());
-        String fingerprint=cipher.fingerprint(input.conversation_id()+"\n"+Objects.toString(input.retry_of(),"")+"\n"+content);
+        String fingerprint=cipher.fingerprint((Boolean.TRUE.equals(input.web_search())?"web-search\n":"")+input.conversation_id()+"\n"+Objects.toString(input.retry_of(),"")+"\n"+content);
         RequestRow previous=requestRow(actor,key);
         if(previous!=null) {
             if(!previous.fingerprint().equals(fingerprint)) throw new Problem("IDEMPOTENCY_CONFLICT","同一请求标识不能用于不同内容",409);
@@ -218,9 +218,9 @@ public final class ChatService {
         });
         Run run=new Run(row); live.put(runKey(actor,key),run);
         run.events.tryEmitNext(started(row,1));
-        run.subscription=Flux.defer(() -> model.stream(turns)).timeout(Duration.ofSeconds(60))
+        run.subscription=Flux.defer(() -> model.stream(turns,Boolean.TRUE.equals(input.web_search()),actor)).timeout(Duration.ofSeconds(60))
             .takeUntilOther(Mono.delay(Duration.ofSeconds(settings.generationSeconds())).flatMap(v -> Mono.error(new IllegalStateException("generation timeout"))))
-            .subscribeOn(Schedulers.boundedElastic()).publishOn(Schedulers.boundedElastic(),1).subscribe(chunk -> delta(run,chunk),failure -> fail(run),() -> complete(run));
+            .subscribeOn(Schedulers.boundedElastic()).publishOn(Schedulers.boundedElastic(),1).subscribe(chunk -> delta(run,chunk),failure -> fail(run,failure),() -> complete(run));
         return stream(run.events.asFlux());
     }
     private List<ModelGateway.Turn> history(String conversation,String retry,String content) {
@@ -266,6 +266,12 @@ public final class ChatService {
     private synchronized void delta(Run run,ModelGateway.Chunk chunk) {
         if(run.terminal) return;
         run.inputTokens=Math.max(run.inputTokens,chunk.inputTokens()); run.outputTokens=Math.max(run.outputTokens,chunk.outputTokens());
+        if(chunk.activity()!=null) {
+            ++run.sequence;
+            db.update("UPDATE requests SET sequence_no=? WHERE tenant_id=? AND user_id=? AND device_id=? AND request_id=?",
+                run.sequence,run.row.actor().tenant(),run.row.actor().user(),run.row.actor().device(),run.row.id());
+            var activity=event(run.row,run.sequence,"activity"); activity.put("stage",chunk.activity()); run.events.tryEmitNext(activity);
+        }
         if(chunk.text().isEmpty()) return;
         if(run.content.length()+chunk.text().length()>settings.maxReplyChars()) { finish(run,"failed","OUTPUT_LIMIT"); return; }
         run.content.append(chunk.text());
@@ -280,7 +286,9 @@ public final class ChatService {
     private synchronized void complete(Run run) {
         if(!run.terminal) finish(run,run.content.isEmpty()?"failed":"complete",run.content.isEmpty()?"AI_EMPTY_REPLY":null);
     }
-    private synchronized void fail(Run run) { if(!run.terminal) finish(run,"failed","AI_UNAVAILABLE"); }
+    private synchronized void fail(Run run,Throwable failure) {
+        if(!run.terminal) finish(run,"failed",failure instanceof Problem p && p.code.startsWith("WEB_")?p.code:"AI_UNAVAILABLE");
+    }
     private void finish(Run run,String status,String errorCode) {
         if(run.terminal) return;
         run.terminal=true; ++run.sequence;
@@ -302,6 +310,8 @@ public final class ChatService {
             case "AI_INTERRUPTED" -> "服务重启导致生成中断，已保留部分回复";
             case "OUTPUT_LIMIT" -> "回复达到长度上限，已保留生成内容";
             case "AI_EMPTY_REPLY" -> "模型未返回文字，请重试";
+            case "WEB_CHAT_UNAVAILABLE" -> "联网服务暂时不可用，已保留生成内容，请重试或关闭联网后发送";
+            case "WEB_SEARCH_UNAVAILABLE" -> "联网搜索未获得可核对的结果，已保留生成内容，请重试";
             default -> "AI 回复暂时不可用，已保留生成内容";
         };
     }

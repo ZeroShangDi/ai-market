@@ -7,6 +7,7 @@ import cn.iocoder.yudao.module.callphone.controller.app.outbound.CallPhoneMobile
 import cn.iocoder.yudao.module.callphone.service.agent.AgentActor;
 import cn.iocoder.yudao.module.callphone.service.agent.AgentFollowUpService;
 import cn.iocoder.yudao.module.callphone.service.agent.AgentTaskRelay;
+import cn.iocoder.yudao.module.callphone.service.ai.MobileAiRelay;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.Test;
@@ -70,6 +71,22 @@ class MobileAgentTaskControllerTest {
             user.setScopes(List.of("callphone-device:10")); TenantContextHolder.setTenantId(2L);
             assertThrows(Exception.class, () -> controller.actor(request));
         } finally { TenantContextHolder.clear(); }
+    }
+    @Test void taskCreationAndListingRejectUnownedConversationBeforeReadingCustomerOrStartingAgent() {
+        var controller=new MobileAgentTaskController(); var devices=mock(CallPhoneMobileController.class);
+        var chat=mock(MobileAiRelay.class); var relay=mock(AgentTaskRelay.class); var business=mock(AgentFollowUpService.class);
+        ReflectionTestUtils.setField(controller,"devices",devices); ReflectionTestUtils.setField(controller,"chat",chat);
+        ReflectionTestUtils.setField(controller,"relay",relay); ReflectionTestUtils.setField(controller,"followUps",business);
+        var user=new LoginUser(); user.setId(7L); user.setTenantId(1L); user.setUserType(2);
+        var request=new MockHttpServletRequest(); request.addHeader("X-Callphone-Device-Id","10"); request.addHeader("X-Callphone-Device-Key","key");
+        doThrow(new MobileAiRelay.ConversationFailure(403)).when(chat).requireConversation("123","1","7","10");
+        TenantContextHolder.setTenantId(1L);
+        try(var security=mockStatic(SecurityFrameworkUtils.class)) {
+            security.when(SecurityFrameworkUtils::getLoginUser).thenReturn(user);
+            assertThrows(MobileAiRelay.ConversationFailure.class,()->controller.create(request,input()));
+            assertThrows(MobileAiRelay.ConversationFailure.class,()->controller.list(request,"123"));
+            verifyNoInteractions(relay,business);
+        } finally {TenantContextHolder.clear();}
     }
 
     @Test void confirmationUsesUpstreamProposalAndStringBusinessReceipt() {

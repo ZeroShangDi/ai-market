@@ -8,7 +8,7 @@ import { onSessionChange, onDeviceChange } from '@/api/http';
 /** Preview and live mode share state management; only repositories and transports differ. */
 export function createChatController(transport: ChatTransport = previewChatTransport, repository?: ChatRepository) {
   const state = reactive({ conversations: [] as ChatConversation[], activeId: '', generating: false,
-    recovering: false, loading: false, error: '', initialized: false, visible: true,
+    recovering: false, loading: false, error: '', initialized: false, visible: true, webSearch: true, activity: '',
     nextCursor: null as string | null, messageCursor: null as string | null });
   const active = computed(() => state.conversations.find(item => item.id === state.activeId));
   let running: { cancel(): void } | undefined, activeRequest = '';
@@ -20,7 +20,7 @@ export function createChatController(transport: ChatTransport = previewChatTrans
     running = undefined; activeRequest = ''; ++generation; clearTimeout(poll);
     const answer = active.value?.messages[active.value.messages.length - 1];
     if ((state.generating || state.recovering) && answer?.role === 'assistant') answer.status = 'stop';
-    state.generating = false; state.recovering = false;
+    state.generating = false; state.recovering = false; state.activity = '';
     if (handle) handle.cancel();
     else if (requestId && repository) void repository.cancel(requestId).catch(() => {});
   }
@@ -124,21 +124,22 @@ export function createChatController(transport: ChatTransport = previewChatTrans
       if (conversation.title === '新会话') conversation.title = Array.from(content).slice(0, 18).join('');
     }
     assistant.request_id = requestId; conversation.updated_at = new Date().toISOString();
-    state.generating = true; state.error = ''; activeRequest = requestId;
+    state.generating = true; state.error = ''; state.activity = ''; activeRequest = requestId;
     const current = ++generation; let sequence = 0;
-    const input: ChatStreamRequest = { request_id: requestId, conversation_id: conversation.id, content, ...(retryId ? { retry_of: retryId } : {}) };
+    const input: ChatStreamRequest = { request_id: requestId, conversation_id: conversation.id, content, web_search: state.webSearch, ...(retryId ? { retry_of: retryId } : {}) };
     try {
       const handle = transport.stream(input, event => {
         if (generation !== current || epoch !== identity || !state.generating || event.request_id !== requestId || event.conversation_id !== conversation.id || event.sequence <= sequence) return;
         sequence = event.sequence;
         if (event.type === 'started') { user.id = event.user_message_id; assistant.id = event.assistant_message_id; user.local = false; assistant.local = false; }
         if (event.type === 'delta') { assistant.content += event.delta; assistant.status = 'streaming'; }
+        if (event.type === 'activity') state.activity = event.stage === 'searching' ? '正在联网搜索…' : '正在整理回复…';
         if (event.type === 'completed') {
           assistant.content = event.content; assistant.status = event.finish_reason === 'cancelled' ? 'stop' : 'complete';
-          state.generating = false; running = undefined; activeRequest = '';
+          state.generating = false; state.activity = ''; running = undefined; activeRequest = '';
         }
         if (event.type === 'failed') {
-          assistant.status = 'error'; assistant.error_message = event.message; state.generating = false;
+          assistant.status = 'error'; assistant.error_message = event.message; state.generating = false; state.activity = '';
           if (event.code === 'STREAM_INTERRUPTED' && repository) {
             state.recovering = true; state.error = event.message;
             void recover(conversation.id, requestId, current);
@@ -148,7 +149,7 @@ export function createChatController(transport: ChatTransport = previewChatTrans
       });
       if (state.generating || state.recovering) running = handle;
     } catch (reason) {
-      assistant.status = 'error'; assistant.error_message = readable(reason); state.generating = false; activeRequest = '';
+      assistant.status = 'error'; assistant.error_message = readable(reason); state.generating = false; state.activity = ''; activeRequest = '';
     }
     return true;
   }
