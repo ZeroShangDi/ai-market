@@ -1,0 +1,7 @@
+{
+  "id": "customer-follow-up",
+  "version": "1",
+  "name": "客户跟进助手",
+  "skill": "customer-follow-up/v1",
+  "tools": ["read_attachment", "query_customer", "submit_report"]
+}
