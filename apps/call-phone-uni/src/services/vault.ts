@@ -27,6 +27,10 @@ export function setVaultDevice(id: string) {
 export function vaultScope() {
   return accountSlot && deviceId ? JSON.stringify([accountSlot, deviceId]) : "";
 }
+/** Non-secret preference identity: server, workspace (tenant), account; no device key. */
+export function accountPreferenceScope() {
+  return accountSlot;
+}
 export function readDevice() {
   if (!accountSlot || !secureStore.available()) return undefined;
   return secureStore.read<{ id: string; key: string }>("device:" + accountSlot);
