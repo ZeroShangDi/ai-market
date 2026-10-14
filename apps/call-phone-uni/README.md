@@ -16,7 +16,7 @@ Vue 3 + TypeScript + uni-app 工程。页面依据 Figma 移动端画板 `2:2`�
 
 ## 启动
 
-工作台新增 AI 助手预览卡片，进入独立会话页后隐藏底部导航。使用 TDesign Chat 组件，当前为模拟增量回复；历史与草稿仅在内存保留。流式 API、鉴权和恢复约定见 [AI 会话契约](../../docs/modules/mobile-ai-chat-contract.md)，后端与真实网络适配器尚未实现。
+工作台新增 AI 助手入口，进入独立会话页后隐藏底部导航。使用 TDesign Chat 组件，已接入移动端流式接口，由芋道后端转发至独立 AI 服务；模型 Key 仅配置在服务端。流式 API、鉴权和恢复约定见 [AI 会话契约](../../docs/modules/mobile-ai-chat-contract.md)。
 
 ```sh
 pnpm install
@@ -38,7 +38,15 @@ Android 代码可用 `pnpm build:app` 编译；真机需用 HBuilderX 安装含 
 
 “本机与配对”中的连通性测试只访问当前配置的客户侧 `/api/v1/mobile/bootstrap`：开发模拟模式会明确显示未检查真实服务，未配置地址会提示配置，401/403 表示服务可达但需要授权，404 表示移动端接口未实现。测试不记录地址或响应内容。“诊断与帮助”中的 10086 测试在用户确认后直接调用旧版 Android 拨号插件，不建立客户通话记录，也不把插件回调误判为已接通；H5 只显示插件不可用。
 
-`pnpm build:app` 生成的是 `dist/build/app` 中的 App 资源，不是可安装 APK。APK 需要在有权使用该云端插件的 DCloud 账户中用 HBuilderX 云打包或配置好的原生离线工程生成；不要把资源编译成功当作真机插件验证。当前工作站的 HBuilderX 命令行启动时报告 Qt 处理器特性不兼容，尚无法由本机完成云打包。
+`pnpm build:app` 生成的是 `dist/build/app` 中的 App 资源，不是可安装 APK。APK 需要在有权使用该云端插件的 DCloud 账户中用 HBuilderX 云打包或配置好的原生离线工程生成；不要把资源编译成功当作真机插件验证。
+
+个人证书安心打包使用 `pnpm pack:android:release`，要求 HBuilderX 已登录。命令先生成共享离线图标，再调用 HBuilderX 编译与打包。签名配置文件为项目根目录 `.android-signing.local.json`，填写 `certfile`（证书路径）、`certalias`（别名）、`certpassword`（证书密码）和 `storepassword`（证书库密码）。此文件已被 Git 忽略，密码不要提交到仓库。脚本固定使用 `safemode:true`、`iscustom:false` 和自有证书，临时配置仅当前用户可读，并在结束时删除。`pack:android:debug` 生成公共证书自定义调试基座，使用传统云打包。
+
+2026-10-13 本机已补齐签名配置并实际调用个人证书安心打包，资源编译成功，23:30:56 已提交至 DCloud 云端。云端原生包于 2026-10-14 00:27 下载至 `dist/cache/apk`，本地状态通道出现 RPC 超时，正式 APK 未自动输出。随后复用本次下载的原生包与 `dist/cache/wgt` 中的编译资源，使用 HBuilderX 自带 zipalign/apksigner 完成本地资源合并和个人证书签名，生成 `dist/release/apk/call-phone-1.0.6-ai-20261014.apk`（约 23.6 MB）。
+
+APK 已通过 v1/v2 签名和 16 KB ZIP 对齐验证；签名与现有 1.0.6 正式 APK 一致。已逐文件核对 AI 页面资源，并确认所有原生 dex/so 与本次云端原生包完全一致；包含通话插件和桌宠模块。包名为 `uni.UNID608100`，版本仍为 `1.0.6`（104）。APK SHA256：`205ce4311c2d91e243a6394029d8ddfd8ee518587fe5ea6331562a8362d864b8`。尚未在手机安装验证实际 AI 流式显示。
+
+脚本实时显示脱敏后的编译与排队进度；排队期间不要重复提交。PC 前端本地开发地址为 `http://127.0.0.1:5175/`，与后端 API 的 `48080` 端口不同。
 
 Android 云打包包名固定为 `uni.UNID608100`（大小写保持一致），与已购 `leven-call` 插件绑定包名一致。源码通过 `app-plus.distribute.android.packagename` 配置实际包名，插件元数据中的 `android_package_name` 不能代替该配置。重新构建资源后，在 HBuilderX 云打包或自定义基座窗口核对“Android 包名”为 `uni.UNID608100`；若窗口仍保留 `uni.app.unid608100`，改为前者再提交。DCloud AppID 保持 `__UNI__D608100`。
 
