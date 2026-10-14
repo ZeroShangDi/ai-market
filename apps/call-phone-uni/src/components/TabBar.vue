@@ -8,7 +8,7 @@
         :class="{ active: current === tab.key }"
         role="button"
         :aria-label="tab.label"
-        @tap="go(tab.path)"
+        @tap="go(tab.key)"
       >
         <AppIcon :name="current === tab.key ? tab.activeIcon : tab.icon" :size="20" :color="current === tab.key ? '#294fdb' : '#636e82'" />
         <text>{{ tab.label }}</text>
@@ -17,7 +17,7 @@
   >
 </template>
 <script setup lang="ts">
-import { hasUnfinishedCall } from "@/services/calls";
+import { openRootTab, type RootTab } from "@/modules/root-navigation";
 import AppIcon from "./AppIcon.vue";
 const props = defineProps<{ current: "workbench" | "apps" | "mine" }>();
 const tabs = [
@@ -42,14 +42,10 @@ const tabs = [
     icon: "user",
     activeIcon: "user-active",
   },
-];
-function go(path: string) {
-  if (tabs.find(tab => tab.path === path)?.key === props.current) return;
-  if (hasUnfinishedCall()) {
-    uni.showToast({ title: "请先完成当前通话并保存结果", icon: "none" });
-    return;
-  }
-  uni.redirectTo({ url: path });
+] satisfies { key: RootTab; label: string; path: string; icon: string; activeIcon: string }[];
+function go(tab: RootTab) {
+  if (tab === props.current) return;
+  openRootTab(tab);
 }
 </script>
 <style scoped lang="scss">
@@ -60,7 +56,6 @@ function go(path: string) {
   right: 0;
   bottom: 0;
   padding: 0 15px calc(16px + env(safe-area-inset-bottom));
-  pointer-events: none;
 }
 .tab-bar {
   height: 64px;
@@ -72,10 +67,9 @@ function go(path: string) {
   display: flex;
   justify-content: space-around;
   align-items: center;
-  pointer-events: auto;
 }
 .tab {
-  width: 70px;
+  flex: 1;
   height: 48px;
   border-radius: 16px;
   display: flex;
@@ -91,6 +85,7 @@ function go(path: string) {
   color: #294fdb;
   font-weight: 500;
 }
+.tab :deep(.app-icon), .tab text { pointer-events: none; }
 .tab-icon {
   width: 18px;
   height: 18px;

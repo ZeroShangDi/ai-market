@@ -1,6 +1,7 @@
 /// <reference types="vite/client" />
 
 interface ImportMetaEnv {
+  readonly VITE_UPDATE_LAN_ORIGINS?: string;
   readonly VITE_UPDATE_MANIFEST_URL?: string;
   readonly VITE_UPDATE_PUBLIC_KEY?: string;
   readonly VITE_UPDATE_DOWNLOAD_ORIGINS?: string;
@@ -17,3 +18,4 @@ declare module "*.vue" {
   const component: DefineComponent<{}, {}, any>;
   export default component;
 }
+declare const __APP_VERSION_NAME__: string;

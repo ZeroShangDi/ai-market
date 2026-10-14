@@ -244,10 +244,10 @@ test('foreground lifecycle deduplicates timers and drops responses after hiding'
 
 const appIdentity = { appId: 'app', platform: 'android', architecture: 'arm64-v8a', channel: 'stable', versionCode: 101, versionName: '1.0.3', baseVersionCode: 101, packageName: 'test.app' }
 const release = { id: '102', ...appIdentity, versionCode: 102, versionName: '1.0.4', publishedAt: '2026-10-10T00:00:00Z', notes: 'test', mandatory: false, minBaseVersionCode: 100, artifact: { type: 'apk', url: 'https://updates.example.test/app.apk', bytes: 100, sha256: 'a'.repeat(64), packageName: 'test.app' } }
-function updateHarness(overrides = {}, source = { latest: async () => release }, allowed = () => true) {
+function updateHarness(overrides = {}, source = { latest: async () => release }) {
   const { createUpdateService } = load('modules/app-update/core.ts')
   const removed = []
-  const service = createUpdateService(source, { identity: async () => appIdentity, download: async () => '/update.apk', verify: async () => true, install: async () => 'requested', cleanup: async path => { removed.push(path) }, ...overrides }, allowed)
+  const service = createUpdateService(source, { identity: async () => appIdentity, download: async () => '/update.apk', verify: async () => true, install: async () => 'requested', cleanup: async path => { removed.push(path) }, ...overrides })
   return { service, removed }
 }
 test('startup and manual update checks share one request, and failures can retry', async () => {
@@ -275,11 +275,11 @@ test('digest failure cleans artifact and cannot install; download retries are bo
   const failed = updateHarness({ download: async () => { downloads++; throw new Error('offline') } }).service
   await failed.check(); await failed.download(); assert.equal(downloads, 3); assert.equal(failed.getState().stage, 'download')
 })
-test('install defers during unsafe business state, deduplicates and never claims request means completion', async () => {
-  let safe = false, installed = 0, done
-  const { service } = updateHarness({ install: () => { installed++; return new Promise(resolve => { done = resolve }) } }, undefined, () => safe)
-  await service.check(); await service.download(); await service.install(); assert.equal(service.getState().status, 'deferred')
-  safe = true; const one = service.install(), two = service.install(); assert.equal(one, two)
+test('installation deduplicates without business guards and never claims request means completion', async () => {
+  let installed = 0, done
+  const { service } = updateHarness({ install: () => { installed++; return new Promise(resolve => { done = resolve }) } })
+  await service.check(); await service.download()
+  const one = service.install(), two = service.install(); assert.equal(one, two)
   await new Promise(setImmediate); done('requested'); await one; await service.install()
   assert.equal(installed, 1); assert.equal(service.getState().status, 'installationRequested')
   await service.reconcileInstallation(); assert.equal(service.getState().status, 'readyToInstall')
@@ -344,14 +344,15 @@ test('signed release source rejects unsigned metadata and unapproved download or
   assert.equal(await createSignedReleaseSource('https://updates.example.test/manifest', [], () => true).latest(appIdentity, controller.signal), null)
 })
 
-test('install revalidates package and rechecks call permission after verification', async () => {
-  let verifies = 0, installs = 0, safe = true
-  const { service } = updateHarness({
-    verify: async () => { if (++verifies === 2) safe = false; return true },
+test('install revalidates package and refuses a changed artifact', async () => {
+  let verifies = 0, installs = 0
+  const { service, removed } = updateHarness({
+    verify: async () => ++verifies === 1,
     install: async () => { installs++; return 'requested' },
-  }, undefined, () => safe)
+  })
   await service.check(); await service.download(); await service.install()
-  assert.equal(verifies, 2); assert.equal(installs, 0); assert.equal(service.getState().status, 'deferred')
+  assert.equal(verifies, 2); assert.equal(installs, 0)
+  assert.equal(service.getState().stage, 'verify'); assert.deepEqual(removed, ['/update.apk'])
 })
 test('download refreshes once and preserves distinct forbidden/not-found/server errors', async () => {
   for (const [status, code] of [[403, 'FORBIDDEN'], [404, 'NOT_FOUND'], [503, 'SERVICE_UNAVAILABLE']]) {

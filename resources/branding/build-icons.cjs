@@ -19,6 +19,10 @@ async function build() {
       await sharp(original).resize(size, size).png().toFile(path.join(directory, name));
     }
   }
+  // APK archive readers can request the default drawable before installation.
+  const androidFallback = path.join(projectRoot, 'apps/call-phone-uni/nativeResources/android/res/drawable');
+  fs.mkdirSync(androidFallback, { recursive: true });
+  fs.copyFileSync(path.join(directories[0], '48x48.png'), path.join(androidFallback, 'icon.png'));
   await sharp(path.join(projectRoot, 'resources/icons/custom/app-ai.svg')).resize(256, 256).png().toFile(path.join(__dirname, 'ai-chat.png'));
   console.log(`统子哥图标已生成，两处发布目录同步 ${names.length} 个尺寸。`);
 }

@@ -1,0 +1,8 @@
+# Only public release artifacts are mounted. The signing key is outside this directory.
+# Combine with the same compose files used by the running local server.
+services:
+  server:
+    environment:
+      APP_UPDATE_STORAGE_ROOT: /yudao-server/data/app-updates
+    volumes:
+      - ../../.local/app-update/release/public:/yudao-server/data/app-updates:ro

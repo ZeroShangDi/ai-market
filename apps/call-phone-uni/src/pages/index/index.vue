@@ -58,6 +58,7 @@ import { aiChat } from '@/services/ai-chat';
 import { remoteChatRepository } from '@/services/ai-chat-remote';
 import { ensureSession } from '@/services/session';
 import { hasUnfinishedCall } from '@/services/calls';
+import { openRootTab } from '@/modules/root-navigation';
 import { hasAccessToken, getSessionVersion, messageOf, onSessionChange } from '@/api/http';
 import { mockEnabled } from '@/config';
 import { when, toast } from '@/ui/format';
@@ -87,8 +88,7 @@ async function loadRecent() {
   }
 }
 function openApps() {
-  if (hasUnfinishedCall()) return toast('请先完成当前通话并保存结果');
-  uni.redirectTo({ url: '/pages/apps/index' });
+  openRootTab('apps');
 }
 function openConversation(id: string) {
   if (hasUnfinishedCall()) return toast('请先完成当前通话并保存结果');

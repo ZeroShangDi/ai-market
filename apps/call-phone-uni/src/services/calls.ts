@@ -200,17 +200,11 @@ export interface StartedCall {
   dialUncertain?: boolean;
   dispatchId?: string;
 }
-let callStartGuard = () => "";
-export function setCallStartGuard(guard: () => string) {
-  callStartGuard = guard;
-}
 export async function beginCall(
   source: Source,
   targetId: string,
   onCreated?: (call: StartedCall) => void,
 ): Promise<StartedCall> {
-  const restriction = callStartGuard();
-  if (restriction) throw new Error(restriction);
   if (currentCallId || activeBegins.size)
     throw new Error("请先完成当前通话并保存结果");
   if (!mockEnabled && !phoneCapability.available())

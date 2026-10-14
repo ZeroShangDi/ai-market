@@ -34,57 +34,7 @@
           ><text>辅助功能</text><text>后台运行、悬浮窗与手机宠</text></view
         ><image class="arrow" src="/static/figma/2-112-imgFrame2.svg"
       /></view>
-      <view class="setting" @tap="checkUpdates(true)"
-        ><view class="setting-text"
-          ><text>应用更新</text
-          ><text
-            >{{ updateLabels[updateState.status]
-            }}{{
-              updateState.progress != null ? ` ${updateState.progress}%` : ""
-            }}</text
-          ></view
-        ></view
-      >
-      <view v-if="updateState.release || updateState.message" class="state">
-        <text>{{ updateState.message || updateState.release?.notes }}</text>
-        <button
-          v-if="
-            ['available', 'cancelled'].includes(updateState.status) ||
-            (updateState.status === 'failed' &&
-              updateState.stage === 'download')
-          "
-          @tap="updates.download()"
-        >
-          下载更新
-        </button>
-        <button
-          v-if="
-            updateState.status === 'failed' && updateState.stage === 'install'
-          "
-          @tap="installSettings"
-        >
-          打开安装权限设置
-        </button>
-        <button
-          v-if="
-            ['readyToInstall', 'deferred'].includes(updateState.status) ||
-            (updateState.status === 'failed' && updateState.stage === 'install')
-          "
-          @tap="updates.install()"
-        >
-          继续安装
-        </button>
-        <button
-          v-if="
-            ['downloading', 'verifying', 'readyToInstall', 'deferred'].includes(
-              updateState.status,
-            )
-          "
-          @tap="updates.cancel()"
-        >
-          取消更新
-        </button>
-      </view>
+      <AppUpdateRow />
       <view v-if="panel" class="panel-scrim" @tap="panel = ''"
         ><view class="panel" @tap.stop>
           <view class="panel-heading"
@@ -136,13 +86,7 @@
   /></view>
 </template>
 <script setup lang="ts">
-import { openAndroidInstallSettings } from "@/modules/app-update/android";
-import {
-  checkUpdates,
-  updateState,
-  updateLabels,
-  updates,
-} from "@/services/updates";
+import AppUpdateRow from "@/components/AppUpdateRow.vue";
 import { computed, ref } from "vue";
 import { onShow } from "@dcloudio/uni-app";
 import ReadinessCard from "@/components/ReadinessCard.vue";
@@ -180,13 +124,6 @@ import { refreshDispatches } from "@/services/foreground";
 import { phoneCapability } from "@/native/phone";
 import { when, toast } from "@/ui/format";
 import type { Bootstrap, Device, Diagnostics } from "@/types/mobile";
-function installSettings() {
-  try {
-    openAndroidInstallSettings();
-  } catch (e) {
-    toast(messageOf(e));
-  }
-}
 const bootstrap = ref<Bootstrap>(),
   device = ref<Device>(),
   diagnostics = ref<Diagnostics>(),

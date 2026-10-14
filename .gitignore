@@ -45,3 +45,4 @@ unpackage/
 *.swo
 *.tmp
 *~
+/.local/app-update/

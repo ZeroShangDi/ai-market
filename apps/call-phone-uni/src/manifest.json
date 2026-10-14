@@ -2,8 +2,8 @@
     "name" : "统子哥",
     "appid" : "__UNI__D608100",
     "description" : "AI 办公私人助理与提效工具入口",
-    "versionName" : "1.0.6",
-    "versionCode" : 104,
+    "versionName" : "1.0.8",
+    "versionCode" : 106,
     "transformPx" : false,
     /* 5+App特有相关 */
     "app-plus" : {
@@ -68,6 +68,7 @@
             "sdkConfigs" : {},
             "icons" : {
                 "android" : {
+                    "mdpi" : "static/app-icons/48x48.png",
                     "hdpi" : "static/app-icons/72x72.png",
                     "xhdpi" : "static/app-icons/96x96.png",
                     "xxhdpi" : "static/app-icons/144x144.png",

@@ -60,8 +60,7 @@ export type UpdateStatus =
   | "installing"
   | "installationRequested"
   | "cancelled"
-  | "failed"
-  | "deferred";
+  | "failed";
 export interface UpdateState {
   status: UpdateStatus;
   release?: Release;
@@ -97,14 +96,14 @@ export function validateRelease(value: Release, app: AppIdentity) {
     !Number.isSafeInteger(value.artifact.bytes) ||
     value.artifact.bytes <= 0 ||
     !/^[a-f0-9]{64}$/i.test(value.artifact.sha256) ||
-    !/^https:\/\//.test(value.artifact.url)
+    // The signed VersionSource enforces HTTPS / explicitly pinned LAN origins.
+    !/^https?:\/\//.test(value.artifact.url)
   )
     throw new Error("更新制品信息不完整或不受支持");
 }
 export function createUpdateService(
   source: VersionSource,
   platform: PlatformAdapter,
-  canInstall: () => boolean,
 ) {
   let state: UpdateState = { status: "idle" };
   const listeners = new Set<(state: UpdateState) => void>();
@@ -223,30 +222,17 @@ export function createUpdateService(
     if (installing) return installing;
     if (
       !path ||
-      !["readyToInstall", "deferred", "failed", "cancelled"].includes(
+      !["readyToInstall", "failed", "cancelled"].includes(
         state.status,
       )
     )
       return Promise.resolve();
-    if (!canInstall()) {
-      set({
-        status: "deferred",
-        release: state.release,
-        message: "请先结束通话并安全保存结果，再继续安装",
-      });
-      return Promise.resolve();
-    }
     const v = version,
       file = path,
       release = state.release;
     set({ status: "installing", release });
     installing = (async () => {
       try {
-        // Recheck before dispatching the native installation request.
-        if (!canInstall()) {
-          set({ status: "deferred", release });
-          return;
-        }
         if (!release || !identity || !(await platform.verify(file, release, identity))) {
           path = undefined;
           await clean(file);
@@ -254,7 +240,6 @@ export function createUpdateService(
           return;
         }
         if (!live(v)) return;
-        if (!canInstall()) { set({ status: "deferred", release }); return; }
         const result = await platform.install(file);
         if (!live(v)) return;
         if (result === "requested")
