@@ -104,7 +104,16 @@ const { state, active, stop } = aiChat;
 const historyVisible = ref(false), scrollTop = ref(0), followLatest = ref(true);
 const keyboardHeight = ref(0), webHeight = ref(0);
 const keyboardOpen = computed(() => keyboardHeight.value > 0);
-const pageStyle = computed(() => ({ height: webHeight.value ? `${webHeight.value}px` : `calc(100vh - ${keyboardHeight.value}px)` }));
+const pageStyle = computed(() => {
+  // App's adjustResize already removes the keyboard from the viewport height.
+  // Subtracting it again leaves a keyboard-sized gap below the composer.
+  // #ifdef APP-PLUS
+  return { height: '100vh' };
+  // #endif
+  // #ifndef APP-PLUS
+  return { height: webHeight.value ? `${webHeight.value}px` : `calc(100vh - ${keyboardHeight.value}px)` };
+  // #endif
+});
 const lastMessageId = computed(() => active.value?.messages.at(-1)?.id);
 const history = computed(() => state.conversations.filter(item => !mockEnabled || item.messages.length).slice().sort((a, b) => b.updated_at.localeCompare(a.updated_at)));
 const suggestions = [
@@ -155,7 +164,7 @@ function keyboardChanged(event: { height: number }) {
   keyboardHeight.value = Math.max(0, event.height);
   if (followLatest.value) setTimeout(() => void jumpToLatest(), 100);
 }
-// H5 follows the visible viewport; App uses adjustNothing and the keyboard event above.
+// H5 follows the visible viewport; App lets adjustResize resize the viewport.
 // #ifdef H5
 function resizeWebViewport() {
   webHeight.value = window.visualViewport?.height || window.innerHeight;

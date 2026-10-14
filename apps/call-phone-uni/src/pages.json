@@ -10,7 +10,7 @@
       "path": "pages/ai-chat/index",
       "style": {
         "navigationStyle": "custom",
-        "app-plus": { "softinputMode": "adjustNothing", "bounce": "none" }
+        "app-plus": { "softinputMode": "adjustResize", "bounce": "none" }
       }
     },
     {
