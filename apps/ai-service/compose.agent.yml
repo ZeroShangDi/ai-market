@@ -1,0 +1,24 @@
+# Merge after ../ruoyi-vue-pro/compose.local.yml; paths resolve from its directory.
+services:
+  agent-service:
+    profiles: [agent]
+    build:
+      context: ../agent-service
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file:
+      - ../agent-service/.env.local
+    environment:
+      AGENT_BIND_HOST: 0.0.0.0
+      AGENT_PORT: 48082
+      AGENT_DATA_DIR: /data
+    expose: ["48082"]
+    volumes:
+      - yudao-local-agent:/data
+    mem_limit: 1g
+    stop_grace_period: 20s
+  server:
+    environment:
+      AGENT_SERVICE_URL: http://agent-service:48082
+volumes:
+  yudao-local-agent:
