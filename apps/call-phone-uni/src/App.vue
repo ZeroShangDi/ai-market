@@ -4,12 +4,15 @@ import { resumeDeviceSession } from "@/services/session";
 import { onApplicationShow } from "@/modules/device-readiness";
 import { configureMobilePet, refreshMobilePet } from "@/modules/mobile-pet";
 import { checkUpdates } from "@/services/updates";
+import { configureAssets } from "@/modules/assets";
+import assetManifest from "@/modules/assets/manifest.json";
 import {
   startForeground,
   stopForeground,
   networkRestored,
 } from "@/services/foreground";
 configureMobilePet({ preferenceKey: "callphone.mobile-pet.enabled" });
+configureAssets({ baseUrl: import.meta.env.VITE_ASSET_BASE_URL || "", manifest: assetManifest });
 let appVisible = false;
 onLaunch(() =>
   uni.onNetworkStatusChange((status) => {

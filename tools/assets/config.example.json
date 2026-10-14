@@ -1,0 +1,7 @@
+{
+  "adapter": "local",
+  "library": "./.asset-library",
+  "publicBaseUrl": "http://127.0.0.1:8788",
+  "s3": { "bucket": "", "endpoint": "", "region": "auto", "profile": "" },
+  "backend": { "baseUrl": "http://127.0.0.1:48080/admin-api" }
+}
