@@ -55,6 +55,14 @@
 | 业务配置 | 业务字典、客户字段、阶段与结果配置 |
 | 数据与系统 | 本地备份与恢复、诊断与日志、扩展服务配置 |
 
+## Issue 记录
+
+待办、讨论结论和后续实施事项统一记录在 `docs/issues/`；`docs/reviews/` 用于审查与验收报告。
+
+- [拨号应用迁移后的全局状态处理](issues/mobile-call-migration-issue.md)。
+- [资源转链接与统一管理通用能力](issues/shared-asset-link-management-issue.md)。
+- [统一图标管理通用能力](issues/shared-icon-management-issue.md)。
+
 ## 模块文档
 
 - [uni 修复实施与验收记录](reviews/2026-10-10-uni-remediation-progress.md)：F01–F10 代码接入、回归证据与真实环境验收边界。
