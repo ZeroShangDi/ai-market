@@ -80,7 +80,7 @@ fi
 echo 'Starting MySQL and Redis; waiting for their health checks...'
 compose up -d --wait --wait-timeout 240 mysql redis
 
-echo 'Applying idempotent Call Phone v44 through v59 migrations...'
+echo 'Applying idempotent Call Phone v44 through v58 migrations (retired v59 receipt feature excluded)...'
 for migration in "$ROOT_DIR"/yudao-module-callphone/src/main/resources/sql/mysql/callphone-v44-*.sql \
                  "$ROOT_DIR"/yudao-module-callphone/src/main/resources/sql/mysql/callphone-v45-*.sql \
                  "$ROOT_DIR"/yudao-module-callphone/src/main/resources/sql/mysql/callphone-v46-*.sql \
@@ -95,8 +95,7 @@ for migration in "$ROOT_DIR"/yudao-module-callphone/src/main/resources/sql/mysql
                  "$ROOT_DIR"/yudao-module-callphone/src/main/resources/sql/mysql/callphone-v55-*.sql \
                  "$ROOT_DIR"/yudao-module-callphone/src/main/resources/sql/mysql/callphone-v56-*.sql \
                  "$ROOT_DIR"/yudao-module-callphone/src/main/resources/sql/mysql/callphone-v57-*.sql \
-                 "$ROOT_DIR"/yudao-module-callphone/src/main/resources/sql/mysql/callphone-v58-*.sql \
-                 "$ROOT_DIR"/yudao-module-callphone/src/main/resources/sql/mysql/callphone-v59-*.sql; do
+                 "$ROOT_DIR"/yudao-module-callphone/src/main/resources/sql/mysql/callphone-v58-*.sql; do
   [ -f "$migration" ] || continue
   compose exec -T mysql sh -c \
     'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysql --protocol=socket --default-character-set=utf8mb4 -uroot "$MYSQL_DATABASE"' \

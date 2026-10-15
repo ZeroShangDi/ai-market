@@ -1,7 +1,0 @@
-{
-  "id": "document-review",
-  "version": "1",
-  "name": "客户资料核查助手",
-  "skill": "document-review/v1",
-  "tools": ["read_attachment", "query_customer", "attachment_metrics", "submit_report"]
-}

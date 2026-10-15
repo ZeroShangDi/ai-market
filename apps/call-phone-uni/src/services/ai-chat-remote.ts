@@ -16,12 +16,12 @@ export const remoteChatRepository: ChatRepository = {
 interface ProgressiveRequest {
   readyState?: number; status?: number; responseText?: string; timeout?: number;
   onreadystatechange?: any; onprogress?: any; onerror?: any; ontimeout?: any;
-  open(method: 'POST', url: string): void;
+  open(method: 'POST' | 'GET', url: string): void;
   setRequestHeader(key: string, value: string): void;
   getResponseHeader(key: string): string | null;
   send(body?: string): void; abort(): void;
 }
-function xhr(): ProgressiveRequest {
+export function xhr(): ProgressiveRequest {
   // #ifdef APP-PLUS
   if (typeof plus !== 'undefined' && plus.net?.XMLHttpRequest) return new plus.net.XMLHttpRequest();
   // #endif

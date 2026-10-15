@@ -55,7 +55,7 @@ test('ordinary answers may complete without unnecessary search and private busin
 test('internal web stream enforces credentials, emits terminal events and aborts on client disconnect', async t => {
   const dataDir=await mkdtemp(join(tmpdir(),'web-http-test-'));
   const token='t'.repeat(32);let disconnected=false;
-  const service=await createAgentServer({internalToken:token,dataDir,executor:{engine:'test',run:async()=>{}},webExecutor:{async *stream(turns,{signal}) {
+  const service=await createAgentServer({internalToken:token,dataDir,webExecutor:{async *stream(turns,{signal}) {
     yield {type:'activity',stage:'searching'};
     if(turns[0].content==='disconnect') {
       await new Promise(resolve=>signal.addEventListener('abort',()=>{disconnected=true;resolve();},{once:true}));return;

@@ -1,4 +1,7 @@
-// Android custom playground only; official HBuilderX CLI owns compilation and cloud packaging.
+// Preserve the debug playground default; safe cloud-certificate APKs reuse the release workflow.
+if (process.argv.includes('--safe-cloud-cert')) {
+  require('./pack-android-release.cjs');
+} else {
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -35,4 +38,5 @@ try {
   process.exitCode = 1;
 } finally {
   fs.rmSync(temporary, { recursive: true, force: true });
+}
 }

@@ -40,6 +40,7 @@
     "type-check": "vue-tsc --noEmit",
     "test": "node --test tests/*.test.cjs",
     "pack:android:debug": "node scripts/pack-android-debug.cjs",
+    "pack:android:safe": "node ../../resources/icons/build.mjs && node scripts/pack-android-debug.cjs --safe-cloud-cert",
     "pack:android:release": "node ../../resources/icons/build.mjs && node scripts/pack-android-release.cjs"
   },
   "dependencies": {

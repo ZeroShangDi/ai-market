@@ -59,8 +59,7 @@
 
 待办、讨论结论和后续实施事项统一记录在 `docs/issues/`；`docs/reviews/` 用于审查与验收报告。
 
-- [可扩展 AI 助手与首条任务执行链路](issues/ai-agent-capability-roadmap-issue.md)。
-- [实时语音与桌宠对话入口](issues/pet-realtime-voice-issue.md)。
+- [秘书型 Work 助手总 issue](issues/ai-agent-capability-roadmap-issue.md)：Chat/Work 边界、资源入口、统一流式展示、系统控制、自动接单与部署讨论的统一入口。
 - [多应用入口的 uni 与 H5 应用划分及管理边界](issues/multi-app-entry-boundaries-issue.md)。
 - [拨号应用迁移后的全局状态处理](issues/mobile-call-migration-issue.md)。
 - [资源转链接与统一管理通用能力](issues/shared-asset-link-management-issue.md)。
@@ -68,8 +67,8 @@
 
 ## 模块文档
 
-- [移动端 Agent 任务契约](contracts/mobile-agent-task-contract.md)：平台任务、身份、产物与业务确认边界。
-- [Agent 原型接力与验证](reviews/2026-10-14-agent-prototype-handoff.md)：实现、模型验证、提交范围和剩余验收。
+- [原生 Work 契约](../apps/agent-service/README.md)：会话、事件、提问批准、资源和产物边界。
+- [原生 Work 接入验证](reviews/2026-10-15-native-work-validation.md)：真实模型证据及旧资料任务退役后的回归。
 
 - [uni 修复实施与验收记录](reviews/2026-10-10-uni-remediation-progress.md)：F01–F10 代码接入、回归证据与真实环境验收边界。
 - [uni 功能复查与待修复清单](reviews/2026-10-10-uni-functional-readiness.md)：5 项核心问题、验证证据与用户已确认范围；不做手机报表或独立本机录音库，录音跟随客户沟通记录播放，代码修复待后续。

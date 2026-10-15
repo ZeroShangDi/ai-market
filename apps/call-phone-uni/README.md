@@ -44,6 +44,8 @@ Android 代码可用 `pnpm build:app` 编译；真机需用 HBuilderX 安装含 
 
 个人证书安心打包使用 `pnpm pack:android:release`，要求 HBuilderX 已登录。命令先生成共享离线图标，再调用 HBuilderX 编译与打包。签名配置文件为项目根目录 `.android-signing.local.json`，填写 `certfile`（证书路径）、`certalias`（别名）、`certpassword`（证书密码）和 `storepassword`（证书库密码）。此文件已被 Git 忽略，密码不要提交到仓库。脚本固定使用 `safemode:true`、`iscustom:false` 和自有证书，临时配置仅当前用户可读，并在结束时删除。`pack:android:debug` 生成公共证书自定义调试基座，使用传统云打包。
 
+账号云端证书安心打包使用 `npm run pack:android:safe`，生成正常 APK，复用同一正式包流程；从 manifest 读取包名，不读取个人签名配置，不自动修改版本。看到“已成功提交到云端”只表示提交成功，最终安装包以当前任务的完成结果为准，排队期间不要重复提交。
+
 安心打包并非完全离线：业务前端代码和私有证书在本机处理，原生模块配置、应用图标和本地原生插件仍需交给 DCloud 生成原生包。本项目的桌宠 `portable-pet-overlay` 会生成 Android Kotlin 插件代码，属于原生编译材料。涉及重新上传时须先确认上传范围；不得将“前端代码不上传”解释为“任何源码都不上传”。参见 [DCloud 安心打包说明](https://uniapp.dcloud.io/tutorial/build/SafePack)。
 
 2026-10-13 本机已补齐签名配置并实际调用个人证书安心打包，资源编译成功，23:30:56 已提交至 DCloud 云端。云端原生包于 2026-10-14 00:27 下载至 `dist/cache/apk`，本地状态通道出现 RPC 超时，正式 APK 未自动输出。随后复用本次下载的原生包与 `dist/cache/wgt` 中的编译资源，使用 HBuilderX 自带 zipalign/apksigner 完成本地资源合并和个人证书签名，生成 `dist/release/apk/call-phone-1.0.6-ai-20261014.apk`（约 23.6 MB）。
@@ -52,7 +54,9 @@ APK 已通过 v1/v2 签名和 16 KB ZIP 对齐验证；签名与现有 1.0.6 正
 
 2026-10-14 晚间已同步远端最新提交 `5fdaf6f8`，合并本地正式打包入口与远端共享图标构建配置。类型检查、127 项移动端测试及 App 资源构建通过；21:40:57 提交个人证书安心打包，22:41:51 HBuilderX 自动完成资源合并、对齐与本地签名。最新安装包为 `dist/release/apk/tongzige-1.0.6-20261014.apk`（24,969,187 字节），另保留官方原名 `__UNI__D608100__20261014214057.apk`。
 
-最新 APK 的 Android 应用名为「统子哥」，包名 `uni.UNID608100`，版本 `1.0.6`（104），最低 Android API 为 23。已通过 v1/v2 签名、16 KB ZIP 对齐和 ZIP 完整性校验，签名证书与之前正式包一致。72 个前端资源逐文件一致；运行时 manifest 仅有 HBuilderX 正常的发布配置移除与模块描述处理。19 个原生 dex/so 与本次下载的原生包一致，业务资源中未发现签名密码。包含应用广场、常用管理和 AI 资料任务页面；尚未做真机安装及手机到真实数据库的资料任务闭环验收，新增 Agent 服务和 v59 迁移需另外部署。最新 APK SHA256：`a4aaa49f6260054cd1ff3fa4ef79e637e66383ed79a4edde1e9d46e41549dbc5`。
+以下是 1.0.6 的历史打包记录；当前源码已移除旧资料任务，AI 对话使用聊天/Work 入口，不再需要旧任务的 v59 迁移。
+
+该历史 APK 的 Android 应用名为「统子哥」，包名 `uni.UNID608100`，版本 `1.0.6`（104），最低 Android API 为 23。已通过 v1/v2 签名、16 KB ZIP 对齐和 ZIP 完整性校验，签名证书与之前正式包一致。72 个前端资源逐文件一致；运行时 manifest 仅有 HBuilderX 正常的发布配置移除与模块描述处理。19 个原生 dex/so 与本次下载的原生包一致，业务资源中未发现签名密码。历史包包含应用广场、常用管理和旧 AI 资料任务页面。APK SHA256：`a4aaa49f6260054cd1ff3fa4ef79e637e66383ed79a4edde1e9d46e41549dbc5`。
 
 脚本实时显示脱敏后的编译与排队进度；排队期间不要重复提交。PC 前端本地开发地址为 `http://127.0.0.1:5175/`，与后端 API 的 `48080` 端口不同。
 

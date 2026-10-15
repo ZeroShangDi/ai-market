@@ -296,10 +296,16 @@ export async function uploadRecording(
 }
 
 export async function downloadRecording(path: string): Promise<string> {
+  return downloadProtectedFile(path, /^\/api\/v1\/mobile\/calls\/\d+\/recording$/);
+}
+export async function downloadWorkArtifact(path: string): Promise<string> {
+  return downloadProtectedFile(path, /^\/api\/v1\/mobile\/work\/sessions\/[a-f0-9-]{36}\/artifacts\/[a-f0-9-]{36}$/, "文件");
+}
+async function downloadProtectedFile(path: string, allowed: RegExp, label = "录音"): Promise<string> {
   if (!accessToken || !callphoneDevice)
     throw error("AUTH_REQUIRED", "请先登录并连接配对设备");
-  if (!/^\/api\/v1\/mobile\/calls\/\d+\/recording$/.test(path))
-    throw error("INVALID_RESPONSE", "录音地址无效");
+  if (!allowed.test(path))
+    throw error("INVALID_RESPONSE", `${label}地址无效`);
   let temporaryPath = "";
   try {
     return await authenticated(
@@ -314,7 +320,7 @@ export async function downloadRecording(path: string): Promise<string> {
               resolve(result);
             },
             fail: () =>
-              reject(error("SERVICE_UNAVAILABLE", "录音下载失败，请稍后重试")),
+              reject(error("SERVICE_UNAVAILABLE", `${label}下载失败，请稍后重试`)),
           }),
         ),
       (result: UniApp.DownloadSuccessData) => {
@@ -334,10 +340,10 @@ export async function downloadRecording(path: string): Promise<string> {
             result.statusCode === 401
               ? "登录已过期，请重新登录"
               : result.statusCode === 403
-                ? "当前账号无权播放录音"
+                ? (label === "录音" ? "当前账号无权播放录音" : "当前账号无权下载文件")
                 : result.statusCode === 404
-                  ? "录音不存在或尚未上传"
-                  : "录音服务暂时不可用，请重试",
+                  ? `${label}不存在或尚未上传`
+                  : `${label}服务暂时不可用，请重试`,
             result.statusCode,
           );
         return result.tempFilePath;

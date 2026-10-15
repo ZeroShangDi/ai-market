@@ -4,12 +4,13 @@
       action-icon="/static/ai-chat/history.svg" action-label="会话历史" @action="openHistory" />
     <view class="chat-shell">
       <view class="conversation-bar">
+        <view class="mode-switch"><text :class="{ selected: mode === 'chat' }" @tap="mode = 'chat'">聊天</text><text :class="{ selected: mode === 'work' }" @tap="mode = 'work'">Work</text></view>
         <text class="conversation-title">{{ active?.messages.length ? active.title : '一起理清思路' }}</text>
         <view class="new-chat" role="button" aria-label="新建会话" @tap="newChat"><TIcon name="add" size="16px" />新会话</view>
       </view>
-      <scroll-view class="message-scroll" scroll-y :scroll-top="scrollTop" :scroll-with-animation="false"
+      <WorkConversation v-if="mode === 'work'" :conversation-id="state.activeId" :visible="pageVisible" />
+      <scroll-view v-else class="message-scroll" scroll-y :scroll-top="scrollTop" :scroll-with-animation="false"
         @scroll="onScroll" @touchmove="followLatest = false" @wheel="followLatest = false" @scrolltolower="followLatest = true">
-        <AgentTaskPanel :conversation-id="state.activeId" :visible="pageVisible" />
         <view v-if="state.error" class="error-note">{{ state.error }}<view role="button" @tap="aiChat.initialize()">刷新会话</view></view>
         <view v-if="state.loading" class="conversation-note">正在加载会话…</view>
         <view v-if="state.messageCursor && !state.generating && !state.recovering" class="latest-row"><view role="button" @tap="aiChat.loadOlderMessages()">查看更早消息</view></view>
@@ -52,9 +53,9 @@
           <view id="chat-bottom" class="chat-bottom" />
         </view>
       </scroll-view>
-      <text v-if="state.generating && state.activity" class="stream-activity">{{ state.activity }}</text>
-      <view v-if="!followLatest && active?.messages.length" class="latest-row"><view role="button" @tap="jumpToLatest">↓ 回到最新消息</view></view>
-      <view class="composer" :class="{ 'keyboard-open': keyboardOpen }">
+      <text v-if="mode === 'chat' && state.generating && state.activity" class="stream-activity">{{ state.activity }}</text>
+      <view v-if="mode === 'chat' && !followLatest && active?.messages.length" class="latest-row"><view role="button" @tap="jumpToLatest">↓ 回到最新消息</view></view>
+      <view v-if="mode === 'chat'" class="composer" :class="{ 'keyboard-open': keyboardOpen }">
         <TChatSender :value="active?.draft || ''" :loading="state.generating || state.recovering" placeholder="输入问题，聊聊你的想法…"
           :render-presets="[{ name: 'send', type: 'icon' }]" :textarea-props="{ autosize: { minHeight: 48, maxHeight: 176 } }"
           :adjust-position="false" :auto-rise-with-keyboard="false" @update:value="updateDraft" @send="onSend"
@@ -101,7 +102,7 @@ import TIcon from '@tdesign/uniapp/icon/icon.vue';
 import TPopup from '@tdesign/uniapp/popup/popup.vue';
 import '@tdesign/uniapp/theme.css';
 import MobileHeader from '@/components/MobileHeader.vue';
-import AgentTaskPanel from '@/components/AgentTaskPanel.vue';
+import WorkConversation from '@/components/WorkConversation.vue';
 import { aiChat } from '@/services/ai-chat';
 import { mockEnabled } from '@/config';
 import { ensureSession } from '@/services/session';
@@ -111,6 +112,7 @@ import { toast, when } from '@/ui/format';
 import { handleMarkdownClick } from '@/ui/chat-markdown';
 
 const { state, active, stop } = aiChat;
+const mode = ref<'chat' | 'work'>('chat');
 const pageVisible = ref(false);
 const requestedConversation = ref('');
 onLoad(query => { requestedConversation.value = String(query?.conversation || ''); });
@@ -233,6 +235,7 @@ onUnload(() => {
 .conversation-bar { flex-shrink: 0; display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 8px 20px 12px; }
 .conversation-title { color: #929bad; font-size: 12px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .new-chat { flex-shrink: 0; display: flex; align-items: center; gap: 4px; color: #53617d; font-size: 12px; background: #fff; padding: 8px 10px; border-radius: 10px; }
+.mode-switch { display: flex; gap: 10px; flex-shrink: 0; font-size: 13px; color: #929bad; }.mode-switch .selected { color: #294fdb; font-weight: 600; }
 .message-scroll { flex: 1; min-height: 0; height: 0; }
 .welcome { padding: 38px 24px 24px; }
 .welcome-mark { width: 64px; height: 64px; border-radius: 21px; display: flex; align-items: center; justify-content: center; font-size: 41px; color: #fff; background: #294fdb; box-shadow: 0 9px 24px rgba(41,79,219,.17); margin-bottom: 26px; }

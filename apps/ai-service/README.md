@@ -46,7 +46,7 @@ python3 apps/ai-service/scripts/run-local.py
 
 ## Compose 部署
 
-同时启用联网和资料任务：先运行 `python3 scripts/configure-agent-local.py --provider deepseek --require-model`，再使用 `apps/ruoyi-vue-pro/script/callphone-local-up.sh`。脚本配置三方一致的内部 token、启动 AI 和 Agent、执行 v59 待办回执迁移，并保留现有数据库。单独使用下面仅 AI 的部署命令不会启动联网服务；完整 Compose 需再合并 `compose.agent.yml` 并启用 `--profile agent`。
+同时启用联网和原生 Work：先运行 `python3 scripts/configure-agent-local.py --provider deepseek --require-model`，再使用 `apps/ruoyi-vue-pro/script/callphone-local-up.sh`。脚本配置三方一致的内部 token、启动 AI 和 Agent，并保留现有数据库；已退役的 v59 旧资料任务回执迁移不再自动执行。单独使用下面仅 AI 的部署命令不会启动联网服务；完整 Compose 需再合并 `compose.agent.yml` 并启用 `--profile agent`。
 
 在项目根目录执行：
 
@@ -91,4 +91,4 @@ npm --prefix apps/call-phone-uni run build:app
 
 服务测试使用本地模型替身和真实 HTTP SSE，不消耗供应商额度。实际 API key 和 Android 真机的增量输出、后台停止、网络切换仍需联调。
 
-完整本地联调：`python3 scripts/ai-feature-live-smoke.py --exercise`。使用真实模型、真实扫码会话、合成客户和本地业务数据库，检查联网来源、历史回放、任务报告、手动确认、唯一回执及 PC 待办时间；结束清理合成业务记录，保留审计。可用 `--chat-only` / `--task-only` 单独重验。此验收会产生模型费用，不能代替 Android 真机交互验收。
+聊天/联网本地联调：`python3 scripts/ai-feature-live-smoke.py --exercise`。使用真实模型及合成扫码设备/会话，检查联网来源、历史回放和请求重放，结束后清理测试会话与设备。脚本不再创建客户、旧资料任务或业务待办，也不提供旧任务过滤选项。原生 Work 使用 `node --env-file=apps/agent-service/.env.local scripts/work-native-smoke.mjs` 验证。两者会产生模型费用，不能代替 Android 真机交互验收。

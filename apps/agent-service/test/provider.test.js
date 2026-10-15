@@ -1,11 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, mkdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { providerConfig } from '../src/provider.js';
-import { createClaudeExecutor } from '../src/claude.js';
-import { validateReport } from '../src/validation.js';
+import { createWorkExecutor } from '../src/work-executor.js';
 
 test('explicit providers use their own key/model and fixed official endpoint', () => {
   const anthropic = providerConfig({ apiKey: 'anthropic-test', deepseekApiKey: 'deepseek-test' });
@@ -27,29 +26,23 @@ test('invalid provider, wrong-provider key and Claude model in DeepSeek mode fai
   assert.throws(() => providerConfig({ provider: 'deepseek', deepseekApiKey: 'k', model: 'claude-sonnet-4-6' }), e => e.code === 'AGENT_MODEL_INVALID');
 });
 
-test('DeepSeek adapter carries official auth and one explicit model, keeps turn cap and excludes Claude price budget', async t => {
-  const cwd = await mkdtemp(join(tmpdir(), 'agent-provider-test-')); t.after(() => rm(cwd, { recursive: true, force: true }));
-  const { z } = await import('zod'); let options;
-  const sdk = { tool: (name, description, schema, handler) => ({ name, handler }), createSdkMcpServer: value => value, query: ({ options: value }) => {
-    options = value;
-    const iterator = (async function* () {
-      const tools = value.mcpServers.business.tools;
-      await tools[0].handler({}); await tools[1].handler({ customer_id: '7' }); await tools[2].handler({ summary: '报告', markdown: '# 跟进建议' });
-      yield { type: 'result', subtype: 'success' };
-    })(); iterator.close = () => {}; return iterator;
-  } };
-  const executor = createClaudeExecutor({ provider: 'deepseek', apiKey: 'must-not-leak', deepseekApiKey: 'deepseek-test', model: '', loadSdk: async () => sdk, loadZod: async () => ({ z }) });
-  await executor.run({ input: { customer_id: '7', prompt: '整理', attachment: { name: 'x.txt', content: 'x' }, customer_snapshot: { id: '7', name: '客户', stage: '意向' } }, cwd, abortController: new AbortController(), onEvent: async () => {}, onSession: async () => {} });
+test('native Work carries the current provider model and credentials without Claude pricing or ambient business secrets', async t => {
+  const base = await mkdtemp(join(tmpdir(), 'work-provider-test-')); t.after(() => rm(base, { recursive: true, force: true }));
+  const paths = { base, cwd: join(base, 'workspace'), config: join(base, 'config'), home: join(base, 'home') };
+  await Promise.all(Object.values(paths).map(path => mkdir(path, { recursive: true })));
+  let options;
+  const sdk = { tool: (name, description, schema, handler) => ({ name, handler }), createSdkMcpServer: value => value,
+    query: ({ options: value }) => {
+      options = value;
+      const iterator = (async function* () { yield { type: 'result', subtype: 'success', result: '完成' }; })();
+      iterator.close = () => {}; return iterator;
+    } };
+  const executor = createWorkExecutor({ provider: 'deepseek', apiKey: 'must-not-leak', deepseekApiKey: 'deepseek-test', loadSdk: async () => sdk });
+  await executor.run({ ...paths, resources: [], prompt: '工作', signal: new AbortController().signal, onEvent: async () => {}, onSession: async () => {} });
   assert.equal(options.model, 'deepseek-flash'); assert.equal(options.fallbackModel, undefined);
-  assert.equal(options.maxTurns, 12); assert.equal(options.maxBudgetUsd, undefined);
+  assert.equal(options.maxTurns, 40); assert.equal(options.maxBudgetUsd, undefined);
   assert.equal(options.env.ANTHROPIC_AUTH_TOKEN, 'deepseek-test'); assert.equal(options.env.ANTHROPIC_API_KEY, '');
   assert.equal(options.env.CLAUDE_CODE_OAUTH_TOKEN, undefined); assert.equal(options.env.AGENT_INTERNAL_TOKEN, undefined);
   assert.equal(options.env.DISABLE_TELEMETRY, '1'); assert.equal(options.env.DISABLE_ERROR_REPORTING, '1');
   assert.equal(JSON.stringify(options.env).includes('must-not-leak'), false);
-});
-
-test('follow-up proposal bounds UTF-8 payload to fit encrypted business storage', () => {
-  const proposal = { title: '跟进', content: '中'.repeat(1000), due_at: new Date(Date.now() + 86400000).toISOString() };
-  assert.equal(validateReport({ summary: '报告', markdown: '报告', proposal }).proposal.content.length, 1000);
-  assert.throws(() => validateReport({ summary: '报告', markdown: '报告', proposal: { ...proposal, content: '中'.repeat(1001) } }), e => e.code === 'AGENT_INVALID_REQUEST');
 });

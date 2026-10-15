@@ -1,3 +1,5 @@
+> 历史存档：本文所述旧资料任务已于 2026-10-15 退役，相关代码、入口与旧演练脚本已删除；不作为当前启动/部署指引。当前能力与清理结果见 [总 issue](../issues/ai-agent-capability-roadmap-issue.md)。
+
 # Agent 业务桥接原型交接（2026-10-14）
 
 状态：业务桥接已独立提交；Java 模块编译和新增 JUnit 已实际通过，MySQL v59 未应用。宿主默认 Java/Maven 不可用，但续作已找到 HBuilderX 自带 Java 17，并将 Maven 下载到 `/private/tmp`，未全局安装。完整模块回归结果见下方。

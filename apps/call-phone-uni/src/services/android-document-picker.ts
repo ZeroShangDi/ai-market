@@ -1,6 +1,3 @@
-import type { AgentAttachment } from '@/types/ai-task';
-import { validateTaskAttachment, utf8Size } from './ai-task';
-
 let choosing = false;
 interface AndroidFileBridge {
   runtimeMainActivity(): any;
@@ -8,16 +5,16 @@ interface AndroidFileBridge {
   invoke(receiver: unknown, method: string, ...args: unknown[]): any;
   newObject(className: string, ...args: unknown[]): any;
 }
-/** Android Storage Access Framework needs no broad storage permission. */
-export function chooseAndroidTaskAttachment(): Promise<AgentAttachment | undefined> {
+/** Android Storage Access Framework; preserves raw bytes through the supplied reader. */
+export function chooseAndroidDocument<T>(maxSize: number, acceptName: (name: string) => boolean, read: (android: AndroidFileBridge, stream: any, name: string) => T): Promise<T | undefined> {
   if (choosing) return Promise.reject(new Error('文件选择器已打开，请先完成选择'));
-  if (typeof plus === 'undefined' || !plus.android) return Promise.reject(new Error('系统文件选择器不可用，请使用粘贴资料'));
+  if (typeof plus === 'undefined' || !plus.android) return Promise.reject(new Error('系统文件选择器不可用'));
   choosing = true;
   return new Promise((resolve, reject) => {
     const android = plus.android as unknown as AndroidFileBridge;
     let activity: any;
     try { activity = android.runtimeMainActivity(); if (!activity) throw new Error('Activity unavailable'); android.importClass(activity); }
-    catch { choosing = false; reject(new Error('系统文件选择器不可用，请使用粘贴资料')); return; }
+    catch { choosing = false; reject(new Error('系统文件选择器不可用')); return; }
     const previous = activity.onActivityResult;
     const requestCode = 41263;
     let settled = false;
@@ -29,7 +26,7 @@ export function chooseAndroidTaskAttachment(): Promise<AgentAttachment | undefin
       settled = true;
       restore();
       if (resultCode !== -1 || !result) { resolve(undefined); return; }
-      let cursor: any, stream: any, reader: any;
+      let cursor: any, stream: any;
       try {
         const uri = android.invoke(result, 'getData');
         if (!uri) throw new Error('文件地址无法读取，请重新选择');
@@ -42,26 +39,14 @@ export function chooseAndroidTaskAttachment(): Promise<AgentAttachment | undefin
           if (nameColumn >= 0) name = String(android.invoke(cursor, 'getString', nameColumn) || '');
           if (sizeColumn >= 0 && !android.invoke(cursor, 'isNull', sizeColumn)) size = Number(android.invoke(cursor, 'getLong', sizeColumn));
         }
-        if (!/\.(txt|md)$/i.test(name)) throw new Error('请选择 TXT 或 Markdown 文本资料');
-        if (!Number.isFinite(size) || size < 0) throw new Error('无法确认文件大小，请保存到本机后重选，或使用粘贴资料');
-        if (size > 65536) throw new Error('资料最多 64 KiB，请缩减内容');
+        if (!acceptName(name)) throw new Error('文件类型或名称无效');
+        if (!Number.isFinite(size) || size < 0) throw new Error('无法确认文件大小，请保存到本机后重选');
+        if (size > maxSize) throw new Error(`文件最多 ${maxSize / 1024} KiB，请缩减内容`);
         stream = android.invoke(resolver, 'openInputStream', uri);
-        if (!stream) throw new Error('文件无法读取，请使用粘贴资料');
-        const decoder = android.newObject('java.io.InputStreamReader', stream, 'UTF-8');
-        reader = android.newObject('java.io.BufferedReader', decoder);
-        if (!reader) throw new Error('文本读取器不可用，请使用粘贴资料');
-        const lines: string[] = []; let line: any, length = 0;
-        while ((line = android.invoke(reader, 'readLine')) !== null) {
-          if (line === undefined) throw new Error('文本读取失败，请使用粘贴资料');
-          const value = String(line); length += utf8Size(value) + 1;
-          if (length > 65537) throw new Error('资料最多 64 KiB，请缩减内容');
-          lines.push(value);
-        }
-        const attachment = { name, content: lines.join('\n') };
-        if (attachment.content.includes('\uFFFD')) throw new Error('文件不是可靠的 UTF-8 文本，请转换编码或粘贴资料');
-        validateTaskAttachment(attachment); resolve(attachment);
-      } catch (reason) { reject(reason instanceof Error ? reason : new Error('文件读取失败，请使用粘贴资料')); }
-      finally { for (const handle of [reader, stream, cursor]) if (handle) { try { android.invoke(handle, 'close'); } catch { /* Already closed by the reader. */ } } }
+        if (!stream) throw new Error('文件无法读取');
+        resolve(read(android, stream, name));
+      } catch (reason) { reject(reason instanceof Error ? reason : new Error('文件读取失败')); }
+      finally { for (const handle of [stream, cursor]) if (handle) { try { android.invoke(handle, 'close'); } catch { /* Already closed by the reader. */ } } }
     }
     try {
       activity.onActivityResult = handler;
@@ -69,8 +54,8 @@ export function chooseAndroidTaskAttachment(): Promise<AgentAttachment | undefin
       if (!intent) throw new Error('Intent unavailable');
       android.invoke(intent, 'addCategory', 'android.intent.category.OPENABLE');
       android.invoke(intent, 'setType', '*/*');
-      deadline = setTimeout(() => { settled = true; restore(); reject(new Error('文件选择超时，请重新选择或粘贴资料')); }, 300000);
+      deadline = setTimeout(() => { settled = true; restore(); reject(new Error('文件选择超时，请重新选择')); }, 300000);
       android.invoke(activity, 'startActivityForResult', intent, requestCode);
-    } catch { settled = true; restore(); reject(new Error('系统文件选择器无法打开，请使用粘贴资料')); }
+    } catch { settled = true; restore(); reject(new Error('系统文件选择器无法打开')); }
   });
 }

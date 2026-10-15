@@ -22,8 +22,8 @@ import java.util.concurrent.TimeUnit;
 /** Bounded JSON protocol client. Mobile credentials and caller internal headers never leave Java. */
 @Service
 @Slf4j
-public class AgentTaskRelay {
-    public static final int MAX_RESPONSE_BYTES = 1024 * 1024;
+public class AgentRelay {
+    public static final int MAX_RESPONSE_BYTES = 12 * 1024 * 1024;
     @Value("${AGENT_SERVICE_URL:http://127.0.0.1:48082}") private String serviceUrl;
     @Value("${AGENT_INTERNAL_TOKEN:}") private String internalToken;
     private final HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(3))
@@ -36,13 +36,13 @@ public class AgentTaskRelay {
 
     public JsonNode request(String method, String path, JsonNode body, String key, AgentActor actor) {
         if (internalToken == null || internalToken.length() < 32) {
-            throw new Failure(503, "AGENT_UNAVAILABLE", "任务服务尚未配置，请联系管理员");
+            throw new Failure(503, "AGENT_UNAVAILABLE", "工作服务尚未配置，请联系管理员");
         }
-        if (!requests.tryAcquire()) throw new Failure(429, "RATE_LIMITED", "任务请求较多，请稍后再试");
+        if (!requests.tryAcquire()) throw new Failure(429, "RATE_LIMITED", "工作请求较多，请稍后再试");
         String phase = "send";
         try {
             HttpRequest.Builder builder = HttpRequest.newBuilder(URI.create(serviceUrl.replaceAll("/+$", "")
-                            + "/internal/v1/agent/tasks" + path))
+                            + "/internal/v1/agent/work/sessions" + path))
                     .timeout(Duration.ofSeconds(15)).header("Authorization", "Bearer " + internalToken)
                     .header("X-AI-Tenant", actor.tenantId().toString()).header("X-AI-User", actor.userId().toString())
                     .header("X-AI-Device", actor.deviceId()).header("Content-Type", "application/json")
@@ -60,25 +60,25 @@ public class AgentTaskRelay {
                 byte[] bytes;
                 try { bytes = input.readNBytes(MAX_RESPONSE_BYTES + 1); }
                 finally { deadline.cancel(false); }
-                if (bytes.length > MAX_RESPONSE_BYTES) throw new Failure(502, "AGENT_UNAVAILABLE", "任务服务响应过大");
+                if (bytes.length > MAX_RESPONSE_BYTES) throw new Failure(502, "AGENT_UNAVAILABLE", "工作服务响应过大");
                 if (upstream.statusCode() < 200 || upstream.statusCode() >= 300) {
-                    if (upstream.statusCode() >= 500) log.warn("AI task upstream status={}", upstream.statusCode());
+                    if (upstream.statusCode() >= 500) log.warn("AI Work upstream status={}", upstream.statusCode());
                     throw upstreamFailure(upstream.statusCode());
                 }
                 phase = "json";
                 JsonNode result = json.readTree(bytes);
                 if (result == null || !result.isObject() || !result.has("data")) {
-                    throw new Failure(502, "AGENT_UNAVAILABLE", "任务服务返回格式不正确");
+                    throw new Failure(502, "AGENT_UNAVAILABLE", "工作服务返回格式不正确");
                 }
                 return result;
             }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            throw new Failure(503, "AGENT_UNAVAILABLE", "任务服务连接中断，请刷新状态");
+            throw new Failure(503, "AGENT_UNAVAILABLE", "工作服务连接中断，请刷新状态");
         } catch (IOException | IllegalArgumentException e) {
-            log.warn("AI task transport failure phase={} type={} cause={}", phase, e.getClass().getSimpleName(),
+            log.warn("AI Work transport failure phase={} type={} cause={}", phase, e.getClass().getSimpleName(),
                     e.getCause() == null ? "none" : e.getCause().getClass().getSimpleName());
-            throw new Failure(503, "AGENT_UNAVAILABLE", "任务服务暂时不可用，请稍后重试");
+            throw new Failure(503, "AGENT_UNAVAILABLE", "工作服务暂时不可用，请稍后重试");
         } finally {
             requests.release();
         }
@@ -86,12 +86,13 @@ public class AgentTaskRelay {
 
     private Failure upstreamFailure(int status) {
         return switch (status) {
-            case 400, 422 -> new Failure(400, "VALIDATION_ERROR", "任务输入不符合要求");
-            case 403 -> new Failure(403, "FORBIDDEN", "当前账号无权访问该任务");
-            case 404 -> new Failure(404, "NOT_FOUND", "任务或结果不存在");
-            case 409 -> new Failure(409, "TASK_CONFLICT", "任务状态已变化，请刷新后重试");
-            case 429 -> new Failure(429, "RATE_LIMITED", "任务请求较多，请稍后再试");
-            default -> new Failure(503, "AGENT_UNAVAILABLE", "任务服务暂时不可用，请稍后重试");
+            case 400, 422 -> new Failure(400, "VALIDATION_ERROR", "工作输入不符合要求");
+            case 403 -> new Failure(403, "FORBIDDEN", "当前账号无权访问该工作");
+            case 404 -> new Failure(404, "NOT_FOUND", "工作或结果不存在");
+            case 409 -> new Failure(409, "WORK_CONFLICT", "工作状态已变化，请刷新后重试");
+            case 413 -> new Failure(413, "VALIDATION_ERROR", "文件或工具输出超过大小限制");
+            case 429 -> new Failure(429, "RATE_LIMITED", "工作请求较多，请稍后再试");
+            default -> new Failure(503, "AGENT_UNAVAILABLE", "工作服务暂时不可用，请稍后重试");
         };
     }
 
