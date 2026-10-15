@@ -1,4 +1,4 @@
-import { mkdir, readFile, cp, readdir, realpath } from 'node:fs/promises';
+import { mkdir, readFile, cp, readdir, realpath, lstat, writeFile } from 'node:fs/promises';
 import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ApiError, digest } from './validation.js';
@@ -10,6 +10,22 @@ const readTools = new Set(['Read', 'Glob', 'Grep', 'Skill', 'ToolSearch', 'TaskO
 const controlTools = new Set(['Agent', 'Task', 'TaskCreate', 'TaskUpdate', 'EnterPlanMode', 'ExitPlanMode', 'WebSearch', 'WebFetch']);
 const toolResult = value => ({ content: [{ type: 'text', text: JSON.stringify(value) }] });
 const hookDecision = (decision, reason, updatedInput) => ({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: decision, permissionDecisionReason: reason, ...(updatedInput ? { updatedInput } : {}) } });
+
+// Bubblewrap must not create SDK placeholders underneath an already read-only
+// .claude/.git mount. Seed only fixed, inert configuration paths before launch.
+export async function prepareProtectedWorkspace(cwd) {
+  const directories = ['.claude', '.claude/commands', '.claude/skills', '.claude/agents', '.claude/hooks', '.claude/workflows', '.git', '.git/hooks', '.git/info'];
+  for (const relative of directories) {
+    const target = join(cwd, relative);
+    try { const stat = await lstat(target); if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error('Invalid protected workspace directory'); }
+    catch (error) { if (error.code !== 'ENOENT') throw error; await mkdir(target, { mode: 0o700 }); }
+  }
+  for (const relative of ['.claude/settings.json', '.claude/settings.local.json', '.claude/scheduled_tasks.json', '.git/config', '.git/info/attributes', 'CLAUDE.md']) {
+    const target = join(cwd, relative);
+    try { const stat = await lstat(target); if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1) throw new Error('Invalid protected workspace file'); }
+    catch (error) { if (error.code !== 'ENOENT') throw error; await writeFile(target, relative.endsWith('.json') ? '{}' : '', { flag: 'wx', mode: 0o600 }); }
+  }
+}
 
 export async function loadWorkConfig(path) {
   if (!path) return { plugins: [], mcpServers: {}, toolRisk: {}, networkDomains: [] };
@@ -30,6 +46,7 @@ export function createWorkExecutor({ provider = process.env.AGENT_PROVIDER || 'a
     const selected = providerConfig({ provider, apiKey, deepseekApiKey, model });
     const [sdk, { z }, managed] = await Promise.all([loadSdk(), loadZod(), loadWorkConfig(managedConfig)]);
     const { cwd, config, home, base, signal } = ctx;
+    await prepareProtectedWorkspace(cwd);
     const protectedConfig = managedConfig ? [resolve(managedConfig), await realpath(resolve(managedConfig))] : [];
     await mkdir(join(config, 'skills'), { recursive: true, mode: 0o700 });
     // Copy only operator-managed skills, never user uploads or personal ~/.claude settings.
@@ -41,9 +58,11 @@ export function createWorkExecutor({ provider = process.env.AGENT_PROVIDER || 'a
       DISABLE_AUTOUPDATER: '1', CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1', DISABLE_TELEMETRY: '1', DISABLE_ERROR_REPORTING: '1' };
     await mkdir(env.TMPDIR, { recursive: true, mode: 0o700 });
     const sandbox = { enabled: true, failIfUnavailable: true, autoAllowBashIfSandboxed: false, allowUnsandboxedCommands: false,
+      enableWeakerNestedSandbox: false,
       network: { allowedDomains: managed.networkDomains, allowAllUnixSockets: false, allowLocalBinding: false },
       filesystem: { allowWrite: [cwd], denyWrite: [config, home, join(cwd, '.claude'), join(cwd, 'CLAUDE.md'), join(cwd, '.git'), ...managed.plugins],
-        denyRead: [dirname(dirname(base)), process.cwd(), process.env.HOME || '/root', '/proc', '/sys', '/dev/fd', '/run/secrets', '/var/run/secrets', ...protectedConfig],
+        // /dev/fd is a /proc alias, not a directory that bubblewrap can mask.
+        denyRead: [dirname(dirname(base)), process.cwd(), process.env.HOME || '/root', '/proc', '/sys', '/run/secrets', '/var/run/secrets', ...protectedConfig],
         allowRead: [cwd, join(config, 'skills'), ...managed.plugins] },
       credentials: { envVars: credentialNames.map(name => ({ name, mode: 'deny' })), files: protectedConfig.map(path => ({ path, mode: 'deny' })) } };
     const registered = sdk.createSdkMcpServer({ name: 'work', version: '1.0.0', alwaysLoad: true, tools: [

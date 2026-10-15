@@ -1,10 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, rm, mkdir } from 'node:fs/promises';
+import { mkdtemp, rm, mkdir, readFile, writeFile, symlink, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { providerConfig } from '../src/provider.js';
-import { createWorkExecutor } from '../src/work-executor.js';
+import { createWorkExecutor, prepareProtectedWorkspace } from '../src/work-executor.js';
 
 test('explicit providers use their own key/model and fixed official endpoint', () => {
   const anthropic = providerConfig({ apiKey: 'anthropic-test', deepseekApiKey: 'deepseek-test' });
@@ -45,4 +45,24 @@ test('native Work carries the current provider model and credentials without Cla
   assert.equal(options.env.CLAUDE_CODE_OAUTH_TOKEN, undefined); assert.equal(options.env.AGENT_INTERNAL_TOKEN, undefined);
   assert.equal(options.env.DISABLE_TELEMETRY, '1'); assert.equal(options.env.DISABLE_ERROR_REPORTING, '1');
   assert.equal(JSON.stringify(options.env).includes('must-not-leak'), false);
+  assert.equal(options.sandbox.enabled, true); assert.equal(options.sandbox.failIfUnavailable, true);
+  assert.equal(options.sandbox.allowUnsandboxedCommands, false);
+  assert.equal(options.sandbox.enableWeakerNestedSandbox, false);
+  assert.ok(options.sandbox.filesystem.denyRead.includes('/proc'));
+  assert.ok(!options.sandbox.filesystem.denyRead.includes('/dev/fd'));
+  assert.ok((await stat(join(paths.cwd, '.claude/commands'))).isDirectory());
+});
+
+test('SDK protected placeholders are created before read-only mounts, preserve files and reject symlink escapes', async t => {
+  const base = await mkdtemp(join(tmpdir(), 'work-protected-test-'));
+  t.after(() => rm(base, { recursive: true, force: true }));
+  const cwd = join(base, 'workspace'); await mkdir(cwd);
+  await prepareProtectedWorkspace(cwd);
+  await writeFile(join(cwd, 'CLAUDE.md'), 'operator-managed');
+  await prepareProtectedWorkspace(cwd);
+  assert.equal(await readFile(join(cwd, 'CLAUDE.md'), 'utf8'), 'operator-managed');
+  const unsafe = join(base, 'unsafe'), outside = join(base, 'outside');
+  await mkdir(unsafe); await mkdir(outside); await symlink(outside, join(unsafe, '.claude'));
+  await assert.rejects(prepareProtectedWorkspace(unsafe), /Invalid protected/);
+  await assert.rejects(stat(join(outside, 'commands')), { code: 'ENOENT' });
 });

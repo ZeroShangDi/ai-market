@@ -16,6 +16,14 @@ services:
     volumes:
       - yudao-local-agent:/data
     mem_limit: 1g
+    cap_drop: [ALL]
+    read_only: true
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,mode=1777,size=268435456
+    security_opt:
+      - no-new-privileges:true
+      - systempaths=unconfined
+      - seccomp:../agent-service/security/work-seccomp.json
     stop_grace_period: 20s
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:48082/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]

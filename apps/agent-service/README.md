@@ -70,6 +70,10 @@ Work 使用独立入口，普通聊天沿用原接口。旧资料任务已移除
 
 Docker 镜像配置 bubblewrap、socat、Python 3、Poppler 和固定版 pypdf/python-docx/openpyxl/python-pptx。Linux 宿主须支持非特权沙箱，缺依赖或不支持时拒绝执行。文件原样传输不限扩展名，实际格式能力以 [验证记录](../../docs/reviews/2026-10-15-native-work-validation.md) 为准；DOC/XLS/PPT、扫描 OCR 尚未承诺。
 
+Compose 使用 [固定版 Moby allowlist](security/README.md) 支持 bubblewrap 嵌套命名空间，仍以 node 运行、移除全部 capabilities、禁止提权。为完整沙箱挂载独立 `/proc`，容器清除外层 systempaths 挂载限制，同时将根文件系统设为只读，仅 `/data` 与有容量限制的 `/tmp` 可写。不使用较弱的嵌套模式、不允许未隔离命令；实际核验外层进程不可见和凭据屏蔽。启动前预建 SDK 受保护配置占位目录，避免只读挂载后无法创建子路径；不跟随链接、不覆盖既有内容。
+
+实际手机入口验收：`python3 scripts/work-api-live-smoke.py --exercise --base http://100.87.254.68:48080`；追加 `--boundaries-only` 验证私有映射、环境凭据、外层进程隔离与配置写保护。脚本使用合成文件和虚拟设备，结束关闭会话、清理配对；会调用真实模型。已有 Workbuddy 容器代码更新与后续部署修复见 [部署记录](../../docs/reviews/2026-10-15-work-deployment.md)。
+
 显式真实验证（从仓库根目录运行，会调用当前模型并产生费用）：
 
 ```sh

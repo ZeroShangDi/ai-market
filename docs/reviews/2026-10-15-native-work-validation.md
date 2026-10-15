@@ -1,5 +1,7 @@
 # 官方 SDK 原生 Work 接入验证
 
+> 后续部署状态：已核对 Workbuddy 的运行容器代码，并补齐手机监听及 Docker 沙箱兼容配置；从真实 Tailscale 手机入口验证文件处理、下载与续会话通过。以 [部署记录](2026-10-15-work-deployment.md) 为准，以下保留各阶段历史。
+
 日期：2026-10-15，北京时间。范围和后续清单统一维护在 [总 issue](../issues/ai-agent-capability-roadmap-issue.md)。本记录为本地测试证据，不表示已部署或真机验收。
 
 ## 实际环境
