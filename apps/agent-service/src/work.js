@@ -54,6 +54,20 @@ export class WorkStore {
       sequence: s.sequence, messages: s.messages, interactions: s.interactions, resources: s.resources, artifacts: s.artifacts,
       snapshots: s.snapshots, created_at: s.created_at, updated_at: s.updated_at };
   }
+  list(actor) {
+    return [...this.sessions.values()].filter(s => s.tenant === actor.tenant && s.user === actor.user)
+      .sort((a, b) => b.updated_at.localeCompare(a.updated_at)).map(s => ({
+        id: s.id, conversation_id: s.conversation_id, title: s.messages.find(m => m.role === 'user')?.content.slice(0, 60) || '新工作',
+        status: s.status, started: !!s.messages.length, updated_at: s.updated_at, sequence: s.sequence,
+        pending: s.interactions.filter(i => i.status === 'pending').map(i => i.kind),
+        unread: s.events.some(e => e.type === 'result' && e.data.success && e.sequence > (s.seen_sequence || 0)),
+      }));
+  }
+  async seen(actor, id, input) {
+    const s = this.get(actor, id);
+    if (!Number.isSafeInteger(input.sequence) || input.sequence < 0 || input.sequence > s.sequence) invalid('查看位置无效');
+    s.seen_sequence = Math.max(s.seen_sequence || 0, input.sequence); await this.save(s); return { seen_sequence: s.seen_sequence };
+  }
   async create(actor, input) {
     if (!this.accepting) throw conflict('服务正在关闭');
     const conversation = decimalId(input?.conversation_id, 'conversation_id');

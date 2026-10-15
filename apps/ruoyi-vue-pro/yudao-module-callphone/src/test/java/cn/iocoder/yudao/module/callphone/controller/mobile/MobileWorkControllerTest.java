@@ -55,4 +55,14 @@ class MobileWorkControllerTest {
         assertEquals("nosniff", response.getHeaders().getFirst("X-Content-Type-Options")); assertTrue(response.getHeaders().getFirst("Content-Disposition").startsWith("attachment"));
         assertThrows(AgentRelay.Failure.class, () -> controller.get(new MockHttpServletRequest(), "../escape"));
     }
+    @Test void inboxOmitsDeletedConversationsButDoesNotHideServiceFailures() {
+        var controller = controller();
+        var items = json.createArrayNode().add(json.createObjectNode().put("conversation_id", "123"))
+                .add(json.createObjectNode().put("conversation_id", "124"));
+        when(relay.request("GET", "", null, null, actor)).thenReturn(envelope(json.createObjectNode().set("items", items)));
+        doThrow(new MobileAiRelay.ConversationFailure(403)).when(chat).requireConversation("124", "1", "7", "10");
+        assertEquals(1, controller.list(new MockHttpServletRequest()).getBody().path("data").path("items").size());
+        doThrow(new MobileAiRelay.ConversationFailure(503)).when(chat).requireConversation("123", "1", "7", "10");
+        assertThrows(MobileAiRelay.ConversationFailure.class, () -> controller.list(new MockHttpServletRequest()));
+    }
 }

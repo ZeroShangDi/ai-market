@@ -6,7 +6,7 @@ interface AndroidFileBridge {
   newObject(className: string, ...args: unknown[]): any;
 }
 /** Android Storage Access Framework; preserves raw bytes through the supplied reader. */
-export function chooseAndroidDocument<T>(maxSize: number, acceptName: (name: string) => boolean, read: (android: AndroidFileBridge, stream: any, name: string) => T): Promise<T | undefined> {
+export function chooseAndroidDocument<T>(maxSize: number, acceptName: (name: string) => boolean, read: (android: AndroidFileBridge, stream: any, name: string) => T, mime = '*/*'): Promise<T | undefined> {
   if (choosing) return Promise.reject(new Error('文件选择器已打开，请先完成选择'));
   if (typeof plus === 'undefined' || !plus.android) return Promise.reject(new Error('系统文件选择器不可用'));
   choosing = true;
@@ -53,7 +53,7 @@ export function chooseAndroidDocument<T>(maxSize: number, acceptName: (name: str
       const intent = android.newObject('android.content.Intent', 'android.intent.action.OPEN_DOCUMENT');
       if (!intent) throw new Error('Intent unavailable');
       android.invoke(intent, 'addCategory', 'android.intent.category.OPENABLE');
-      android.invoke(intent, 'setType', '*/*');
+      android.invoke(intent, 'setType', mime);
       deadline = setTimeout(() => { settled = true; restore(); reject(new Error('文件选择超时，请重新选择')); }, 300000);
       android.invoke(activity, 'startActivityForResult', intent, requestCode);
     } catch { settled = true; restore(); reject(new Error('系统文件选择器无法打开')); }

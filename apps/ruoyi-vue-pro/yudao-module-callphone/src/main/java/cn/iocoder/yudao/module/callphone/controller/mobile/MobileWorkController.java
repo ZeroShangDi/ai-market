@@ -48,6 +48,18 @@ public class MobileWorkController {
     }
     private ResponseEntity<JsonNode> ok(JsonNode value) { return ResponseEntity.ok().header("Cache-Control", "no-store").body(value); }
 
+    @GetMapping
+    @ApiAccessLog(requestEnable = false, responseEnable = false)
+    public ResponseEntity<JsonNode> list(HttpServletRequest request) {
+        AgentActor actor = actor(request);
+        var items = json.createArrayNode();
+        for (JsonNode item : relay.request("GET", "", null, null, actor).path("data").path("items")) {
+            try { conversation(item, actor); items.add(item); }
+            catch (MobileAiRelay.ConversationFailure error) { if (error.status != 403) throw error; }
+        }
+        return ok(json.createObjectNode().set("data", json.createObjectNode().set("items", items)));
+    }
+
     @PostMapping
     @ApiAccessLog(requestEnable = false, responseEnable = false)
     public ResponseEntity<JsonNode> create(HttpServletRequest request, @RequestBody JsonNode body) {
@@ -58,7 +70,7 @@ public class MobileWorkController {
     @ApiAccessLog(requestEnable = false, responseEnable = false)
     public ResponseEntity<JsonNode> get(HttpServletRequest request, @PathVariable String sessionId) { return ok(owned(actor(request), id(sessionId))); }
 
-    @PostMapping("/{sessionId}/{operation:messages|files|interrupt|close}")
+    @PostMapping("/{sessionId}/{operation:messages|files|interrupt|close|seen}")
     @ApiAccessLog(requestEnable = false, responseEnable = false)
     public ResponseEntity<JsonNode> action(HttpServletRequest request, @PathVariable String sessionId, @PathVariable String operation, @RequestBody JsonNode body) {
         AgentActor actor = actor(request); String sid = id(sessionId); owned(actor, sid);

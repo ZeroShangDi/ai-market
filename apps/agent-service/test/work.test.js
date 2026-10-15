@@ -121,12 +121,15 @@ test('Native adapter uses CC presets, persists sessions, enforces per-tool bound
       assert.equal((await before({ tool_name: 'Bash', tool_input: { command: 'printf test', dangerouslyDisableSandbox: true }, tool_use_id: 'unsafe' })).hookSpecificOutput.permissionDecision, 'deny');
       assert.equal((await before({ tool_name: 'Bash', tool_input: { command: 'printf test' }, tool_use_id: 'bash' })).hookSpecificOutput.permissionDecision, 'allow');
       assert.equal((await before({ tool_name: 'mcp__business__send', tool_input: { text: '固定参数' }, tool_use_id: 'business' })).hookSpecificOutput.permissionDecision, 'deny');
+      for (const tool of ['WebSearch', 'WebFetch']) assert.equal((await options.canUseTool(tool, { query: '猪肉价格', url: 'https://example.com/prices' }, { toolUseID: tool })).behavior, 'allow');
       const answer = await options.canUseTool('AskUserQuestion', { questions: [{ question: '哪个？' }] }, { toolUseID: 'q' }); assert.equal(answer.updatedInput.answers['哪个？'], '第一个');
       yield { type: 'system', subtype: 'init', session_id: 'sdk-id', tools: ['Read', 'Bash', 'Skill', 'Agent'], mcp_servers: [{ name: 'work', status: 'connected' }] };
       yield { type: 'stream_event', event: { type: 'content_block_delta', delta: { type: 'text_delta', text: '处理' } } };
       yield { type: 'stream_event', event: { type: 'content_block_delta', index: 0, delta: { type: 'input_json_delta', partial_json: '{"x":1}' } } };
       yield { type: 'assistant', uuid: 'm', message: { content: [{ type: 'tool_use', id: 't', name: 'Read', input: { file_path: 'x' } }] } };
       yield { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 't', content: '文件结果' }] } };
+      yield { type: 'assistant', message: { content: [{ type: 'tool_use', id: 'search', name: 'WebSearch', input: { query: '价格' } }] } };
+      yield { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'search', content: '[价格来源](https://example.com/prices)' }] } };
       yield { type: 'result', subtype: 'success', result: '完成', is_error: false };
     } }; } };
   const executor = createWorkExecutor({ apiKey: 'provider-secret', loadSdk: async () => sdk });
@@ -137,6 +140,8 @@ test('Native adapter uses CC presets, persists sessions, enforces per-tool bound
   assert.equal(options.persistSession, true); assert.equal(options.resume, 'old-sdk-id'); assert.equal(options.includePartialMessages, true);
   assert.deepEqual(options.settingSources, ['user']); assert.equal(options.sandbox.failIfUnavailable, true); assert.equal(options.sandbox.allowUnsandboxedCommands, false);
   assert.equal(options.env.AGENT_INTERNAL_TOKEN, undefined); assert.ok(options.sandbox.credentials.envVars.some(v => v.name === 'ANTHROPIC_API_KEY' && v.mode === 'deny'));
+  assert.ok(events.some(e => e.type === 'sources' && e.data.items[0].url === 'https://example.com/prices'));
+  assert.equal(approvals.length, 2);
   assert.equal(backupCount, 1); assert.equal(approvals[0].input._risk, 3);
   assert.ok(events.some(e => e.type === 'tool_delta')); assert.ok(events.some(e => e.type === 'tool_result' && e.data.content === '文件结果'));
   assert.ok((await readFile(join(config, 'skills', 'workspace-files', 'SKILL.md'), 'utf8')).includes('python'));
@@ -157,4 +162,18 @@ test('Work HTTP requires identity, uses event cursors and keeps execution on dis
   assert.ok((await response.body.getReader().read()).value.length); abort.abort();
   assert.equal(service.work.get(actor, id).status, 'waiting');
   const batch = await fetch(base + '/' + id + '/events?after=1', { headers }).then(r => r.json()); assert.equal(batch.data.items[0].sequence, 2);
+});
+
+test('Work inbox isolates owners and acknowledges only the completion sequence actually viewed', async t => {
+  const { store, s } = await fixture(t, async () => ({ success: true, text: '完成' }));
+  await store.send(actor, s.id, { request_id: randomUUID(), prompt: '整理猪肉价格表' });
+  await settle(store, s.id);
+  const first = store.list(actor)[0];
+  assert.equal(first.title, '整理猪肉价格表'); assert.equal(first.unread, true); assert.equal(first.started, true);
+  assert.deepEqual(store.list({ ...actor, user: '999' }), []);
+  await assert.rejects(store.seen({ ...actor, tenant: '999' }, s.id, { sequence: first.sequence }));
+  await store.seen(actor, s.id, { sequence: first.sequence }); assert.equal(store.list(actor)[0].unread, false);
+  await store.send(actor, s.id, { request_id: randomUUID(), prompt: '再整理一次' }); await settle(store, s.id);
+  await store.seen(actor, s.id, { sequence: first.sequence }); assert.equal(store.list(actor)[0].unread, true);
+  await assert.rejects(store.seen(actor, s.id, { sequence: 999999 }));
 });

@@ -41,8 +41,9 @@ export async function createAgentServer({ internalToken, dataDir, webExecutor, w
       if (path.startsWith('/internal/v1/agent/work/sessions')) {
         if (!work) throw new ApiError(503, 'WORK_UNAVAILABLE', 'Work 尚未配置');
         const base = '/internal/v1/agent/work/sessions';
+        if (path === base && request.method === 'GET') { json(response, 200, { data: { items: work.list(identity) } }); return; }
         if (path === base && request.method === 'POST') { json(response, 200, { data: await work.create(identity, await body(request)) }); return; }
-        const match = /^\/internal\/v1\/agent\/work\/sessions\/([^/]+)(?:\/(messages|events|interrupt|close|files|interactions|artifacts)(?:\/([^/]+))?)?$/.exec(path);
+        const match = /^\/internal\/v1\/agent\/work\/sessions\/([^/]+)(?:\/(messages|events|interrupt|close|files|interactions|artifacts|seen)(?:\/([^/]+))?)?$/.exec(path);
         if (!match) throw new ApiError(404, 'WORK_NOT_FOUND', '接口不存在');
         const id = uuid(match[1]), operation = match[2], child = match[3];
         if (!operation && request.method === 'GET') { json(response, 200, { data: work.view(work.get(identity, id)) }); return; }
@@ -67,6 +68,7 @@ export async function createAgentServer({ internalToken, dataDir, webExecutor, w
             if (request.headers['idempotency-key'] !== input.request_id) throw new ApiError(400, 'AGENT_INVALID_REQUEST', 'Idempotency-Key 必须与 request_id 相同');
             json(response, 200, { data: await work.send(identity, id, input) }); return;
           }
+          if (operation === 'seen') { json(response, 200, { data: await work.seen(identity, id, input) }); return; }
           if (operation === 'files') { json(response, 200, { data: await work.upload(identity, id, input) }); return; }
           if (operation === 'interactions' && child) { json(response, 200, { data: await work.answer(identity, id, child, input) }); return; }
           if (['interrupt', 'close'].includes(operation)) { json(response, 200, { data: await work.stop(identity, id, operation === 'close') }); return; }

@@ -15,8 +15,9 @@ function harness() {
   }).outputText;
   const modules = {
     vue,
-    '@dcloudio/uni-app': { onShow() {}, onUnload(fn) { unload = fn; } },
+    '@dcloudio/uni-app': { onShow() {}, onHide() {}, onUnload(fn) { unload = fn; } },
     '@/modules/app-registry': { mobileApps: [], openMobileApp() {} },
+    '@/services/work': { workInbox: { items: [] }, refreshWorkInbox: async () => {}, workStatus: () => '' },
     '@/services/ai-chat': { aiChat: { state: { conversations: [] } } },
     '@/services/ai-chat-remote': { remoteChatRepository: { list() { return new Promise((resolve, reject) => requests.push({ resolve, reject })); } } },
     '@/services/session': { ensureSession: () => authenticated },
@@ -30,7 +31,7 @@ function harness() {
     '@/ui/format': { when: value => value, toast: value => notices.push(value) },
   };
   const exports = {};
-  vm.runInNewContext(code, { exports, require: key => modules[key] || {}, uni: { navigateTo: args => navigations.push(args.url) }, console });
+  vm.runInNewContext(code, { exports, require: key => modules[key] || {}, uni: { navigateTo: args => navigations.push(args.url) }, console, clearTimeout, setTimeout });
   return {
     ...exports.subject, requests, navigations, notices,
     changeSession() { session++; sessionChanged(); },

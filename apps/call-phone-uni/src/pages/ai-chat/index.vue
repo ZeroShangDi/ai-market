@@ -1,35 +1,24 @@
 <template>
   <view class="chat-page" :style="pageStyle">
-    <MobileHeader title="AI 对话" back-icon="/static/figma/2-71-imgFrame.svg" back-fallback="/pages/index/index"
-      action-icon="/static/ai-chat/history.svg" action-label="会话历史" @action="openHistory" />
+    <MobileHeader :title="pageTitle" back-icon="/static/figma/2-71-imgFrame.svg" back-fallback="/pages/index/index">
+      <template #actions><view class="header-tools">
+        <view role="button" aria-label="新建会话" @tap="newChat"><TIcon name="add" size="21px" /></view>
+        <view role="button" aria-label="会话历史" @tap="openHistory"><TIcon name="history" size="21px" /></view>
+      </view></template>
+    </MobileHeader>
     <view class="chat-shell">
-      <view class="conversation-bar">
-        <view class="mode-switch"><text :class="{ selected: mode === 'chat' }" @tap="mode = 'chat'">聊天</text><text :class="{ selected: mode === 'work' }" @tap="mode = 'work'">Work</text></view>
-        <text class="conversation-title">{{ active?.messages.length ? active.title : '一起理清思路' }}</text>
-        <view class="new-chat" role="button" aria-label="新建会话" @tap="newChat"><TIcon name="add" size="16px" />新会话</view>
-      </view>
-      <WorkConversation v-if="mode === 'work'" :conversation-id="state.activeId" :visible="pageVisible" />
+      <WorkConversation v-if="mode === 'work'" :conversation-id="state.activeId" :visible="pageVisible" @started="workStarted = true" @title="workTitle = $event">
+        <template #mode><ConversationModeToggle mode="work" :locked="modeLocked" @change="setMode" /></template>
+      </WorkConversation>
       <scroll-view v-else class="message-scroll" scroll-y :scroll-top="scrollTop" :scroll-with-animation="false"
         @scroll="onScroll" @touchmove="followLatest = false" @wheel="followLatest = false" @scrolltolower="followLatest = true">
         <view v-if="state.error" class="error-note">{{ state.error }}<view role="button" @tap="aiChat.initialize()">刷新会话</view></view>
         <view v-if="state.loading" class="conversation-note">正在加载会话…</view>
         <view v-if="state.messageCursor && !state.generating && !state.recovering" class="latest-row"><view role="button" @tap="aiChat.loadOlderMessages()">查看更早消息</view></view>
         <view v-if="!active?.messages.length" class="welcome">
-          <view class="welcome-mark">✦</view>
-          <text class="welcome-eyebrow">你的私人助理</text>
-          <view class="welcome-title"><text>有问题，有想法，</text><text>一起找到下一步</text></view>
-          <view class="welcome-description"><text>写作、梳理、日常规划，</text><text>把事情理清，把工作推进。</text></view>
-          <view class="suggestions">
-            <view v-for="suggestion in suggestions" :key="suggestion.prompt" class="suggestion" role="button"
-              :aria-label="suggestion.prompt" @tap="send(suggestion.prompt)">
-              <view class="suggestion-icon" :class="suggestion.tone"><TIcon :name="suggestion.icon" size="21px" /></view>
-              <view class="suggestion-copy"><text>{{ suggestion.title }}</text><text class="suggestion-description">{{ suggestion.description }}</text></view>
-              <TIcon name="chevron-right" size="18px" color="#a0aabd" />
-            </view>
-          </view>
+          <view class="welcome-title">有什么可以帮你？</view>
         </view>
         <view v-else class="messages">
-          <text class="conversation-note">{{ mockEnabled ? '统子哥 · 演示对话' : '统子哥' }}</text>
           <view v-for="message in active.messages" :key="message.id" class="message-item">
             <TChatMessage :chat-id="message.id" :role="message.role" :placement="message.role === 'user' ? 'right' : 'left'"
               :name="message.role === 'assistant' ? '统子哥' : undefined" :status="message.status" animation="dots" variant="base"
@@ -56,32 +45,42 @@
       <text v-if="mode === 'chat' && state.generating && state.activity" class="stream-activity">{{ state.activity }}</text>
       <view v-if="mode === 'chat' && !followLatest && active?.messages.length" class="latest-row"><view role="button" @tap="jumpToLatest">↓ 回到最新消息</view></view>
       <view v-if="mode === 'chat'" class="composer" :class="{ 'keyboard-open': keyboardOpen }">
+          <view v-if="!active?.messages.length" class="suggestions">
+            <view v-for="suggestion in suggestions" :key="suggestion.prompt" class="suggestion" role="button"
+              :aria-label="suggestion.prompt" @tap="send(suggestion.prompt)">
+              <view class="suggestion-icon" :class="suggestion.tone"><TIcon :name="suggestion.icon" size="21px" /></view>
+              <view class="suggestion-copy"><text>{{ suggestion.title }}</text></view>
+
+            </view>
+          </view>
+
         <TChatSender :value="active?.draft || ''" :loading="state.generating || state.recovering" placeholder="输入问题，聊聊你的想法…"
-          :render-presets="[{ name: 'send', type: 'icon' }]" :textarea-props="{ autosize: { minHeight: 48, maxHeight: 176 } }"
+          :render-presets="[{ name: 'send', type: 'icon' }]" :textarea-props="{ autosize: { minHeight: '48px', maxHeight: '160px' } }"
           :adjust-position="false" :auto-rise-with-keyboard="false" @update:value="updateDraft" @send="onSend"
           @stop="stop" @keyboardheightchange="keyboardChanged">
           <template #footer-prefix>
-            <view class="composer-tools"><text class="composer-label">✦ 统子哥</text>
+            <view class="composer-tools"><ConversationModeToggle mode="chat" :locked="modeLocked" @change="setMode" />
               <view v-if="!mockEnabled" class="web-toggle" :class="{ active: state.webSearch }" role="button"
                 :aria-label="state.webSearch ? '关闭联网搜索' : '开启联网搜索'" :aria-pressed="state.webSearch"
-                @tap="!state.generating && !state.recovering && (state.webSearch = !state.webSearch)">联网{{ state.webSearch ? ' · 已开启' : '' }}</view>
+                @tap="!state.generating && !state.recovering && (state.webSearch = !state.webSearch)">联网</view>
             </view>
           </template>
         </TChatSender>
-        <text class="preview-note">{{ mockEnabled ? '演示模式 · 回复为模拟内容' : 'AI 回复仅供参考 · 不会自动读取客户资料' }}</text>
+        <text v-if="mockEnabled" class="preview-note">演示模式</text>
       </view>
     </view>
     <TPopup :visible="historyVisible" placement="bottom" :close-btn="true" :z-index="28" :overlay-props="{ zIndex: 27 }"
       @visible-change="historyVisible = $event.visible">
       <view class="history-panel">
         <text class="history-title">会话历史</text>
-        <text class="history-subtitle">{{ mockEnabled ? '本次预览期间保留，关闭应用后清空' : '会话保存在当前工作区，仅本人可见' }}</text>
+        <input v-model="historyQuery" class="history-search" placeholder="搜索会话标题" confirm-type="search" />
+        <text v-if="workInbox.error" class="error-note" @tap="refreshWorkInbox">{{ workInbox.error }} · 重试</text>
         <view class="history-new" role="button" @tap="newChat"><TIcon name="add" size="18px" />开始新会话</view>
         <scroll-view class="history-list" scroll-y>
-          <view v-if="!history.length" class="history-empty">还没有会话，先聊一个问题吧</view>
+          <view v-if="!history.length" class="history-empty">{{ historyQuery ? '没有匹配的会话' : '还没有会话' }}</view>
           <view v-for="item in history" :key="item.id" class="history-item" :class="{ selected: item.id === state.activeId }">
             <view class="history-item-copy" role="button" :aria-label="item.title" @tap="selectChat(item.id)">
-              <text class="history-item-title">{{ item.title }}</text><text class="history-item-date">{{ when(item.updated_at) }}</text>
+              <text class="history-item-title">{{ item.title }}</text><text class="history-item-date">{{ item.work ? workStatus(item.work) + ' · ' : '' }}{{ when(item.updated_at) }}</text>
             </view>
             <view class="history-delete" role="button" aria-label="删除会话" @tap="deleteChat(item.id)"><TIcon name="delete" size="18px" /></view>
           </view>
@@ -93,6 +92,8 @@
 </template>
 
 <script setup lang="ts">
+import ConversationModeToggle from '@/components/ConversationModeToggle.vue';
+import { workInbox, refreshWorkInbox, workStatus } from '@/services/work';
 import { computed, nextTick, ref, watch } from 'vue';
 import { onBackPress, onHide, onLoad, onShow, onUnload } from '@dcloudio/uni-app';
 import TChatMessage from '@tdesign/uniapp-chat/chat-message/chat-message.vue';
@@ -113,7 +114,13 @@ import { handleMarkdownClick } from '@/ui/chat-markdown';
 
 const { state, active, stop } = aiChat;
 const mode = ref<'chat' | 'work'>('chat');
-const pageVisible = ref(false);
+const pageVisible = ref(false), workStarted = ref(false), workTitle = ref(''), historyQuery = ref('');
+const summary = computed(() => workInbox.items.find(item => item.conversation_id === state.activeId));
+const modeLocked = computed(() => workInbox.loading || workStarted.value || !!summary.value?.started || !!active.value?.messages.length || state.generating || state.recovering);
+const pageTitle = computed(() => mode.value === 'work' ? (workTitle.value || summary.value?.title || '新工作') : (active.value?.messages.length ? active.value.title : '新会话'));
+function setMode(value: 'chat' | 'work') { if (!modeLocked.value) mode.value = value; }
+watch(() => state.activeId, () => { workStarted.value = false; workTitle.value = ''; mode.value = summary.value?.started ? 'work' : 'chat'; });
+watch(() => summary.value?.started, started => { if (started) mode.value = 'work'; });
 const requestedConversation = ref('');
 onLoad(query => { requestedConversation.value = String(query?.conversation || ''); });
 const historyVisible = ref(false), scrollTop = ref(0), followLatest = ref(true);
@@ -130,11 +137,30 @@ const pageStyle = computed(() => {
   // #endif
 });
 const lastMessageId = computed(() => active.value?.messages.at(-1)?.id);
-const history = computed(() => state.conversations.filter(item => !mockEnabled || item.messages.length).slice().sort((a, b) => b.updated_at.localeCompare(a.updated_at)));
+const history = computed(() => {
+  const items = state.conversations.filter(item => !mockEnabled || item.messages.length).map(item => {
+    const work = workInbox.items.find(w => w.conversation_id === item.id && w.started);
+    return { ...item, title: work?.title || item.title, updated_at: work?.updated_at || item.updated_at, work };
+  });
+  for (const work of workInbox.items.filter(w => w.started)) if (!items.some(i => i.id === work.conversation_id)) items.push({ id: work.conversation_id, title: work.title, updated_at: work.updated_at, messages: [], draft: '', work });
+  return items.filter(item => item.title.toLowerCase().includes(historyQuery.value.trim().toLowerCase())).sort((a, b) => b.updated_at.localeCompare(a.updated_at));
+});
+let searchTimer: ReturnType<typeof setTimeout> | undefined;
+watch(historyQuery, query => {
+  clearTimeout(searchTimer);
+  if (!query.trim()) return;
+  searchTimer = setTimeout(async () => {
+    while (historyVisible.value && historyQuery.value === query && state.nextCursor) {
+      const cursor = state.nextCursor;
+      await aiChat.loadMoreConversations();
+      if (state.nextCursor === cursor) break;
+    }
+  }, 250);
+});
 const suggestions = [
-  { title: '起草一封邮件', description: '说清目的，表达得体', prompt: '帮我起草一封工作邮件，先问我收件人和邮件目的', icon: 'chat', tone: 'blue' },
-  { title: '整理一段内容', description: '提炼重点，理清结构', prompt: '帮我整理一段内容，提炼重点，先让我提供原文', icon: 'user', tone: 'purple' },
-  { title: '安排今天的工作', description: '排好优先级，从容推进', prompt: '帮我安排今天的工作，先问我需要处理哪些事情', icon: 'calendar', tone: 'green' },
+  { title: '起草邮件', description: '说清目的，表达得体', prompt: '帮我起草一封工作邮件，先问我收件人和邮件目的', icon: 'chat', tone: 'blue' },
+  { title: '整理内容', description: '提炼重点，理清结构', prompt: '帮我整理内容，提炼重点，先让我提供原文', icon: 'user', tone: 'purple' },
+  { title: '安排工作', description: '排好优先级，从容推进', prompt: '帮我安排工作，先问我需要处理哪些事情', icon: 'calendar', tone: 'green' },
 ];
 
 
@@ -169,11 +195,12 @@ async function retry(id: string) {
   if (await aiChat.retry(id)) { followLatest.value = true; void jumpToLatest(); }
 }
 function copy(content: string) { uni.setClipboardData({ data: content, fail: () => toast('复制失败，请重试') }); }
-async function newChat() { await aiChat.newConversation(true); historyVisible.value = false; followLatest.value = true; scrollTop.value = 0; lastScrollTop = 0; uni.hideKeyboard(); }
-function openHistory() { uni.hideKeyboard(); historyVisible.value = true; }
-async function selectChat(id: string) { await aiChat.select(id); historyVisible.value = false; void jumpToLatest(); }
+async function newChat() { await aiChat.newConversation(true); mode.value = 'chat'; workStarted.value = false; workTitle.value = ''; historyVisible.value = false; followLatest.value = true; scrollTop.value = 0; lastScrollTop = 0; uni.hideKeyboard(); }
+function openHistory() { uni.hideKeyboard(); historyVisible.value = true; if (!mockEnabled) void refreshWorkInbox(); }
+function includeWorkConversation(id: string) { const work = workInbox.items.find(w => w.conversation_id === id); if (work && !state.conversations.some(c => c.id === id)) state.conversations.push({ id, title: work.title, updated_at: work.updated_at, messages: [], draft: '' }); }
+async function selectChat(id: string) { includeWorkConversation(id); await aiChat.select(id); mode.value = summary.value?.started ? 'work' : 'chat'; historyVisible.value = false; void jumpToLatest(); }
 function deleteChat(id: string) {
-  uni.showModal({ title: '删除会话', content: '删除后无法恢复，确认删除这段对话？', success: result => { if (result.confirm) void aiChat.remove(id); } });
+  uni.showModal({ title: '删除会话', content: '删除后无法恢复，确认删除这段对话？', success: async result => { if (result.confirm) { await aiChat.remove(id); if (!mockEnabled) await refreshWorkInbox(); } } });
 }
 function keyboardChanged(event: { height: number }) {
   keyboardHeight.value = Math.max(0, event.height);
@@ -193,14 +220,15 @@ watch(automaticCall, call => { if (call) { historyVisible.value = false; stop();
 onShow(() => {
   if (!ensureSession()) return;
   pageVisible.value = true;
-  void aiChat.resume().then(async () => {
+  void Promise.all([aiChat.resume(), mockEnabled ? Promise.resolve() : refreshWorkInbox()]).then(async () => {
     if (!state.initialized || !state.visible) return;
     if (requestedConversation.value) {
       const id = requestedConversation.value;
       requestedConversation.value = '';
-      if (state.conversations.some(item => item.id === id)) await aiChat.select(id);
+      if (state.conversations.some(item => item.id === id) || workInbox.items.some(item => item.conversation_id === id)) { includeWorkConversation(id); await aiChat.select(id); }
       else toast('这段对话已不可访问，请从会话历史选择');
     }
+    if (summary.value?.started) mode.value = 'work';
     if (active.value?.messages.length) void jumpToLatest();
   });
 });
@@ -211,7 +239,7 @@ onBackPress(() => {
   return false;
 });
 onUnload(() => {
-  pageVisible.value = false;
+  pageVisible.value = false; clearTimeout(searchTimer);
   aiChat.suspend(); clearTimeout(scrollTimer);
   // #ifdef H5
   window.visualViewport?.removeEventListener('resize', resizeWebViewport);
@@ -278,4 +306,16 @@ onUnload(() => {
 .history-list { height: 40vh; }.history-empty { text-align: center; padding: 50px 0; color: #a0a8b7; font-size: 13px; }
 .history-item { display: flex; align-items: center; padding: 14px 12px; border-radius: 12px; margin-bottom: 6px; }.history-item.selected { background: #f5f7fc; }
 .history-item-copy { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: 7px; }.history-item-title { font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.history-item-date { font-size: 11px; color: #98a1b1; }.history-delete { padding: 10px; color: #9ba4b4; }
+.header-tools { display: flex; gap: 6px; flex-shrink: 0; }.header-tools > view { width: 36px; height: 36px; display: flex; align-items: center; justify-content: center; }
+.history-search { margin-top: 18px; background: #f3f5f9; border-radius: 12px; padding: 12px 14px; font-size: 14px; }
+.welcome { padding: 17vh 24px 24px; }.welcome-title { text-align: center; font-size: 25px; }
+.suggestions { flex-direction: row; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 26px; }.suggestion { padding: 8px 10px; border-radius: 18px; gap: 5px; }.suggestion-icon { width: 23px; height: 23px; background: transparent; }.suggestion-copy { font-size: 11px; }
+.mode-switch text { padding: 6px 8px; }.mode-switch .selected { background: #edf2ff; border-radius: 12px; }
+.suggestions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; margin: 0 0 12px; }
+.suggestion { padding: 11px 4px; justify-content: center; gap: 5px; background: #fff; border: 1px solid #e7e8eb; border-radius: 12px; min-width: 0; }
+.suggestion-copy { flex: initial; font-size: 12px; color: #5d6169; white-space: nowrap; }.suggestion-icon { width: 18px; height: 18px; color: #80858e; }.suggestion-icon :deep(.t-icon) { font-size: 16px !important; }
+@media (max-width: 340px) { .suggestions { grid-template-columns: 1fr; gap: 5px; }.suggestion { justify-content: flex-start; padding: 9px 13px; } }
+.suggestion-icon.blue { color: #5885ce; }.suggestion-icon.purple { color: #9876c9; }.suggestion-icon.green { color: #3c9a79; }
+.header-tools > view:first-child { color: #5885ce; }.header-tools > view:last-child { color: #8e75c9; }
+:deep(.t-chat-sender__textarea--control) { box-sizing: border-box; padding-bottom: 0; max-height: 160px; overflow-y: auto !important; }:deep(.t-chat-sender__textarea) { max-height: 160px; overflow: hidden; }:deep(.uni-textarea-wrapper) { max-height: 160px !important; overflow: hidden; }:deep(.uni-textarea-textarea) { max-height: 160px !important; overflow-y: auto !important; }
 </style>

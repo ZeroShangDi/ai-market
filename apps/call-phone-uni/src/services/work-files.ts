@@ -3,10 +3,10 @@ import { request, downloadWorkArtifact } from '@/api/http';
 
 const limit = 8 * 1024 * 1024;
 export interface WorkUpload { name: string; content_base64: string }
-export async function chooseWorkFile(): Promise<WorkUpload | undefined> {
+export async function chooseWorkFile(accept = '', mime = '*/*'): Promise<WorkUpload | undefined> {
   // #ifdef H5
   if (typeof document !== 'undefined') return new Promise((resolve, reject) => {
-    const input = document.createElement('input'); input.type = 'file';
+    const input = document.createElement('input'); input.type = 'file'; input.accept = accept;
     input.oncancel = () => { input.remove(); resolve(undefined); };
     input.onchange = async () => {
       const file = input.files?.[0]; input.remove(); if (!file) return resolve(undefined);
@@ -35,7 +35,7 @@ export async function chooseWorkFile(): Promise<WorkUpload | undefined> {
         }
         return { name, content_base64: String(android.invoke('android.util.Base64', 'encodeToString', android.invoke(output, 'toByteArray'), 2)) };
       } finally { android.invoke(output, 'close'); }
-    });
+    }, mime);
   // #endif
   throw new Error('当前平台暂不支持原始文件选择');
 }

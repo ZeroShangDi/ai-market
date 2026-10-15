@@ -25,12 +25,14 @@
         <view class="section">
           <view class="section-heading"><text class="section-title">继续处理</text><text v-if="loadingRecent" class="section-caption">加载中…</text></view>
           <view class="recent-card">
+            <view v-for="work in pendingWork" :key="work.id" class="recent-row" @tap="openConversation(work.conversation_id)"><view class="recent-icon"><AppIcon name="pending" :size="22" color="#5264a5" /></view><view class="recent-copy"><text class="recent-title">{{ work.title }}</text><text class="work-badge" :class="{ attention: work.pending.length || work.unread }">{{ workStatus(work) }}</text></view><AppIcon name="chevron-right" :size="18" color="#8994a8" /></view>
+            <view v-if="workInbox.error" class="recent-error" @tap="refreshWorkInbox">工作状态暂不可用 · 重试</view>
             <view v-for="conversation in recentConversations" :key="conversation.id" class="recent-row" role="button" :aria-label="'继续对话：' + conversation.title" @tap="openConversation(conversation.id)">
               <view class="recent-icon"><AppIcon name="pending" :size="22" color="#5264a5" /></view>
               <view class="recent-copy"><text class="recent-title">{{ conversation.title }}</text><text class="recent-time">{{ when(conversation.updated_at) }}</text></view>
               <AppIcon name="chevron-right" :size="18" color="#8994a8" />
             </view>
-            <view v-if="!recentConversations.length" class="recent-empty">
+            <view v-if="!recentConversations.length && !pendingWork.length" class="recent-empty">
               <view class="recent-icon"><AppIcon name="pending" :size="22" color="#5264a5" /></view>
               <view class="recent-copy"><text class="recent-title">{{ recentError ? '暂时无法加载最近对话' : (loadingRecent ? '正在加载…' : '暂无最近对话') }}</text><text v-if="recentError" class="recent-time">{{ recentError }}</text></view>
               <view v-if="recentError" class="retry" role="button" aria-label="重新加载最近对话" @tap="loadRecent">重试</view>
@@ -45,7 +47,7 @@
 </template>
 <script setup lang="ts">
 import { computed, ref } from 'vue';
-import { onShow, onUnload } from '@dcloudio/uni-app';
+import { onShow, onHide, onUnload } from '@dcloudio/uni-app';
 import MobileHeader from '@/components/MobileHeader.vue';
 import TabBar from '@/components/TabBar.vue';
 import PreviewBanner from '@/components/PreviewBanner.vue';
@@ -54,6 +56,7 @@ import AppAsset from '@/modules/assets/AppAsset.vue';
 import { openMobileApp } from '@/modules/app-registry';
 import { favoriteApps, refreshFavorites } from '@/modules/app-registry/favorites';
 import { scanAndPair } from '@/services/pairing-actions';
+import { workInbox, refreshWorkInbox, workStatus } from '@/services/work';
 import { aiChat } from '@/services/ai-chat';
 import { remoteChatRepository } from '@/services/ai-chat-remote';
 import { ensureSession } from '@/services/session';
@@ -64,13 +67,14 @@ import { mockEnabled } from '@/config';
 import { when, toast } from '@/ui/format';
 import type { ConversationSummary } from '@/types/ai-chat';
 
+const pendingWork = computed(() => workInbox.items.filter(item => item.started).slice().sort((a, b) => Number(!!(b.pending.length || b.unread)) - Number(!!(a.pending.length || a.unread)) || b.updated_at.localeCompare(a.updated_at)).slice(0, 8));
 const recent = ref<ConversationSummary[]>([]);
 const recentError = ref('');
 const loadingRecent = ref(false);
 let recentGeneration = 0;
 const recentConversations = computed(() => (mockEnabled
   ? aiChat.state.conversations.filter(item => item.messages.length)
-  : recent.value).slice().sort((a, b) => b.updated_at.localeCompare(a.updated_at)).slice(0, 3));
+  : recent.value).filter(item => !workInbox.items.some(w => w.started && w.conversation_id === item.id)).slice().sort((a, b) => b.updated_at.localeCompare(a.updated_at)).slice(0, 3));
 
 async function loadRecent() {
   const generation = ++recentGeneration;
@@ -106,8 +110,12 @@ const stopSession = onSessionChange(() => {
   loadingRecent.value = false;
   void loadRecent();
 });
-onShow(() => { refreshFavorites(); void loadRecent(); });
-onUnload(() => { ++recentGeneration; stopSession(); });
+let workPoll: ReturnType<typeof setTimeout> | undefined;
+let visible = false;
+async function pollWork() { if (!visible || mockEnabled) return; if (hasAccessToken()) await refreshWorkInbox(); if (visible) workPoll = setTimeout(pollWork, 10000); }
+onShow(() => { visible = true; refreshFavorites(); void loadRecent(); void pollWork(); });
+onHide(() => { visible = false; clearTimeout(workPoll); });
+onUnload(() => { visible = false; clearTimeout(workPoll); ++recentGeneration; stopSession(); });
 </script>
 <style scoped lang="scss">
 .page { min-height: 100vh; padding-bottom: calc(112px + env(safe-area-inset-bottom)); background: #f7f8fc; }
@@ -143,4 +151,5 @@ onUnload(() => { ++recentGeneration; stopSession(); });
 .retry { padding: 8px 0 8px 6px; flex-shrink: 0; color: #294fdb; font-size: 12px; }
 .recent-error { padding: 0 0 14px; color: #a96812; font-size: 11px; }
 @media (max-width: 350px) { .content { padding-left: 16px; padding-right: 16px; } .ai-entry { padding-left: 16px; padding-right: 16px; } .recent-card { padding: 0 12px; } }
+.work-badge { display: inline-block; font-size: 11px; color: #7b879b; margin-top: 7px; }.work-badge.attention { color: #294fdb; background: #edf2ff; border-radius: 8px; padding: 3px 7px; }
 </style>

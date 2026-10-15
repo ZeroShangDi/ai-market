@@ -2,6 +2,7 @@ import { mkdir, readFile, cp, readdir, realpath, lstat, writeFile } from 'node:f
 import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ApiError, digest } from './validation.js';
+import { collectSources } from './web-chat.js';
 import { providerConfig } from './provider.js';
 import { workspacePath, workspaceSize, contained } from './work-files.js';
 
@@ -96,13 +97,13 @@ export function createWorkExecutor({ provider = process.env.AGENT_PROVIDER || 'a
             if (input.dangerouslyDisableSandbox || input.run_in_background) return { behavior: 'deny', message: '仅允许受隔离的前台命令' };
             await ctx.backup();
             // No network, business credentials or writes outside a restorable workspace.
-            // Opening network egress changes arbitrary commands to tier 3.
-            risk = managed.networkDomains.length ? 3 : 1;
+            // Network-capable arbitrary commands require review; this is not a confirmed business side effect.
+            risk = managed.networkDomains.length ? 2 : 1;
           } else if (tool.startsWith('mcp__work__')) risk = 1;
           else if (tool.startsWith('mcp__')) risk = managed.toolRisk[tool] || 3;
           else if (controlTools.has(tool)) {
             if (input.run_in_background || input.isolation) return { behavior: 'deny', message: '本阶段子任务必须在当前工作区内前台完成' };
-            risk = ['Agent', 'Task', 'WebFetch'].includes(tool) ? 3 : 1;
+            risk = ['Agent', 'Task'].includes(tool) ? 2 : 1;
           } else return { behavior: 'deny', message: '此原生工具尚未接入 Work 的执行边界' };
         } catch (e) { return { behavior: 'deny', message: e instanceof ApiError ? e.message : '无法核验文件边界或保存恢复点' }; }
         await ctx.onEvent('audit', { tool_use_id: id, tool, risk, input });
@@ -142,7 +143,7 @@ export function createWorkExecutor({ provider = process.env.AGENT_PROVIDER || 'a
       await inputDone;
     }
     let query;
-    const streams = new Map();
+    const streams = new Map(), webTools = new Map(), sources = new Map();
     const abort = () => { controller.abort(); finishInput(); query?.close?.(); };
     signal.addEventListener('abort', abort, { once: true });
     let final; let lastText = '';
@@ -169,7 +170,13 @@ export function createWorkExecutor({ provider = process.env.AGENT_PROVIDER || 'a
         } else if (message.type === 'assistant' || message.type === 'user') {
           const blocks = Array.isArray(message.message?.content) ? message.message.content : [];
           for (const block of blocks) {
+            if (block.type === 'tool_use' && ['WebSearch', 'WebFetch'].includes(block.name)) webTools.set(block.id, { name: block.name, url: block.input?.url });
             if (block.type === 'tool_use') await ctx.onEvent('tool_call', { id: block.id, name: block.name, input: block.input, parent_tool_use_id: message.parent_tool_use_id });
+            if (block.type === 'tool_result' && !block.is_error && webTools.has(block.tool_use_id)) {
+              const tool = webTools.get(block.tool_use_id);
+              collectSources(tool.name === 'WebFetch' ? { url: tool.url } : block.content, sources);
+              await ctx.onEvent('sources', { items: [...sources.values()] });
+            }
             if (block.type === 'tool_result') await ctx.onEvent('tool_result', { id: block.tool_use_id, content: block.content, is_error: !!block.is_error, parent_tool_use_id: message.parent_tool_use_id });
           }
           if (message.type === 'assistant') { lastText = blocks.filter(b => b.type === 'text').map(b => b.text).join('\n'); await ctx.onEvent('assistant', { id: message.uuid, content: lastText, parent_tool_use_id: message.parent_tool_use_id }); }

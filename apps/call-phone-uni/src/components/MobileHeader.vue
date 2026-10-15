@@ -21,6 +21,7 @@
           :aria-label="actionLabel"
           @tap="$emit('action')"
           ><AppIcon v-if="actionIconName" :name="actionIconName" :size="20" color="#1a1f2e" /><image v-else :src="actionIcon" /></view>
+        <slot name="actions" />
         <view v-if="actionText" class="header-text-action" :class="{ disabled: actionDisabled }" role="button" :aria-label="actionLabel || actionText" :aria-disabled="actionDisabled" @tap="!actionDisabled && $emit('action')">{{ actionText }}</view>
         </view></view
   ></view>
@@ -114,6 +115,7 @@ function back() {
 }
 .header-title {
   flex: 1;
+  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   font-size: 25px;
   font-weight: 500;
 }

@@ -12,13 +12,33 @@ export interface WorkSession {
   interactions: WorkInteraction[]; resources: { id: string; name: string }[];
   artifacts: { id: string; name: string; size: number }[];
 }
-export interface WorkEvent { sequence: number; type: string; data: any; run_id: string }
+export interface WorkEvent { created_at?: string; sequence: number; type: string; data: any; run_id: string }
+
+export interface WorkSummary { id: string; conversation_id: string; title: string; status: string; started: boolean; updated_at: string; sequence: number; pending: string[]; unread: boolean }
+export const workInbox = reactive({ items: [] as WorkSummary[], loading: false, error: '' });
+let inboxEpoch = 0;
+function clearInbox() { inboxEpoch++; workInbox.items = []; workInbox.loading = false; workInbox.error = ''; }
+onSessionChange(clearInbox); onDeviceChange(clearInbox);
+export async function refreshWorkInbox() {
+  const epoch = ++inboxEpoch; workInbox.loading = true;
+  try { const result = await request<{ items: WorkSummary[] }>('GET', base); if (epoch === inboxEpoch) { workInbox.items = result.items; workInbox.error = ''; } }
+  catch (e: any) { if (epoch === inboxEpoch) workInbox.error = e.message || '工作状态暂不可用'; }
+  finally { if (epoch === inboxEpoch) workInbox.loading = false; }
+}
+export function workStatus(item: WorkSummary) {
+  if (item.pending.includes('approval')) return '待授权';
+  if (item.pending.includes('question')) return '待回答';
+  if (item.status === 'running') return '进行中';
+  if (item.unread) return '已完成 · 待查看';
+  return ({ failed: '执行失败', interrupted: '已中断', closed: '已关闭', idle: '已完成', waiting: '等你处理' } as Record<string, string>)[item.status] || '工作';
+}
 
 export function createWorkController() {
   const state = reactive({ session: null as WorkSession | null, error: '', draft: '', loading: false, submitting: false,
     liveText: '', activity: '', selected: [] as string[], events: [] as WorkEvent[], conversation: '', visible: false });
   let epoch = 0, cursor = 0, stream: ReturnType<typeof xhr> | undefined;
   let timer: ReturnType<typeof setTimeout> | undefined;
+  let liveMessage = '';
   let pending: { prompt: string; ids: string; key: string } | undefined;
   const fence = () => ({ epoch, conversation: state.conversation });
   const current = (f: ReturnType<typeof fence>) => epoch === f.epoch && state.visible && state.conversation === f.conversation;
@@ -33,13 +53,13 @@ export function createWorkController() {
   function apply(event: WorkEvent, token: ReturnType<typeof fence>) {
     if (!current(token) || event.sequence <= cursor) return;
     if (event.sequence !== cursor + 1) throw new Error('工作事件缺失，正在重新读取');
-    cursor = event.sequence; state.events.push(event); if (state.events.length > 200) state.events.shift();
+    cursor = event.sequence; if (!['text_delta', 'tool_delta'].includes(event.type)) state.events.push(event);
     if (event.type === 'status' && state.session && event.sequence >= state.session.sequence) {
       state.session.status = event.data.status; state.session.run_id = event.run_id;
-      if (event.data.status === 'running') state.liveText = '';
+      if (event.data.status === 'running' && event.sequence >= state.session.sequence) state.liveText = '';
     }
     const currentRun = !state.session?.run_id || event.run_id === state.session.run_id;
-    if (currentRun && event.type === 'text_delta' && !event.data.parent_tool_use_id) state.liveText += event.data.delta;
+    if (currentRun && event.type === 'text_delta' && !event.data.parent_tool_use_id) { if (event.data.message_id && event.data.message_id !== liveMessage) { liveMessage = event.data.message_id; state.liveText = ''; } state.liveText += event.data.delta; }
     if (currentRun && event.type === 'assistant' && !event.data.parent_tool_use_id) state.liveText = event.data.content;
     if (currentRun && ['tool_start', 'tool_call', 'audit'].includes(event.type)) state.activity = `正在执行 ${event.data.name || event.data.tool || ''}`;
     if (currentRun && event.type === 'error') state.error = event.data.message;
@@ -109,6 +129,9 @@ export function createWorkController() {
     } catch (e: any) { if (current(token)) state.error = e.message; }
     finally { if (current(token)) state.loading = false; }
   }
+  async function markSeen(sequence: number) {
+    if (state.session && state.visible) await request('POST', `${base}/${state.session.id}/seen`, { sequence });
+  }
   async function send() {
     if (!state.session || state.submitting || !state.draft.trim()) return;
     const token = fence(), prompt = state.draft.trim(), ids = JSON.stringify(state.selected);
@@ -140,5 +163,5 @@ export function createWorkController() {
     catch (e: any) { if (current(token)) state.error = e.message; }
     finally { if (current(token)) state.submitting = false; }
   }
-  return { state, attach, send, answer, interrupt, upload, refresh, dispose: () => { reset(); unsub.forEach(fn => fn()); } };
+  return { state, attach, send, answer, interrupt, upload, refresh, markSeen, dispose: () => { reset(); unsub.forEach(fn => fn()); } };
 }

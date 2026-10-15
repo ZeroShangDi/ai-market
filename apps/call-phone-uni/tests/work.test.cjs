@@ -47,7 +47,7 @@ test('Work mutation uses the same key after an uncertain failure and identity re
   });
   await h.attach('1',true);h.state.draft='保存文件';await h.send();const second=h.send();
   assert.equal(requests[0].request_id,requests[1].request_id);
-  h.observers[0]();late.resolve(session({messages:[{id:'x',content:'旧账号数据'}]}));await second;assert.equal(h.state.session,null);assert.equal(h.state.draft,'');h.dispose();
+  h.observers.forEach(fn => fn());late.resolve(session({messages:[{id:'x',content:'旧账号数据'}]}));await second;assert.equal(h.state.session,null);assert.equal(h.state.draft,'');h.dispose();
 });
 test('Leaving during a submission releases UI lock; returning reconciles accepted request without resending', async () => {
   const pending=deferred();let accepted=false;
@@ -69,4 +69,13 @@ test('Out-of-order Work snapshots cannot revert a newer final state', async () =
   const h=harness((method,url) => url.endsWith('/s1') ? (++n===1?old.promise:latest.promise) : session());
   await h.attach('1',true);const a=h.refresh(),b=h.refresh();latest.resolve(session({status:'idle',sequence:9}));await b;old.resolve(session({status:'waiting',sequence:4}));await a;
   assert.equal(h.state.session.status,'idle');assert.equal(h.state.session.sequence,9);h.dispose();
+});
+
+test('Long streamed replies retain tool progress and a new assistant message does not concatenate the previous one', async () => {
+  const h = harness(); await h.attach('1', true); const x = h.connections[0];
+  x.chunk({ sequence: 1, type: 'tool_start', data: { id: 'tool', name: 'WebSearch' }, run_id: 'r' });
+  for (let i = 2; i < 250; i++) x.chunk({ sequence: i, type: 'text_delta', data: { message_id: 'a', delta: '字' }, run_id: 'r' });
+  x.chunk({ sequence: 250, type: 'text_delta', data: { message_id: 'b', delta: '新的过程' }, run_id: 'r' });
+  assert.equal(h.state.liveText, '新的过程'); assert.equal(h.state.events[0].data.name, 'WebSearch');
+  await h.markSeen(250); assert.ok(h.calls.some(c => c[1].endsWith('/seen') && c[2].sequence === 250)); h.dispose();
 });
