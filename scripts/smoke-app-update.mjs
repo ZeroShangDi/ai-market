@@ -7,6 +7,7 @@ import { createRequire } from 'node:module';
 import path from 'node:path';
 import os from 'node:os';
 import vm from 'node:vm';
+import { execFileSync } from 'node:child_process';
 import { inspectApk } from '../tools/app-update/release.mjs';
 
 const [envFile, baseline] = process.argv.slice(2);
@@ -28,23 +29,38 @@ function load(name) {
 }
 const { createSignedReleaseSource } = load('source'), { createUpdateService } = load('core');
 const source = createSignedReleaseSource(settings.VITE_UPDATE_MANIFEST_URL, settings.VITE_UPDATE_DOWNLOAD_ORIGINS.split(','), verifySignature, (settings.VITE_UPDATE_LAN_ORIGINS || '').split(','));
-const old = inspectApk(baseline), release = await source.latest({}, new AbortController().signal);
+function installedMetadata(file) {
+  const entries = execFileSync('unzip', ['-Z', '-1', file], { encoding: 'utf8' }).split('\n');
+  const manifests = entries.filter(name => /^assets\/apps\/[^/]+\/www\/manifest.json$/.test(name));
+  assert.equal(manifests.length, 1, 'APK 必须包含唯一应用资源清单');
+  const runtime = JSON.parse(execFileSync('unzip', ['-p', file, manifests[0]], { encoding: 'utf8' }));
+  assert.ok(runtime.id && manifests[0].includes('/' + runtime.id + '/'));
+  return { ...inspectApk(file), appId: runtime.id };
+}
+const old = installedMetadata(baseline), release = await source.latest({}, new AbortController().signal);
 assert.ok(release);
 const temp = mkdtempSync(path.join(os.tmpdir(), 'update-live-'));
 try {
   let downloadedMetadata;
-  const identity = metadata => ({ ...metadata, appId: release.appId, platform: 'android', channel: release.channel, baseVersionCode: metadata.versionCode });
+  // Read APK identity and client channel independently of the remote release.
+  // This remains a transport/core smoke, not a phone Native.js bridge test.
+  const identity = metadata => ({ ...metadata, platform: 'android', channel: settings.VITE_UPDATE_CHANNEL || 'stable', baseVersionCode: metadata.versionCode });
   const adapter = {
     identity: async () => identity(old),
     async download(value, signal, progress) {
-      const response = await fetch(value.artifact.url, { signal, redirect: 'error' });
-      assert.equal(response.status, 200); assert.equal(Number(response.headers.get('content-length')), value.artifact.bytes);
-      const body = Buffer.from(await response.arrayBuffer());
-      assert.equal(createHash('sha256').update(body).digest('hex'), value.artifact.sha256);
-      const file = path.join(temp, 'download.apk'); writeFileSync(file, body); progress(100); return file;
+      const controller = new AbortController(), abort = () => controller.abort();
+      signal.addEventListener('abort', abort, { once: true });
+      if (signal.aborted) abort();
+      try {
+        const response = await fetch(value.artifact.url, { signal: controller.signal, redirect: 'error' });
+        assert.equal(response.status, 200); assert.equal(Number(response.headers.get('content-length')), value.artifact.bytes);
+        const body = Buffer.from(await response.arrayBuffer());
+        assert.equal(createHash('sha256').update(body).digest('hex'), value.artifact.sha256);
+        const file = path.join(temp, 'download.apk'); writeFileSync(file, body); progress(100); return file;
+      } finally { signal.removeEventListener('abort', abort); }
     },
     async verify(file, value) {
-      downloadedMetadata = inspectApk(file);
+      downloadedMetadata = installedMetadata(file);
       assert.deepEqual(downloadedMetadata.certificates, old.certificates);
       assert.equal(downloadedMetadata.packageName, value.artifact.packageName);
       assert.equal(downloadedMetadata.versionCode, value.versionCode);
@@ -54,7 +70,7 @@ try {
   };
   const service = createUpdateService(source, adapter);
   await service.check(); assert.equal(service.getState().status, 'available');
-  await service.download(); assert.equal(service.getState().status, 'readyToInstall');
+  await service.download(); assert.equal(service.getState().status, 'readyToInstall', JSON.stringify(service.getState()));
   const response = await fetch(release.artifact.url, { headers: { Range: 'bytes=0-31' }, redirect: 'error' });
   assert.equal(response.status, 206); assert.equal((await response.arrayBuffer()).byteLength, 32);
   const head = await fetch(release.artifact.url, { method: 'HEAD', redirect: 'error' });

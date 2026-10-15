@@ -3,6 +3,8 @@ export interface AppIdentity {
   appId: string;
   platform: string;
   architecture: string;
+  /** Android's ordered supported ABIs; absent for adapters with one target ABI. */
+  supportedArchitectures?: string[];
   channel: string;
   versionCode: number;
   versionName: string;
@@ -108,14 +110,9 @@ export function validateRelease(value: Release, app: AppIdentity) {
     !Number.isSafeInteger(value.minBaseVersionCode)
   )
     throw new Error("版本发布信息格式无效");
-  if (
-    value.appId !== app.appId ||
-    value.platform !== app.platform ||
-    value.channel !== app.channel ||
-    value.architecture !== app.architecture ||
-    value.minBaseVersionCode > app.baseVersionCode
-  )
-    throw new Error("更新与当前应用、平台、架构、渠道或基座不兼容");
+  if (value.appId !== app.appId) throw new Error("更新应用标识不匹配，请检查是否安装了同一应用的正式包");
+  if (value.platform !== app.platform) throw new Error("更新平台不匹配，请使用 Android 安装包");
+  if (value.channel !== app.channel) throw new Error("更新渠道不匹配，请使用当前渠道的安装包");
   if (
     value.artifact?.type !== "apk" ||
     value.artifact.packageName !== app.packageName ||
@@ -126,6 +123,14 @@ export function validateRelease(value: Release, app: AppIdentity) {
     !/^https?:\/\//.test(value.artifact.url)
   )
     throw new Error("更新制品信息不完整或不受支持");
+  // A stale feed offers nothing to install. ABI/base requirements apply only
+  // to a newer candidate; app/channel/package and artifact validation still run.
+  if (value.versionCode > app.versionCode) {
+    if (!(app.supportedArchitectures || [app.architecture]).includes(value.architecture))
+      throw new Error("更新架构不匹配，安装包不支持此手机的处理器");
+    if (value.minBaseVersionCode > app.baseVersionCode)
+      throw new Error("当前安装基座版本过低，请下载完整安装包覆盖安装");
+  }
 }
 export function createUpdateService(
   source: VersionSource,

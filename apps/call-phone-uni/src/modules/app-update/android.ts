@@ -1,4 +1,39 @@
 import type { AppIdentity, PlatformAdapter, Release } from "./core";
+import { logger } from "@/services/logger";
+
+// Native.js can return null without throwing. Validate each access path before
+// falling back to the imported class, as in device-readiness's SDK probe.
+function nativeValue<T>(a: any, target: any, field: string, parse: (value: any) => T | null): T | null {
+  try {
+    const value = parse(a.getAttribute(target, field));
+    if (value !== null) return value;
+  } catch { /* Try the imported class below. */ }
+  try {
+    const imported = a.importClass(target);
+    const object = typeof target === "string" ? imported : target;
+    const value = parse(object?.[field]);
+    if (value !== null) return value;
+    return parse(object?.plusGetAttribute?.(field));
+  } catch { return null; }
+}
+const abiNames = new Set(["arm64-v8a", "armeabi-v7a", "armeabi", "x86_64", "x86", "mips64", "mips", "riscv64"]);
+function abiName(value: unknown): string | null {
+  return typeof value === "string" && abiNames.has(value.trim()) ? value.trim() : null;
+}
+function abiList(value: any): string[] | null {
+  if (!value || typeof value === "string" || !Number.isInteger(value.length) || value.length < 1 || value.length > 16) return null;
+  const result: string[] = [];
+  for (let i = 0; i < value.length; i++) {
+    const abi = abiName(value[i]);
+    if (abi && !result.includes(abi)) result.push(abi);
+  }
+  return result.length ? result : null;
+}
+function positiveInteger(value: unknown): number | null {
+  if (typeof value !== "number" && (typeof value !== "string" || !/^\d+$/.test(value))) return null;
+  const number = Number(value);
+  return Number.isSafeInteger(number) && number > 0 ? number : null;
+}
 function native() {
   if (
     typeof plus === "undefined" ||
@@ -59,20 +94,43 @@ export function createAndroidUpdateAdapter(channel: string): PlatformAdapter {
   return {
     async identity(): Promise<AppIdentity> {
       const { a, invoke, activity, manager } = native();
-      const packageName = String(invoke(activity, "getPackageName"));
+      const packageName = invoke(activity, "getPackageName");
+      if (typeof packageName !== "string" || !/^[A-Za-z0-9_.]+$/.test(packageName))
+        throw new Error("无法读取当前应用包名，请重新打开应用后重试");
       const info = invoke(manager, "getPackageInfo", packageName, 0);
-      const versionCode = Number(a.getAttribute(info, "versionCode"));
-      const abi = a.getAttribute("android.os.Build", "CPU_ABI");
-      return {
-        appId: String(plus.runtime.appid || ""),
+      let versionCode = nativeValue(a, info, "versionCode", positiveInteger);
+      if (versionCode === null) {
+        // Android 9+ exposes the actual installed APK version as a public method.
+        try { versionCode = positiveInteger(invoke(info, "getLongVersionCode")); } catch { /* Fail explicitly below. */ }
+      }
+      if (versionCode === null) throw new Error("无法读取当前安装版本，请重新打开应用后重试");
+      const versionName = nativeValue(a, info, "versionName", value => typeof value === "string" && value.trim() ? value.trim() : null);
+      if (!versionName) throw new Error("无法读取当前版本名称，请重新打开应用后重试");
+      const appId = plus.runtime.appid;
+      if (appId === "HBuilder") throw new Error("调试基座不支持正式更新，请安装正式应用包");
+      if (typeof appId !== "string" || !appId.trim()) throw new Error("无法读取当前应用标识，请重新打开应用后重试");
+      // SUPPORTED_ABIS describes what can actually be installed on this device;
+      // CPU_ABI is deprecated and can describe only the current 32-bit process.
+      const supported = nativeValue(a, "android.os.Build", "SUPPORTED_ABIS", abiList);
+      const legacy = supported ? null : nativeValue(a, "android.os.Build", "CPU_ABI", abiName);
+      const supportedArchitectures = supported || (legacy ? [legacy] : null);
+      if (!supportedArchitectures) throw new Error("无法读取手机支持的架构，请重新打开应用后重试");
+      const identity: AppIdentity = {
+        appId: appId.trim(),
         platform: "android",
-        architecture: String(abi),
+        architecture: supportedArchitectures[0],
+        supportedArchitectures,
         channel,
         versionCode,
-        versionName: String(a.getAttribute(info, "versionName")),
+        versionName,
         baseVersionCode: versionCode,
         packageName,
       };
+      logger.info("update", "identity.read", {
+        appId: identity.appId, packageName, platform: identity.platform,
+        architecture: identity.architecture, supportedArchitectures, channel, versionCode,
+      });
+      return identity;
     },
     download(release: Release, signal, progress) {
       native();
@@ -185,7 +243,8 @@ export function createAndroidUpdateAdapter(channel: string): PlatformAdapter {
     },
     async install(path) {
       const { a, invoke, manager } = native();
-      const sdk = Number(a.getAttribute("android.os.Build$VERSION", "SDK_INT"));
+      const sdk = nativeValue(a, "android.os.Build$VERSION", "SDK_INT", positiveInteger);
+      if (sdk === null) throw new Error("无法读取 Android 版本，请重试后再安装更新");
       if (sdk >= 26 && !invoke(manager, "canRequestPackageInstalls"))
         return "permissionDenied";
       return new Promise((resolve, reject) =>
