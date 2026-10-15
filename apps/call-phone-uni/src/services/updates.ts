@@ -2,6 +2,7 @@ import { createUpdateService } from '@/modules/app-update/core';
 import { createSignedReleaseSource } from '@/modules/app-update/source';
 import { createAndroidUpdateAdapter, verifyReleaseSignature } from '@/modules/app-update/android';
 import { createUpdatePresenter } from '@/modules/app-update/presenter';
+import { logger } from './logger';
 
 const url = import.meta.env.VITE_UPDATE_MANIFEST_URL || '';
 const origins = (import.meta.env.VITE_UPDATE_DOWNLOAD_ORIGINS || '').split(',').map(value => value.trim()).filter(Boolean);
@@ -12,8 +13,17 @@ const source = createSignedReleaseSource(url, origins, (payload, signature) =>
 );
 const platform = createAndroidUpdateAdapter(import.meta.env.VITE_UPDATE_CHANNEL || 'stable');
 export const updates = createUpdateService(source, platform);
+let lastStatus = '';
+updates.subscribe(state => {
+  if (lastStatus === state.status) return;
+  lastStatus = state.status;
+  logger[state.status === 'failed' ? 'error' : 'info']('update', 'state.changed', {
+    status: state.status, stage: state.stage, reason: state.message, version: state.release?.versionName,
+  });
+});
 export const updatePresenter = createUpdatePresenter(updates, () => platform.identity(), {
-  toast: title => uni.showToast({ title, icon: 'none' }),
+  reportError: error => logger.error('update', 'check.failed', { error }),
+  toast: title => { logger.info('update', 'notice', { reason: title }); uni.showToast({ title, icon: 'none' }); },
   confirm: options => uni.showModal({
     title: options.title,
     content: options.content,

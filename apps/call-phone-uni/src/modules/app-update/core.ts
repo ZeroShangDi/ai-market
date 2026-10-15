@@ -29,14 +29,40 @@ export interface Release {
     packageName: string;
   };
 }
+// Only the cancellation contract used by uni.request / plus.downloader.
+// App's logic runtime does not guarantee browser AbortController / EventTarget.
+export interface UpdateSignal {
+  readonly aborted: boolean;
+  addEventListener(type: 'abort', listener: () => void, options?: { once?: boolean }): void;
+  removeEventListener(type: 'abort', listener: () => void): void;
+}
+function createUpdateController() {
+  let aborted = false;
+  const listeners = new Set<() => void>();
+  const signal: UpdateSignal = {
+    get aborted() { return aborted; },
+    addEventListener(_type, listener) { if (!aborted) listeners.add(listener); },
+    removeEventListener(_type, listener) { listeners.delete(listener); },
+  };
+  return {
+    signal,
+    abort() {
+      if (aborted) return;
+      aborted = true;
+      const pending = [...listeners];
+      listeners.clear();
+      pending.forEach(listener => listener());
+    },
+  };
+}
 export interface VersionSource {
-  latest(identity: AppIdentity, signal: AbortSignal): Promise<Release | null>;
+  latest(identity: AppIdentity, signal: UpdateSignal): Promise<Release | null>;
 }
 export interface PlatformAdapter {
   identity(): Promise<AppIdentity>;
   download(
     release: Release,
-    signal: AbortSignal,
+    signal: UpdateSignal,
     progress: (percent: number) => void,
   ): Promise<string>;
   verify(
@@ -109,7 +135,7 @@ export function createUpdateService(
   const listeners = new Set<(state: UpdateState) => void>();
   let version = 0,
     disposed = false,
-    controller: AbortController | undefined;
+    controller: ReturnType<typeof createUpdateController> | undefined;
   let checking: Promise<void> | undefined,
     downloading: Promise<void> | undefined,
     installing: Promise<void> | undefined;
@@ -140,7 +166,7 @@ export function createUpdateService(
     if (checking) return checking;
     if (downloading || installing || path) return Promise.resolve();
     const v = ++version;
-    controller = new AbortController();
+    controller = createUpdateController();
     const signal = controller.signal;
     set({ status: "checking", release: state.release });
     checking = (async () => {
@@ -170,7 +196,7 @@ export function createUpdateService(
     const release = state.release;
     if (!release || !identity || path || installing || checking) return Promise.resolve();
     const v = ++version;
-    controller = new AbortController();
+    controller = createUpdateController();
     const signal = controller.signal;
     downloading = (async () => {
       let file: string | undefined;

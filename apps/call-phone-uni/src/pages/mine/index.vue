@@ -35,6 +35,7 @@
         ><image class="arrow" src="/static/figma/2-112-imgFrame2.svg"
       /></view>
       <AppUpdateRow />
+      <DiagnosticLogs />
       <view v-if="panel" class="panel-scrim" @tap="panel = ''"
         ><view class="panel" @tap.stop>
           <view class="panel-heading"
@@ -87,6 +88,7 @@
 </template>
 <script setup lang="ts">
 import AppUpdateRow from "@/components/AppUpdateRow.vue";
+import DiagnosticLogs from "@/components/DiagnosticLogs.vue";
 import { computed, ref } from "vue";
 import { onShow } from "@dcloudio/uni-app";
 import ReadinessCard from "@/components/ReadinessCard.vue";

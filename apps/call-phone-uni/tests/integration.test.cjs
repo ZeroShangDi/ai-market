@@ -6,7 +6,7 @@ const root = path.resolve(__dirname, '../src')
 // Exercise actual TypeScript modules using uni/native adapters supplied by each test.
 function load(file, mocks = {}, globals = {}) {
   const code = ts.transpileModule(fs.readFileSync(path.join(root, file), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 } }).outputText
-  mocks = { './pet-status': { reportPetConnection: () => {} }, '@/modules/mobile-pet': { isPetActive: () => false, onPetChange: () => {}, reportPetConnection: () => {} }, vue: { reactive: value => value, ref: value => ({ value }) }, './vault': { readQueue: () => undefined, writeQueue: () => true }, '@/services/vault': { saveDevice: () => {}, verifyDeviceStorage: () => {} }, '@/native/secure-store': { secureStore: { available: () => false } }, ...mocks }
+  mocks = { '@/services/logger': { logger: { warn: () => {} } }, './pet-status': { reportPetConnection: () => {} }, '@/modules/mobile-pet': { isPetActive: () => false, onPetChange: () => {}, reportPetConnection: () => {} }, vue: { reactive: value => value, ref: value => ({ value }) }, './vault': { readQueue: () => undefined, writeQueue: () => true }, '@/services/vault': { saveDevice: () => {}, verifyDeviceStorage: () => {} }, '@/native/secure-store': { secureStore: { available: () => false } }, ...mocks }
   const exports = {}
   vm.runInNewContext(code, { exports, require(id) { if (id in mocks) return mocks[id]; throw new Error('Unmocked dependency: ' + id) }, console, setTimeout, clearTimeout, Date, Math, Error, AbortController, ...globals }, { filename: file })
   return exports
@@ -245,11 +245,32 @@ test('foreground lifecycle deduplicates timers and drops responses after hiding'
 const appIdentity = { appId: 'app', platform: 'android', architecture: 'arm64-v8a', channel: 'stable', versionCode: 101, versionName: '1.0.3', baseVersionCode: 101, packageName: 'test.app' }
 const release = { id: '102', ...appIdentity, versionCode: 102, versionName: '1.0.4', publishedAt: '2026-10-10T00:00:00Z', notes: 'test', mandatory: false, minBaseVersionCode: 100, artifact: { type: 'apk', url: 'https://updates.example.test/app.apk', bytes: 100, sha256: 'a'.repeat(64), packageName: 'test.app' } }
 function updateHarness(overrides = {}, source = { latest: async () => release }) {
-  const { createUpdateService } = load('modules/app-update/core.ts')
+  const { createUpdateService } = load('modules/app-update/core.ts', {}, { AbortController: undefined })
   const removed = []
   const service = createUpdateService(source, { identity: async () => appIdentity, download: async () => '/update.apk', verify: async () => true, install: async () => 'requested', cleanup: async path => { removed.push(path) }, ...overrides })
   return { service, removed }
 }
+test('update cancellation aborts the transport without browser AbortController and a new check can recover', async () => {
+  let requests = 0, aborts = 0, firstSignal
+  const { service } = updateHarness({}, { latest: async (_, signal) => {
+    if (++requests > 1) return null
+    firstSignal = signal
+    return new Promise((_, reject) => {
+      const removed = () => { throw new Error('removed listener was called') }
+      signal.addEventListener('abort', removed)
+      signal.removeEventListener('abort', removed)
+      signal.addEventListener('abort', () => { aborts++; reject(new Error('已取消检查')) }, { once: true })
+    })
+  } })
+  const pending = service.check()
+  await new Promise(setImmediate)
+  await service.cancel(); await pending
+  assert.equal(firstSignal.aborted, true); assert.equal(aborts, 1)
+  assert.equal(service.getState().status, 'cancelled')
+  await service.cancel(); assert.equal(aborts, 1)
+  await service.check(); assert.equal(service.getState().status, 'upToDate')
+  assert.equal(requests, 2)
+})
 test('startup and manual update checks share one request, and failures can retry', async () => {
   let requests = 0, done
   const { service } = updateHarness({}, { latest: () => { requests++; return new Promise(resolve => { done = resolve }) } })

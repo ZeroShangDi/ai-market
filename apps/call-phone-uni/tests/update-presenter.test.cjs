@@ -6,7 +6,8 @@ function load(name) {
   const exports = {};
   const source = fs.readFileSync(path.join(__dirname, '../src/modules/app-update', name + '.ts'), 'utf8');
   vm.runInNewContext(ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 } }).outputText, {
-    exports, require: id => { assert.equal(id, 'vue'); return require('vue'); }, AbortController, Date, Error,
+    // App's logic runtime need not provide browser AbortController / EventTarget.
+    exports, require: id => { assert.equal(id, 'vue'); return require('vue'); }, Date, Error,
   });
   return exports;
 }
@@ -106,5 +107,21 @@ test('failed version checks give a retryable error rather than saying latest', a
   // make captured the new identity function; no fake successful version check occurs.
   await p.check(true);
   assert.deepEqual(h.notices, ['版本读取失败']);
+  assert.equal(p.state.value.status, 'failed');
+  assert.equal(p.state.value.message, '版本读取失败');
   assert.equal(h.checks, 0);
+});
+
+test('unexpected check errors are visible and a manual retry can recover', async () => {
+  const h = harness({ latest: null });
+  const check = h.service.check;
+  h.service.check = () => { throw new Error('检查暂时失败'); };
+  await h.presenter.action();
+  assert.deepEqual(h.notices, ['检查暂时失败']);
+  assert.equal(h.presenter.state.value.message, '检查暂时失败');
+  assert.equal(h.presenter.busy.value, false);
+  h.service.check = check;
+  await h.presenter.action();
+  assert.equal(h.presenter.state.value.status, 'upToDate');
+  assert.equal(h.notices.at(-1), '已经是最新版本');
 });

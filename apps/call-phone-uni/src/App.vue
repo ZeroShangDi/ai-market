@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { onLaunch, onShow, onHide } from "@dcloudio/uni-app";
+import { onLaunch, onShow, onHide, onError, onUnhandledRejection } from "@dcloudio/uni-app";
+import { logger, resumeLogging, pauseLogging, installRequestLogging, runtimeFailure, diagnosticEnvironment } from '@/services/logger';
 import { resumeDeviceSession } from "@/services/session";
 import { onApplicationShow } from "@/modules/device-readiness";
 import { configureMobilePet, refreshMobilePet } from "@/modules/mobile-pet";
@@ -14,14 +15,20 @@ import {
 configureMobilePet({ preferenceKey: "callphone.mobile-pet.enabled" });
 configureAssets({ baseUrl: import.meta.env.VITE_ASSET_BASE_URL || "", manifest: assetManifest });
 let appVisible = false;
-onLaunch(() =>
+onError(reason => logger.error('runtime', 'uncaught', runtimeFailure(reason)));
+onUnhandledRejection(event => logger.error('runtime', 'unhandled-rejection', runtimeFailure(event.reason)));
+onLaunch(() => {
+  installRequestLogging();
+  logger.info('app', 'launched', diagnosticEnvironment());
   uni.onNetworkStatusChange((status) => {
+    logger.info('network', 'status.changed', { connected: status.isConnected, networkType: status.networkType });
     if (status.isConnected) {
       void resumeDeviceSession().then(networkRestored).catch(() => {});
     }
-  }),
-);
+  });
+});
 onShow(() => {
+  resumeLogging(); logger.info('app', 'shown');
   appVisible = true;
   void onApplicationShow();
   void refreshMobilePet();
@@ -32,7 +39,7 @@ onShow(() => {
   startForeground();
   void checkUpdates();
 });
-onHide(() => { appVisible = false; stopForeground(); });
+onHide(() => { logger.info('app', 'hidden'); pauseLogging(); appVisible = false; stopForeground(); });
 </script>
 <style lang="scss">
 page {

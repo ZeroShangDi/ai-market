@@ -6,6 +6,7 @@ interface UpdateUi {
   confirm(options: { title: string; content: string; update(): void; skip(): void }): void;
   readSkip(key: string): unknown;
   saveSkip(key: string, version: number): void;
+  reportError?(cause: unknown): void;
 }
 
 export function createUpdatePresenter(
@@ -40,15 +41,9 @@ export function createUpdatePresenter(
     if (manual) manualRequested = true;
     if (checking) return checking;
     checking = (async () => {
-      let app: AppIdentity;
-      try {
-        app = await identity();
-        versionName.value = app.versionName;
-        await service.reconcileInstallation();
-      } catch (cause) {
-        if (manualRequested) ui.toast(cause instanceof Error ? cause.message : '暂时无法读取应用版本');
-        return;
-      }
+      const app = await identity();
+      versionName.value = app.versionName;
+      await service.reconcileInstallation();
       if (!manualRequested && lastCheck !== undefined && now() - lastCheck < 60 * 60 * 1000) return;
       if (!options.configured && !manualRequested) return;
       await service.check();
@@ -76,7 +71,12 @@ export function createUpdatePresenter(
           try { ui.saveSkip(key, release.versionCode); } catch { /* Keep this session’s choice. */ }
         },
       });
-    })().finally(() => { checking = undefined; manualRequested = false; });
+    })().catch(cause => {
+      ui.reportError?.(cause);
+      const message = cause instanceof Error ? cause.message : '检查更新失败，请重试';
+      state.value = { status: 'failed', stage: 'check', retryable: true, message };
+      if (manualRequested) ui.toast(message);
+    }).finally(() => { checking = undefined; manualRequested = false; });
     return checking;
   }
 

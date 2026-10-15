@@ -1,8 +1,9 @@
+import { logger } from '@/services/logger';
 // Native.js may return null/undefined without throwing. Keep probe failures distinct from denial.
 const probeFailures = new Map<string, string>();
 export function permissionDiagnostics() { return [...probeFailures.values()].join('；'); }
 function failed(key: string, message: string) {
-  if (probeFailures.get(key) !== message) console.warn('[permission-probe]', key, message);
+  if (probeFailures.get(key) !== message) logger.warn('permissions', 'probe.failed', { check: key, reason: message });
   probeFailures.set(key, message);
 }
 export function bridge(): any | undefined {
