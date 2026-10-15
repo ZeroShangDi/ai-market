@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onLaunch, onShow, onHide, onError, onUnhandledRejection } from "@dcloudio/uni-app";
 import { logger, resumeLogging, pauseLogging, installRequestLogging, runtimeFailure, diagnosticEnvironment } from '@/services/logger';
+import { testConnectivity } from "@/services/connectivity";
 import { resumeDeviceSession } from "@/services/session";
 import { onApplicationShow } from "@/modules/device-readiness";
 import { configureMobilePet, refreshMobilePet } from "@/modules/mobile-pet";
@@ -19,6 +20,7 @@ onError(reason => logger.error('runtime', 'uncaught', runtimeFailure(reason)));
 onUnhandledRejection(event => logger.error('runtime', 'unhandled-rejection', runtimeFailure(event.reason)));
 onLaunch(() => {
   installRequestLogging();
+  void testConnectivity(false);
   logger.info('app', 'launched', diagnosticEnvironment());
   uni.onNetworkStatusChange((status) => {
     logger.info('network', 'status.changed', { connected: status.isConnected, networkType: status.networkType });

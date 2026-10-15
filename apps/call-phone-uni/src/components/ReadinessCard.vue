@@ -3,12 +3,11 @@
     <view class="card-line">
       <view class="state-icon" :aria-label="status"><text aria-hidden="true">{{ symbol }}</text></view>
       <text class="card-title">{{ title }}</text>
-      <button v-if="needsAction && !description" class="card-action" :disabled="busy" @tap="$emit('action')">{{ action }}</button>
+      <button v-if="needsAction" class="card-action" :disabled="busy" @tap="$emit('action')">{{ action }}</button>
       <text v-else class="card-status">{{ status }}</text>
     </view>
     <view v-if="description" class="card-extra">
       <text class="card-description">{{ description }}</text>
-      <button v-if="needsAction" class="card-action" :disabled="busy" @tap="$emit('action')">{{ action }}</button>
     </view>
   </view>
 </template>

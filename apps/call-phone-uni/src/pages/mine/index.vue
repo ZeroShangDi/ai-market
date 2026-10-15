@@ -50,7 +50,7 @@
               <ReadinessCard title="工作空间" :status="bootstrap?.workspace?.name || '未连接'" :state="bootstrap ? 'ready' : 'unknown'" />
               <ReadinessCard title="服务授权" :status="licenseStatus" :state="bootstrap?.license?.status === 'active' ? 'ready' : 'unknown'" description="AI 服务套餐与有效期，不代表手机电话权限" />
               <ReadinessCard title="电脑配对" :status="device?.paired ? '已配对' : '未配对'" :state="device?.paired ? 'ready' : 'action'" action="去配对" @action="scanPairing" />
-              <ReadinessCard title="服务器连接" :description="serviceAddress || (mockEnabled ? '当前为预览模式' : '扫码配对后自动配置服务器地址')" :status="checkingConnectivity ? '检查中' : connectivityStatus" :state="checkingConnectivity ? 'checking' : connectivityStatus.includes('可达') ? 'ready' : 'unknown'" action="测试连接" @action="testConnectivity" />
+              <ReadinessCard title="服务器连接" :description="serviceAddress || (mockEnabled ? '当前为预览模式' : '扫码配对后自动配置服务器地址')" :status="checkingConnectivity ? '检查中' : connectivityStatus" :state="checkingConnectivity ? 'checking' : connectivityStatus.includes('可达') ? 'ready' : 'unknown'" action="测试连接" @action="testConnectivity()" />
               <ReadinessCard title="扫码相机" :state="readiness.camera" :status="checkLabel(readiness.camera)" action="去授权" @action="systemSettings('app')" />
               <ReadinessCard title="本机安全存储" :state="persistenceStatus.includes('已启用') ? 'ready' : 'unknown'" :status="persistenceStatus.includes('已启用') ? '已启用' : '待确认'" />
             </view>
@@ -99,7 +99,6 @@ import TabBar from "@/components/TabBar.vue";
 import PreviewBanner from "@/components/PreviewBanner.vue";
 import { mobileService } from "@/services/mobile";
 import {
-  checkDataService,
   clearAccessToken,
   clearCallphoneDeviceCredential,
   messageOf,
@@ -108,6 +107,7 @@ import {
 } from "@/api/http";
 
 import { scanAndPair } from "@/services/pairing-actions";
+import { connectivityStatus, checkingConnectivity, testConnectivity } from "@/services/connectivity";
 import { logout } from "@/services/session";
 import { mockEnabled, connectionSettings } from "@/config";
 import {
@@ -133,8 +133,6 @@ const bootstrap = ref<Bootstrap>(),
   errorMessage = ref(""),
   panel = ref<"account" | "device" | "diagnostics" | "">(""),
   pairingDeviceName = ref("我的手机"),
-  connectivityStatus = ref("未检查"),
-  checkingConnectivity = ref(false),
   testCallStatus = ref("未测试"),
   testCallBusy = ref(false);
 const serviceAddress = ref(connectionSettings().serviceUrl);
@@ -219,6 +217,7 @@ async function load() {
 async function open(value: "account" | "device" | "diagnostics") {
   panel.value = value;
   serviceAddress.value = connectionSettings().serviceUrl;
+  if (value === "account") void testConnectivity(false);
   void checkNative();
   if (value === "diagnostics") {
     void checkNative();
@@ -269,21 +268,6 @@ async function disposeTask(id: string) {
     discardPending(id);
   } catch (e) {
     toast(messageOf(e));
-  }
-}
-async function testConnectivity() {
-  if (mockEnabled) {
-    connectivityStatus.value = "开发模拟模式，未检查真实服务";
-    return;
-  }
-  checkingConnectivity.value = true;
-  connectivityStatus.value = "检查中…";
-  try {
-    connectivityStatus.value = await checkDataService();
-  } catch {
-    connectivityStatus.value = "无法连接客户侧数据服务";
-  } finally {
-    checkingConnectivity.value = false;
   }
 }
 async function testCall() {
