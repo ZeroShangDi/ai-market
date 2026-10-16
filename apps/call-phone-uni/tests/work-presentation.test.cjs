@@ -39,3 +39,42 @@ test('resource categories only advertise provisioned document and table formats 
   assert.equal(acceptsWorkFile('any.exe', ''), false);
   assert.notEqual(fileAppearance('数据.xlsx').color, fileAppearance('说明.docx').color);
 });
+
+const workItem = (id, status, hour, extra = {}) => ({ id: `work-${id}`, conversation_id: id, title: id, status, started: true, updated_at: `2026-10-16T${hour}:00:00Z`, pending: [], unread: false, sequence: 1, ...extra });
+const chatItem = (id, hour) => ({ id, title: id, updated_at: `2026-10-16T${hour}:00:00Z` });
+const ids = rows => Array.from(rows, row => row.id);
+test('continue preview keeps three newest actionable tasks, without status priority or history filler', () => {
+  const result = exportsObject.continueItems([
+    workItem('approval', 'waiting', '01', { pending: ['approval'] }),
+    workItem('running', 'running', '03'), workItem('failed', 'failed', '04'),
+    workItem('unread', 'idle', '02', { unread: true }), workItem('done', 'idle', '06'),
+  ], [chatItem('chat', '07')]);
+  assert.deepEqual(ids(result.pending), ['failed', 'running', 'unread', 'approval']);
+  assert.deepEqual(ids(result.preview), ['failed', 'running', 'unread']);
+  assert.deepEqual(ids(result.history), ['chat', 'done']);
+});
+test('seen completed work leaves pending and only fills remaining preview slots in history time order', () => {
+  const completed = workItem('done', 'idle', '05', { unread: true });
+  const work = [workItem('running', 'running', '01'), completed];
+  assert.equal(exportsObject.continueItems(work, []).pending.length, 2);
+  completed.unread = false;
+  const result = exportsObject.continueItems(work, [chatItem('chat', '06'), chatItem('older', '02')]);
+  assert.deepEqual(ids(result.pending), ['running']);
+  assert.deepEqual(ids(result.preview), ['running', 'chat', 'done']);
+});
+test('continue list deduplicates work and chat, ignores unstarted work and compares actual timestamps', () => {
+  const result = exportsObject.continueItems([
+    workItem('same', 'idle', '03'), workItem('same', 'running', '01'),
+    workItem('draft', 'idle', '07', { started: false }),
+    workItem('offset', 'idle', '01', { updated_at: '2026-10-16T10:00:00+08:00' }),
+  ], [chatItem('same', '08'), chatItem('draft', '04'), chatItem('draft', '01')]);
+  assert.deepEqual(ids(result.history), ['draft', 'same', 'offset']);
+  assert.equal(result.pending.length, 0);
+  assert.equal(result.history[1].work.status, 'idle');
+});
+test('continue preview does not fabricate minimum rows and retains interrupted work for action', () => {
+  assert.equal(exportsObject.continueItems([], []).preview.length, 0);
+  const result = exportsObject.continueItems([workItem('stopped', 'interrupted', '02'), workItem('closed', 'closed', '03')], []);
+  assert.deepEqual(ids(result.pending), ['stopped']);
+  assert.deepEqual(ids(result.preview), ['stopped', 'closed']);
+});
