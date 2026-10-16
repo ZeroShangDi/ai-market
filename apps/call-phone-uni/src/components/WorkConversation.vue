@@ -15,6 +15,19 @@
               <view v-for="step in workSteps(state.events, message.id)" :key="step.id" class="process-step"><TIcon :name="step.status === '完成' ? 'check' : 'time'" size="13px" /><text>{{ step.label }}</text><text class="step-status">{{ step.status }}</text></view>
             </view>
           </view>
+          <view v-if="message.role === 'user'" class="plugin-results">
+            <view v-for="receipt in workReceipts(state.events, message.id)" :key="receipt.sequence" class="plugin-receipt">
+              <text class="receipt-title">{{ receipt.title }}</text>
+              <text>{{ receipt.summary }}</text>
+              <view role="button" class="details-toggle" @tap="receiptOpen[receipt.sequence] = !receiptOpen[receipt.sequence]">{{ receiptOpen[receipt.sequence] ? '收起详情' : '查看详情' }}</view>
+              <scroll-view v-if="receiptOpen[receipt.sequence]" scroll-y class="receipt-rows">
+                <view v-for="(row, rowIndex) in receipt.rows" :key="rowIndex" class="receipt-row">
+                  <text>{{ row.label }} · {{ row.status }}</text>
+                  <text selectable>{{ row.detail }}</text>
+                </view>
+              </scroll-view>
+            </view>
+          </view>
         </view>
         <view v-if="state.liveText && busy" class="work-message"><TChatMarkdown :content="state.liveText" :streaming="{ hasNextChunk: true, tail: true }" @click="handleMarkdownClick" /></view>
         <view v-if="busy" class="work-note"><text class="pulse">●</text> {{ statusLabel }}</view>
@@ -60,16 +73,24 @@
       </scroll-view></view>
       <view v-if="adding" class="add-dismiss" @tap="adding = false" />
       <view v-if="adding" class="add-panel">
-        <view class="add-heading"><text>添加到工作</text><view role="button" aria-label="关闭添加面板" @tap="adding = false"><TIcon name="close" size="16px" /></view></view>
+        <view class="add-heading"><text>添加</text><view role="button" aria-label="关闭添加面板" @tap="adding = false"><TIcon name="close" size="16px" /></view></view>
         <scroll-view class="add-scroll" scroll-y>
+
           <view v-for="type in fileTypes" :key="type.label" class="add-menu-row" role="button" @tap="addFile(type.accept, type.mime)"><TIcon :name="type.icon" :color="type.color" size="19px" /><text>{{ type.label }}</text><TIcon name="chevron-right" size="14px" color="#a1a1a6" /></view>
+          <text v-if="availableSkills.length" class="add-section-label">技能</text>
+          <view v-for="item in availableSkills" :key="item.plugin.id + item.skill.name" class="add-menu-row capability-row" role="button" @tap="selectPlugin(item.plugin, item.skill.name)"><TIcon name="lightbulb" size="16px" /><text>{{ item.skill.name }}</text><text class="capability-summary">{{ item.skill.description }}</text></view>
+          <text v-if="availablePlugins.length" class="add-section-label">插件</text>
+          <view v-for="plugin in availablePlugins" :key="plugin.id" class="add-menu-row capability-row" role="button" @tap="selectPlugin(plugin)"><TIcon name="app" size="16px" /><text>{{ plugin.name }}</text><text class="capability-summary">{{ plugin.description }}</text><TIcon v-if="plugin.added" name="check" size="14px" /></view>
+          <view v-if="state.pluginLoading" class="menu-status">加载能力…</view>
+          <view v-if="pluginError" class="menu-status" role="button" @tap="loadPluginMenu">{{ pluginError }} · 重试</view>
+          <view class="add-menu-row capability-row" role="button" @tap="openCapabilities"><TIcon name="setting" size="16px" /><text>能力中心</text><text class="capability-summary">管理技能与连接</text></view>
           <template v-if="availableResources.length"><view class="add-divider" /><text class="add-section-label">会话文件</text><view v-for="file in availableResources" :key="file.id" class="add-menu-row" role="button" @tap="selectResource(file.id)"><TIcon :name="fileAppearance(file.name).icon" :color="fileAppearance(file.name).color" size="19px" /><text class="menu-file-name">{{ file.name }}</text><TIcon name="add" color="#5885ce" size="15px" /></view></template>
         </scroll-view>
       </view>
       <TChatSender v-if="!interactions.length" :value="state.draft" :loading="busy || state.submitting" :disabled="state.session?.status === 'closed'" placeholder="交办工作，说明期望的结果…"
         :textarea-props="{ autosize: { minHeight: '48px', maxHeight: '160px' } }" :render-presets="[{ name: 'send', type: 'icon' }]" :adjust-position="false" :auto-rise-with-keyboard="false"
         @update:value="state.draft = $event" @send="send" @stop="controller.interrupt()">
-        <template #header><ComposerAttachments :resources="selectedResources" :disabled="busy || state.submitting" @remove-resource="removeResource" /></template>
+        <template #header><view class="plugin-chips"><view v-for="plugin in state.session?.plugins?.filter(p => p.added)" :key="plugin.id" role="button" @tap="removePlugin(plugin.id)">{{ plugin.name || plugin.id }} ×</view></view><ComposerAttachments :resources="selectedResources" :disabled="busy || state.submitting" @remove-resource="removeResource" /></template>
         <template #footer-prefix><view class="composer-actions"><view class="add-trigger" role="button" aria-label="添加资源" :aria-disabled="busy || state.submitting" @tap="toggleAdding"><TIcon name="add" size="23px" color="#5885ce" /></view><slot name="mode"><text>工作</text></slot><text v-if="busy" role="button" @tap="controller.interrupt()">打断</text></view></template>
       </TChatSender>
     </view>
@@ -77,13 +98,13 @@
 </template>
 
 <script setup lang="ts">
-import { workSteps, workElapsed, approvalFields, workFileCategories, fileAppearance, acceptsWorkFile } from '@/ui/work-presentation';
+import { workReceipts, workSteps, workElapsed, approvalFields, workFileCategories, fileAppearance, acceptsWorkFile } from '@/ui/work-presentation';
 import ComposerAttachments from './ComposerAttachments.vue';
 import TIcon from '@tdesign/uniapp/icon/icon.vue';
 import { computed, onUnmounted, reactive, ref, watch } from 'vue';
 import TChatMarkdown from '@tdesign/uniapp-chat/chat-markdown/chat-markdown.vue';
 import TChatSender from '@tdesign/uniapp-chat/chat-sender/chat-sender.vue';
-import { createWorkController, type WorkInteraction } from '@/services/work';
+import { createWorkController, type WorkInteraction, type WorkPlugin } from '@/services/work';
 import { chooseWorkFile, openWorkArtifact } from '@/services/work-files';
 import { mockEnabled } from '@/config';
 import { hasUnfinishedCall } from '@/services/calls';
@@ -93,12 +114,16 @@ import { toast } from '@/ui/format';
 const props = defineProps<{ conversationId: string; visible: boolean }>();
 const emit = defineEmits<{ (event: 'started'): void; (event: 'title', value: string): void }>();
 const controller = createWorkController(), state = controller.state;
+const pluginError = ref('');
+const availablePlugins = computed(() => state.plugins.filter(p => p.installed && p.enabled && p.connected));
+const availableSkills = computed(() => availablePlugins.value.flatMap(plugin => plugin.skills.filter(s => s.enabled).map(skill => ({ plugin, skill }))));
 const answers = reactive<Record<string, Record<string, string>>>({});
 const scrollTop = ref(0), followLatest = ref(true), adding = ref(false), details = ref(false), sourcesOpen = ref(false), downloading = ref('');
 const expanded = reactive<Record<string, boolean>>({});
 const fileTypes = workFileCategories;
 const selectedResources = computed(() => state.session?.resources.filter(file => state.selected.includes(file.id)) || []);
 const availableResources = computed(() => state.session?.resources.filter(file => !state.selected.includes(file.id)) || []);
+const receiptOpen = reactive<Record<number, boolean>>({});
 const sources = computed(() => { const links = new Map<string, { title: string; url: string; domain: string }>(); for (const event of state.events.filter(e => e.type === 'sources')) for (const source of event.data.items || []) { if (markdownHttpUrl(source.url)) links.set(source.url, { ...source, domain: source.url.split('/')[2] }); } return [...links.values()]; });
 let seen = 0;
 const now = ref(Date.now());
@@ -118,7 +143,7 @@ watch(() => state.session, session => {
 const busy = computed(() => ['running', 'waiting'].includes(state.session?.status || ''));
 const interactions = computed(() => state.session?.interactions.filter(i => i.status === 'pending') || []);
 const statusLabel = computed(() => ({ idle: '可以继续交办', running: '正在执行', waiting: interactions.value[0]?.kind === 'approval' ? '等待你的授权' : '等待你的答复', interrupted: '已打断，请核对后继续', failed: '未完成，请核对后继续', closed: '工作会话已关闭' }[state.session?.status || 'idle']));
-watch(() => [props.conversationId, props.visible] as const, ([id, visible]) => { seen = 0; adding.value = false; details.value = false; if (!mockEnabled) void controller.attach(id, visible); else state.error = 'Work 需要连接真实服务'; }, { immediate: true });
+watch(() => [props.conversationId, props.visible] as const, ([id, visible]) => { seen = 0; pluginError.value = ''; adding.value = false; details.value = false; if (!mockEnabled) void controller.attach(id, visible); else state.error = 'Work 需要连接真实服务'; }, { immediate: true });
 watch(() => state.liveText.length + state.events.length, () => { if (followLatest.value) scrollTop.value += 100000; });
 onUnmounted(() => { clearInterval(clock); controller.dispose(); });
 function progressNotes(run: string) { return state.events.filter(e => e.run_id === run && e.type === 'assistant' && !e.data.parent_tool_use_id && e.data.content && e.data.content !== state.liveText && !state.session?.messages.some(m => m.role === 'assistant' && m.content === e.data.content)); }
@@ -132,7 +157,24 @@ function choose(id: string, question: string, value: string, multiple: boolean) 
 }
 function removeResource(id: string) { if (!busy.value && !state.submitting) state.selected = state.selected.filter(value => value !== id); }
 function selectResource(id: string) { if (busy.value || state.submitting) return; if (state.selected.length >= 20) return toast('每次最多关联 20 个文件'); state.selected.push(id); adding.value = false; }
-function toggleAdding() { if (!busy.value && !state.submitting) adding.value = !adding.value; }
+async function loadPluginMenu() {
+  pluginError.value = '';
+  try { await controller.loadPlugins(); } catch (e: any) { pluginError.value = e.message || '能力加载失败'; }
+}
+function openCapabilities() { adding.value = false; uni.navigateTo({ url: '/pages/capabilities/index' }); }
+async function selectPlugin(plugin: WorkPlugin, skill?: string) {
+  if (busy.value || state.submitting) return;
+  try {
+    if (!plugin.added) await controller.configurePlugin(plugin, 'add');
+    if (skill) state.draft = `使用「${skill}」技能。${state.draft}`;
+    adding.value = false;
+  } catch (e: any) { toast(e.message || '能力选用失败'); }
+}
+async function removePlugin(id: string) {
+  if (busy.value || state.submitting) return;
+  try { await controller.configurePlugin({ id } as WorkPlugin, 'remove'); } catch (e: any) { toast(e.message || '移除失败'); }
+}
+function toggleAdding() { if (!busy.value && !state.submitting) { adding.value = !adding.value; if (adding.value) void loadPluginMenu(); } }
 function allAnswered(item: WorkInteraction) { return (item.input.questions || []).every((q: any) => answers[item.id]?.[q.question]?.trim()); }
 
 function approvalDetails(item: WorkInteraction) { return Object.entries(item.input).filter(([key]) => !key.startsWith('_')).map(([key, value]) => `${key}: ${typeof value === 'string' ? value : JSON.stringify(value, null, 2)}`).join('\n'); }
@@ -150,6 +192,10 @@ async function download(file: { id: string; name: string }) { if (downloading.va
 </script>
 
 <style scoped>
+.plugin-receipt { margin-top: 12px; padding: 12px; border: 1px solid #e5e7eb; border-radius: 12px; display: flex; flex-direction: column; gap: 6px; color: #555; font-size: 13px; }
+.receipt-title { font-weight: 600; color: #333; overflow-wrap: anywhere; }
+.receipt-rows { max-height: 240px; }
+.receipt-row { display: flex; flex-direction: column; gap: 4px; padding: 8px 0; border-top: 1px solid #eee; }
 .work { flex: 1; min-height: 0; display: flex; flex-direction: column; color: #303237; }
 .work-scroll { flex: 1; min-height: 0; height: 0; }.work-content { padding: 12px 20px 24px; }
 .work-welcome { text-align: center; font-size: 25px; font-weight: 600; margin-top: 17vh; }
@@ -173,4 +219,15 @@ async function download(file: { id: string; name: string }) { if (downloading.va
 .work-error { font-size: 12px; color: #ad6666; }.work-error text { display: block; padding: 8px 0; }.back-latest { align-self: center; background: #fff; border: 1px solid #e5e6e8; color: #868a93; border-radius: 20px; font-size: 11px; padding: 7px 12px; }
 :deep(.t-chat-sender) { margin: 0; border: 1px solid #dedfe3; border-radius: 22px; }:deep(.t-chat-markdown) { font-size: 14px; line-height: 1.8; }
 :deep(.t-chat-sender__textarea--control) { box-sizing: border-box; padding-bottom: 0; max-height: 160px; overflow-y: auto !important; }:deep(.t-chat-sender__textarea) { max-height: 160px; overflow: hidden; }:deep(.uni-textarea-wrapper) { max-height: 160px !important; overflow: hidden; }:deep(.uni-textarea-textarea) { max-height: 160px !important; overflow-y: auto !important; }.file-download { color: #5885ce; }.source-site :deep(.t-icon) { color: #659baf; }
+</style>
+
+<style scoped>
+.capability-row { gap: 8px; }
+.capability-row > text:first-of-type { flex: none; }
+.capability-summary { color: #999; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.menu-status { padding: 8px; color: #888; font-size: 12px; }
+.plugin-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.plugin-chips > view { padding: 5px 9px; margin: 4px 0; border: 1px solid #dedfe2; border-radius: 7px; font-size: 12px; }
+.add-menu-row { height: auto; min-height: 36px; padding: 6px 8px; border-radius: 16px; }
+.add-menu-row:active { background: #eceef1; }
 </style>

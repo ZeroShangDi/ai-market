@@ -10,6 +10,7 @@ const active = value => ['running', 'waiting'].includes(value.status);
 export class WorkStore {
   constructor({ dataDir, executor, concurrency = 2, timeoutMs = 30 * 60 * 1000 }) {
     this.dir = join(dataDir, 'work'); this.executor = executor; this.concurrency = concurrency; this.timeoutMs = timeoutMs;
+    this.capabilityStates = new Map(); this.capabilityLocks = new Set();
     this.sessions = new Map(); this.runs = new Map(); this.listeners = new Map(); this.accepting = true;
   }
   async init() {
@@ -32,7 +33,7 @@ export class WorkStore {
   async save(s) {
     // Writes are serialized per session: callbacks may arrive concurrently from native subagents.
     const previous = s._save || Promise.resolve();
-    const copy = JSON.stringify(s, (key, value) => key === '_save' ? undefined : value);
+    const copy = JSON.stringify(s, (key, value) => ['_save', '_pluginBusy'].includes(key) ? undefined : value);
     const work = previous.then(async () => { const path = join(this.paths(s).base, 'mapping.json'); await writeFile(`${path}.tmp`, copy, { mode: 0o600 }); await rename(`${path}.tmp`, path); });
     s._save = work.catch(() => {}); await work;
   }
@@ -51,7 +52,7 @@ export class WorkStore {
   }
   view(s) {
     return { id: s.id, conversation_id: s.conversation_id, status: s.status, run_id: s.run_id || null, sdk_session_id: s.sdk_session_id,
-      sequence: s.sequence, messages: s.messages, interactions: s.interactions, resources: s.resources, artifacts: s.artifacts,
+      sequence: s.sequence, messages: s.messages, interactions: s.interactions, resources: s.resources, plugins: s.plugins || [], artifacts: s.artifacts,
       snapshots: s.snapshots, created_at: s.created_at, updated_at: s.updated_at };
   }
   list(actor) {
@@ -81,13 +82,94 @@ export class WorkStore {
     catch (e) { this.sessions.delete(s.id); throw e; }
     return this.view(s);
   }
+  actorKey(actor) { if (!/^(0|[1-9][0-9]{0,18})$/.test(actor.tenant)) invalid('租户无效'); return `${actor.tenant}-${decimalId(actor.user, 'user')}`; }
+  async capabilityState(actor) {
+    const key = this.actorKey(actor);
+    if (!this.capabilityStates.has(key)) {
+      let state = { items: [] };
+      try { state = JSON.parse(await readFile(join(this.dir, 'capabilities', `${key}.json`), 'utf8')); }
+      catch (e) { if (e.code !== 'ENOENT') throw e; }
+      this.capabilityStates.set(key, state);
+    }
+    return this.capabilityStates.get(key);
+  }
+  async capabilityCatalog(actor) {
+    return await this.executor.plugins?.({ base: this.dir, identity: actor }) || [];
+  }
+  async capabilities(actor) {
+    const available = await this.capabilityCatalog(actor), state = await this.capabilityState(actor);
+    return { items: available.map(({ manifest }) => {
+      const saved = state.items.find(p => p.id === manifest.id);
+      return { id: manifest.id, name: manifest.name || manifest.id, description: manifest.description || '',
+        skills: (manifest.skills || []).map(skill => ({ ...skill, enabled: !(saved?.disabledSkills || []).includes(skill.name) })),
+        tools: Object.entries(manifest.tools || {}).map(([id, tool]) => ({ id, label: tool.label })),
+        connection: { label: manifest.connection?.label, actionLabel: manifest.connection?.actionLabel, description: manifest.connection?.description },
+        installed: !!saved, enabled: !!saved?.enabled, connected: !!saved?.account, account: saved?.account || '' };
+    }) };
+  }
+  async configureCapability(actor, input) {
+    const key = this.actorKey(actor);
+    if (this.capabilityLocks.has(key)) throw conflict('能力配置正在更新');
+    if (!input || !['install', 'enable', 'disable', 'uninstall', 'connect', 'disconnect', 'enable_skill', 'disable_skill'].includes(input.action)) invalid('能力操作无效');
+    this.capabilityLocks.add(key);
+    try {
+      const plugin = (await this.capabilityCatalog(actor)).find(p => p.manifest.id === input.plugin_id);
+      if (!plugin) invalid('插件不可用');
+      const state = await this.capabilityState(actor), next = structuredClone(state);
+      let saved = next.items.find(p => p.id === input.plugin_id);
+      if (input.action === 'install') { if (!saved) next.items.push({ id: input.plugin_id, enabled: true, disabledSkills: [] }); }
+      else {
+        if (!saved) invalid('请先安装插件');
+        if (input.action === 'uninstall') next.items = next.items.filter(p => p !== saved);
+        if (input.action === 'enable') saved.enabled = true;
+        if (input.action === 'disable') saved.enabled = false;
+        if (input.action === 'disconnect') delete saved.account;
+        if (['enable_skill', 'disable_skill'].includes(input.action)) {
+          if (!plugin.manifest.skills?.some(s => s.name === input.skill)) invalid('技能不存在');
+          saved.disabledSkills = (saved.disabledSkills || []).filter(s => s !== input.skill);
+          if (input.action === 'disable_skill') saved.disabledSkills.push(input.skill);
+        }
+        if (input.action === 'connect') {
+          try { saved.account = (await this.executor.connectPlugin(plugin, actor)).account; }
+          catch { throw new ApiError(403, 'PLUGIN_CONNECTION_FAILED', '连接未通过，请检查系统配置与当前账号权限'); }
+        }
+      }
+      const dir = join(this.dir, 'capabilities'); await mkdir(dir, { recursive: true, mode: 0o700 });
+      const file = join(dir, `${key}.json`); await writeFile(file + '.tmp', JSON.stringify(next), { mode: 0o600 }); await rename(file + '.tmp', file);
+      this.capabilityStates.set(key, next);
+      return this.capabilities(actor);
+    } finally { this.capabilityLocks.delete(key); }
+  }
+  async plugins(actor, id) {
+    const s = this.get(actor, id), catalog = await this.capabilities(actor);
+    return { items: catalog.items.map(p => ({ ...p, added: !!s.plugins?.some(v => v.id === p.id && v.added) })) };
+  }
+  async configurePlugin(actor, id, input) {
+    const s = this.get(actor, id);
+    if (active(s) || s.status === 'closed' || s._pluginBusy) throw conflict('请等待当前操作结束');
+    if (!input || !['add', 'remove'].includes(input.action)) invalid('请在能力中心管理插件与账号');
+    s._pluginBusy = true;
+    try {
+      const plugin = (await this.capabilities(actor)).items.find(p => p.id === input.plugin_id);
+      if (input.action === 'add' && (!plugin?.installed || !plugin.enabled || !plugin.connected)) invalid('请先到能力中心启用插件并连接账号');
+      if (active(s) || s.status === 'closed') throw conflict('会话状态已变化');
+      s.plugins = [...(s.plugins || []).filter(p => p.id !== input.plugin_id), ...(input.action === 'add' ? [{ id: plugin.id, name: plugin.name, added: true }] : [])];
+      await this.emit(s, 'plugins_changed', { items: s.plugins }); return this.view(s);
+    } finally { delete s._pluginBusy; }
+  }
+  async requireCapabilities(actor, ids, tool, input) {
+    if (!ids.length) return;
+    const items = (await this.capabilities(actor)).items;
+    if (tool === 'Skill' && items.some(p => p.skills.some(s => !s.enabled && input?.skill === `${p.id}:${s.id || s.name}`))) throw conflict('此技能已停用');
+    if (ids.some(id => !items.some(p => p.id === id && p.installed && p.enabled && p.connected))) throw conflict('会话能力已停用或断开，请移除或到能力中心重新连接');
+  }
   async send(actor, id, input) {
     const s = this.get(actor, id), key = uuid(input?.request_id), prompt = text(input?.prompt, 12000, '工作指令');
     const resourceIds = input.resource_ids || [];
     if (!Array.isArray(resourceIds) || resourceIds.length > 20 || resourceIds.some(id => !s.resources.some(r => r.id === id))) invalid('关联资源无效');
     const hash = digest({ prompt, resourceIds });
     if (s.receipts[key]) { if (s.receipts[key] !== hash) throw conflict('相同请求标识不能用于不同指令'); return this.view(s); }
-    if (!this.accepting || active(s) || s.status === 'closed') throw conflict('工作会话忙碌或已关闭，请刷新');
+    if (!this.accepting || active(s) || s._pluginBusy || s.status === 'closed') throw conflict('工作会话忙碌或已关闭，请刷新');
     if (this.runs.size >= this.concurrency) throw new ApiError(429, 'RATE_LIMITED', '工作执行较多，请稍后再试');
     s.run_id = key; s.status = 'running'; s.receipts[key] = hash;
     s.messages.push({ id: key, role: 'user', content: prompt, resource_ids: resourceIds, created_at: new Date().toISOString() });
@@ -102,7 +184,9 @@ export class WorkStore {
     const timer = setTimeout(() => run.controller.abort(), this.timeoutMs); timer.unref?.();
     try {
       const ensureCurrent = () => { if (run.controller.signal.aborted || this.runs.get(s.id) !== run) throw conflict('当前执行已失效'); };
-      const result = await this.executor.run({ ...this.paths(s), sessionId: s.sdk_session_id, prompt, identity: { tenant: s.tenant, user: s.user },
+      const actor = { tenant: s.tenant, user: s.user }, pluginIds = (s.plugins || []).filter(p => p.added).map(p => p.id);
+      await this.requireCapabilities(actor, pluginIds);
+      const result = await this.executor.run({ validatePlugins: (tool, input) => this.requireCapabilities(actor, pluginIds, tool, input), ...this.paths(s), sessionId: s.sdk_session_id, pluginIds: (s.plugins || []).filter(p => p.added).map(p => p.id), prompt, identity: { tenant: s.tenant, user: s.user },
         resources: s.resources.filter(r => ids.includes(r.id)), signal: run.controller.signal,
         onSession: async id => { ensureCurrent(); if (s.sdk_session_id && s.sdk_session_id !== id) throw conflict('原生会话映射不一致，请核对后继续'); s.sdk_session_id = id; await this.save(s); },
         onEvent: (type, data) => { ensureCurrent(); return this.emit(s, type, data); },

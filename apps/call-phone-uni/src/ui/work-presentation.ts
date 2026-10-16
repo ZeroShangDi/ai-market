@@ -11,7 +11,7 @@ export function workSteps(events: WorkEvent[], run: string) {
     const data = event.data;
     if (['tool_start', 'tool_call', 'audit'].includes(event.type)) {
       const id = data.id || data.tool_use_id;
-      if (id && !steps.has(id)) steps.set(id, { id, label: toolLabel(data.name || data.tool || ''), status: '进行中' });
+      if (id && !steps.has(id)) steps.set(id, { id, label: typeof data.label === 'string' ? data.label : toolLabel(data.name || data.tool || ''), status: '进行中' });
     }
     if (event.type === 'tool_result' && steps.has(data.id)) steps.get(data.id)!.status = data.is_error ? '未完成' : '完成';
     if (['result', 'error'].includes(event.type)) for (const step of steps.values()) if (step.status === '进行中') step.status = '已结束';
@@ -30,7 +30,13 @@ export function workElapsed(events: WorkEvent[], run: string, now = Date.now()) 
   return seconds < 60 ? `${seconds} 秒` : `${Math.floor(seconds / 60)} 分 ${seconds % 60} 秒`;
 }
 export function approvalFields(tool: string, input: Record<string, unknown>) {
-  const fields = [{ label: '操作', value: toolLabel(tool) }, { label: '工具', value: tool }];
+  const display = input._display as { label?: string; fields?: { label: string; value: string }[] } | undefined;
+  const fields = [{ label: '操作', value: display?.label || toolLabel(tool) }];
+  if (display && Array.isArray(display.fields)) {
+    fields.push(...display.fields.filter(f => typeof f.label === 'string' && typeof f.value === 'string'));
+    fields.push({ label: '授权范围', value: '仅本次操作' }); return fields;
+  }
+  fields.push({ label: '工具', value: tool });
   const labels: Record<string, string> = { description: '操作说明', order_id: '订单', customer_id: '客户 ID', recipient: '接收方', to: '接收方', amount: '金额', currency: '币种', quantity: '数量', url: '目标网址', file_path: '文件', command: '执行命令' };
   for (const [key, label] of Object.entries(labels)) {
     const value = input[key];
@@ -85,4 +91,11 @@ export function continueItems(work: WorkSummary[], conversations: Pick<Conversat
   pending.sort(byRecent);
   history.sort(byRecent);
   return { pending, history, preview: [...pending, ...history].slice(0, 3) };
+}
+
+/** Render only persisted plugin results, never model prose or business-specific schemas. */
+export function workReceipts(events: WorkEvent[], run: string) {
+  return events.filter(e => e.run_id === run && e.type === 'plugin_result' && typeof e.data.title === 'string'
+    && typeof e.data.summary === 'string' && Array.isArray(e.data.rows))
+    .map(e => ({ ...e.data, sequence: e.sequence }));
 }

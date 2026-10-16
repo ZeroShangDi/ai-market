@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "id": "callphone",
+  "name": "客户业务",
+  "entry": "index.js",
+  "tools": {
+    "preview_lead_import": {
+      "label": "检查线索文件",
+      "risk": 1
+    },
+    "import_leads": {
+      "label": "导入线索",
+      "risk": 2
+    }
+  },
+  "description": "检查 CSV 文件并将有效行导入线索池",
+  "skills": [
+    {
+      "id": "import-leads",
+      "name": "导入线索",
+      "description": "上传 CSV，检查字段并授权导入"
+    }
+  ],
+  "connection": {
+    "label": "客户业务账号",
+    "actionLabel": "连接当前账号",
+    "description": "使用当前登录账号与租户，需具备线索创建权限"
+  }
+}

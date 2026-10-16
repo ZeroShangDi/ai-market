@@ -1,7 +1,7 @@
 <template>
   <view class="page">
     <view class="wrap">
-      <MobileHeader title="应用广场" />
+      <MobileHeader title="应用广场" action-text="能力中心" @action="openCapabilities" />
       <PreviewBanner />
       <view class="content">
         <view class="search-box">
@@ -96,6 +96,7 @@ import { hasUnfinishedCall } from '@/services/calls';
 import { ensureSession } from '@/services/session';
 import { toast } from '@/ui/format';
 
+function openCapabilities() { uni.navigateTo({ url: '/pages/capabilities/index' }); }
 const query = ref('');
 const searchTerm = computed(() => query.value.trim().toLocaleLowerCase());
 const filteredApps = computed(() => mobileApps.filter(app =>

@@ -78,3 +78,21 @@ test('continue preview does not fabricate minimum rows and retains interrupted w
   assert.deepEqual(ids(result.pending), ['stopped']);
   assert.deepEqual(ids(result.preview), ['stopped', 'closed']);
 });
+
+test('generic plugin results persist after completion and stay scoped to their original run', () => {
+  const { workReceipts } = exportsObject;
+  const result = { title: '测试结果', summary: '处理 2 项', rows: [{ label: '项目一', status: '完成', detail: '回执 1002' }] };
+  const events = [
+    { sequence: 1, run_id: 'r', type: 'plugin_result', data: result },
+    { sequence: 2, run_id: 'r', type: 'result', data: { success: true } },
+    { sequence: 3, run_id: 'next', type: 'plugin_result', data: result },
+    { sequence: 4, run_id: 'r', type: 'assistant', data: result },
+  ];
+  const restored = workReceipts(JSON.parse(JSON.stringify(events)), 'r');
+  assert.equal(restored.length, 1); assert.equal(restored[0].rows[0].detail, '回执 1002');
+});
+test('plugin tool and authorization labels come from metadata without client business branches', () => {
+  const fields = approvalFields('mcp__example__execute', { _display: { label: '执行示例', fields: [{ label: '范围', value: '2 项' }] } });
+  assert.equal(fields[0].value, '执行示例'); assert.equal(fields[1].value, '2 项');
+  assert.equal(workSteps([{ run_id: 'r', type: 'tool_call', data: { id: 'x', name: 'mcp__example__execute', label: '执行示例' } }], 'r')[0].label, '执行示例');
+});

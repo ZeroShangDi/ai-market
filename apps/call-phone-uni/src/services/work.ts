@@ -6,7 +6,13 @@ import { previewRequestId } from './ai-chat-preview';
 
 const base = '/api/v1/mobile/work/sessions';
 export interface WorkInteraction { id: string; kind: 'question' | 'approval'; binding: string; status: string; tool: string; input: any }
+export interface WorkPlugin {
+  id: string; name: string; description: string; installed: boolean; enabled: boolean; tools: { id: string; label: string }[]; skills: { id?: string; name: string; description: string; enabled: boolean }[];
+  connection: { label?: string; actionLabel?: string; description?: string };
+  account: string; connected: boolean; added: boolean;
+}
 export interface WorkSession {
+  plugins?: { id: string; name?: string; added: boolean }[];
   id: string; conversation_id: string; status: string; sequence: number; run_id?: string | null;
   messages: { id: string; role: string; content: string; resource_ids?: string[] }[];
   interactions: WorkInteraction[]; resources: { id: string; name: string }[];
@@ -35,7 +41,7 @@ export function workStatus(item: WorkSummary) {
 
 export function createWorkController() {
   const state = reactive({ session: null as WorkSession | null, error: '', draft: '', loading: false, submitting: false,
-    liveText: '', activity: '', selected: [] as string[], events: [] as WorkEvent[], conversation: '', visible: false });
+    plugins: [] as WorkPlugin[], pluginLoading: false, liveText: '', activity: '', selected: [] as string[], events: [] as WorkEvent[], conversation: '', visible: false });
   let epoch = 0, cursor = 0, stream: ReturnType<typeof xhr> | undefined;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let liveMessage = '';
@@ -43,7 +49,7 @@ export function createWorkController() {
   const fence = () => ({ epoch, conversation: state.conversation });
   const current = (f: ReturnType<typeof fence>) => epoch === f.epoch && state.visible && state.conversation === f.conversation;
   function detach() { clearTimeout(timer); const previous = stream; stream = undefined; previous?.abort(); }
-  function reset() { epoch++; detach(); state.session = null; state.draft = ''; state.selected = []; state.events = []; state.liveText = ''; state.activity = ''; state.error = ''; state.submitting = false; state.loading = false; pending = undefined; cursor = 0; }
+  function reset() { epoch++; detach(); state.session = null; state.plugins = []; state.pluginLoading = false; state.draft = ''; state.selected = []; state.events = []; state.liveText = ''; state.activity = ''; state.error = ''; state.submitting = false; state.loading = false; pending = undefined; cursor = 0; }
   const unsub = [onSessionChange(reset), onDeviceChange(reset)];
   async function refresh(token = fence()) {
     if (!current(token) || !state.session) return;
@@ -117,7 +123,7 @@ export function createWorkController() {
   async function attach(conversation: string, visible: boolean) {
     if (state.conversation !== conversation) { reset(); state.conversation = conversation; }
     state.visible = visible;
-    if (!visible || !conversation) { epoch++; detach(); state.submitting = false; state.loading = false; return; }
+    if (!visible || !conversation) { epoch++; detach(); state.submitting = false; state.pluginLoading = false; state.loading = false; return; }
     const token = fence(); state.loading = true;
     try {
       const result = await request<WorkSession>('POST', base, { conversation_id: conversation });
@@ -156,6 +162,20 @@ export function createWorkController() {
     try { await request('POST', `${base}/${state.session.id}/${close ? 'close' : 'interrupt'}`, {}); await refresh(token); }
     catch (e: any) { if (current(token)) state.error = e.message; }
   }
+  async function loadPlugins() {
+    if (!state.session || state.pluginLoading) return;
+    const token = fence(); state.pluginLoading = true;
+    try { const data = await request<{ items: WorkPlugin[] }>('GET', `${base}/${state.session.id}/plugins`); if (current(token)) state.plugins = data.items; }
+    finally { if (current(token)) state.pluginLoading = false; }
+  }
+  async function configurePlugin(plugin: WorkPlugin, action: string) {
+    if (!state.session || state.submitting || state.pluginLoading) return;
+    const token = fence(); state.submitting = true;
+    try {
+      const session = await request<WorkSession>('POST', `${base}/${state.session.id}/plugins`, { plugin_id: plugin.id, action });
+      if (current(token)) { state.session = session; await loadPlugins(); }
+    } finally { if (current(token)) state.submitting = false; }
+  }
   async function upload(file: { name: string; content_base64: string }) {
     if (!state.session || state.submitting) return;
     const token = fence(); state.submitting = true;
@@ -163,5 +183,5 @@ export function createWorkController() {
     catch (e: any) { if (current(token)) state.error = e.message; }
     finally { if (current(token)) state.submitting = false; }
   }
-  return { state, attach, send, answer, interrupt, upload, refresh, markSeen, dispose: () => { reset(); unsub.forEach(fn => fn()); } };
+  return { state, loadPlugins, configurePlugin, attach, send, answer, interrupt, upload, refresh, markSeen, dispose: () => { reset(); unsub.forEach(fn => fn()); } };
 }

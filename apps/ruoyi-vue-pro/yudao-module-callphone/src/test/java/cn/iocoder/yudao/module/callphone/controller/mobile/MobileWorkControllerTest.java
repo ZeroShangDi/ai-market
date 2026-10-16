@@ -47,6 +47,16 @@ class MobileWorkControllerTest {
         assertThrows(MobileAiRelay.ConversationFailure.class, () -> controller.answer(request, SID, SID, json.createObjectNode()));
         verify(relay, never()).request(eq("POST"), contains("interactions"), any(), any(), any());
     }
+    @Test void pluginCatalogAndConnectionRequireOwnedConversationAndForwardGenericPayload() {
+        var controller = controller(); owned(); var request = new MockHttpServletRequest();
+        var body = json.createObjectNode().put("plugin_id", "example").put("action", "connect");
+        when(relay.request("GET", "/" + SID + "/plugins", null, null, actor)).thenReturn(envelope(json.createObjectNode().set("items", json.createArrayNode())));
+        assertEquals(200, controller.plugins(request, SID).getStatusCode().value());
+        when(relay.request("POST", "/" + SID + "/plugins", body, null, actor)).thenReturn(envelope(json.createObjectNode()));
+        assertEquals(200, controller.action(request, SID, "plugins", body).getStatusCode().value());
+        doThrow(new MobileAiRelay.ConversationFailure(403)).when(chat).requireConversation("123", "1", "7", "10");
+        assertThrows(MobileAiRelay.ConversationFailure.class, () -> controller.plugins(request, SID));
+    }
     @Test void artifactDownloadPreservesBytesAndForcesDownloadWithNoCacheOrSniffing() {
         var controller = controller(); owned(); byte[] bytes = {0, -1, 1, 2};
         when(relay.request("GET", "/" + SID + "/artifacts/" + SID, null, null, actor)).thenReturn(envelope(json.createObjectNode().put("name", "结果.xlsx").put("content_base64", Base64.getEncoder().encodeToString(bytes))));
