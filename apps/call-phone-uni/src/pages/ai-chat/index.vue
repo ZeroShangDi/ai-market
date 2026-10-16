@@ -8,7 +8,7 @@
     </MobileHeader>
     <view class="chat-shell">
       <WorkConversation v-if="mode === 'work'" :conversation-id="state.activeId" :visible="pageVisible" @started="workStarted = true" @title="workTitle = $event">
-        <template #mode><ConversationModeToggle mode="work" :locked="modeLocked" @change="setMode" /></template>
+        <template #mode><view v-if="!modeLocked" class="composer-mode"><ConversationModeToggle mode="work" :locked="false" @change="setMode" /></view></template>
       </WorkConversation>
       <scroll-view v-else class="message-scroll" scroll-y :scroll-top="scrollTop" :scroll-with-animation="false"
         @scroll="onScroll" @touchmove="followLatest = false" @wheel="followLatest = false" @scrolltolower="followLatest = true">
@@ -54,12 +54,13 @@
             </view>
           </view>
 
+        <view v-if="!modeLocked" class="composer-mode"><ConversationModeToggle mode="chat" :locked="false" @change="setMode" /></view>
         <TChatSender :value="active?.draft || ''" :loading="state.generating || state.recovering" placeholder="输入问题，聊聊你的想法…"
           :render-presets="[{ name: 'send', type: 'icon' }]" :textarea-props="{ autosize: { minHeight: '48px', maxHeight: '160px' } }"
           :adjust-position="false" :auto-rise-with-keyboard="false" @update:value="updateDraft" @send="onSend"
           @stop="stop" @keyboardheightchange="keyboardChanged">
           <template #footer-prefix>
-            <view class="composer-tools"><ConversationModeToggle mode="chat" :locked="modeLocked" @change="setMode" />
+            <view class="composer-tools">
               <view v-if="!mockEnabled" class="web-toggle" :class="{ active: state.webSearch }" role="button"
                 :aria-label="state.webSearch ? '关闭联网搜索' : '开启联网搜索'" :aria-pressed="state.webSearch"
                 @tap="!state.generating && !state.recovering && (state.webSearch = !state.webSearch)">联网</view>
@@ -92,6 +93,7 @@
 </template>
 
 <script setup lang="ts">
+import { incomingWorkFiles } from '@/services/incoming-work-files';
 import ConversationModeToggle from '@/components/ConversationModeToggle.vue';
 import { workInbox, refreshWorkInbox, workStatus } from '@/services/work';
 import { computed, nextTick, ref, watch } from 'vue';
@@ -116,11 +118,24 @@ const { state, active, stop } = aiChat;
 const mode = ref<'chat' | 'work'>('chat');
 const pageVisible = ref(false), workStarted = ref(false), workTitle = ref(''), historyQuery = ref('');
 const summary = computed(() => workInbox.items.find(item => item.conversation_id === state.activeId));
-const modeLocked = computed(() => workInbox.loading || workStarted.value || !!summary.value?.started || !!active.value?.messages.length || state.generating || state.recovering);
+const modeLocked = computed(() => incomingWorkFiles.conversation === state.activeId && incomingWorkFiles.items.length > 0 || workInbox.loading || workStarted.value || !!summary.value?.started || !!active.value?.messages.length || state.generating || state.recovering);
 const pageTitle = computed(() => mode.value === 'work' ? (workTitle.value || summary.value?.title || '新工作') : (active.value?.messages.length ? active.value.title : '新会话'));
 function setMode(value: 'chat' | 'work') { if (!modeLocked.value) mode.value = value; }
 watch(() => state.activeId, () => { workStarted.value = false; workTitle.value = ''; mode.value = summary.value?.started ? 'work' : 'chat'; });
 watch(() => summary.value?.started, started => { if (started) mode.value = 'work'; });
+let preparingIncoming = false;
+async function openIncomingConversation() {
+  if (preparingIncoming || !pageVisible.value || !state.initialized || !state.visible || !incomingWorkFiles.items.length || incomingWorkFiles.conversation || hasUnfinishedCall()) return;
+  preparingIncoming = true;
+  try {
+    if (!await aiChat.newConversation(true)) throw new Error("会话创建失败");
+    await nextTick();
+    if (!state.activeId || !pageVisible.value) return;
+    incomingWorkFiles.conversation = state.activeId;
+    mode.value = 'work';
+  } catch { toast('创建工作会话失败，文件已保留，返回页面可重试'); } finally { preparingIncoming = false; }
+}
+watch(() => [incomingWorkFiles.batch, pageVisible.value], () => { void openIncomingConversation(); });
 const requestedConversation = ref('');
 onLoad(query => { requestedConversation.value = String(query?.conversation || ''); });
 const historyVisible = ref(false), scrollTop = ref(0), followLatest = ref(true);
@@ -228,7 +243,8 @@ onShow(() => {
       if (state.conversations.some(item => item.id === id) || workInbox.items.some(item => item.conversation_id === id)) { includeWorkConversation(id); await aiChat.select(id); }
       else toast('这段对话已不可访问，请从会话历史选择');
     }
-    if (summary.value?.started) mode.value = 'work';
+    await openIncomingConversation();
+    if (summary.value?.started || incomingWorkFiles.conversation === state.activeId) mode.value = 'work';
     if (active.value?.messages.length) void jumpToLatest();
   });
 });
@@ -263,6 +279,7 @@ onUnload(() => {
 .conversation-bar { flex-shrink: 0; display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 8px 20px 12px; }
 .conversation-title { color: #929bad; font-size: 12px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .new-chat { flex-shrink: 0; display: flex; align-items: center; gap: 4px; color: #53617d; font-size: 12px; background: #fff; padding: 8px 10px; border-radius: 10px; }
+.composer-mode { display: flex; justify-content: flex-end; padding: 0 4px 8px; }
 .mode-switch { display: flex; gap: 10px; flex-shrink: 0; font-size: 13px; color: #929bad; }.mode-switch .selected { color: #294fdb; font-weight: 600; }
 .message-scroll { flex: 1; min-height: 0; height: 0; }
 .welcome { padding: 38px 24px 24px; }

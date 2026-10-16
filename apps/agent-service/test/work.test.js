@@ -177,3 +177,16 @@ test('Work inbox isolates owners and acknowledges only the completion sequence a
   await store.seen(actor, s.id, { sequence: first.sequence }); assert.equal(store.list(actor)[0].unread, true);
   await assert.rejects(store.seen(actor, s.id, { sequence: 999999 }));
 });
+
+test('workspace retains previously sent resources across turns but excludes uploaded unsent files', async t => {
+  const seen = [];
+  const { store, s } = await fixture(t, async ctx => {
+    seen.push({ resources: ctx.resources.map(r => r.id), selected: ctx.currentResourceIds });
+    return { success: true, text: '检查完成' };
+  });
+  const attached = await store.upload(actor, s.id, { name: 'leads.csv', content_base64: Buffer.from('name,phone\n测试,+12025550101').toString('base64') });
+  await store.upload(actor, s.id, { name: 'unsent.csv', content_base64: 'YQ==' });
+  await store.send(actor, s.id, { request_id: randomUUID(), prompt: '检查附件', resource_ids: [attached.id] }); await settle(store, s.id);
+  await store.send(actor, s.id, { request_id: randomUUID(), prompt: '继续使用刚才的附件', resource_ids: [] }); await settle(store, s.id);
+  assert.deepEqual(seen, [{ resources: [attached.id], selected: [attached.id] }, { resources: [attached.id], selected: [] }]);
+});

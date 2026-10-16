@@ -187,7 +187,7 @@ export class WorkStore {
       const actor = { tenant: s.tenant, user: s.user }, pluginIds = (s.plugins || []).filter(p => p.added).map(p => p.id);
       await this.requireCapabilities(actor, pluginIds);
       const result = await this.executor.run({ validatePlugins: (tool, input) => this.requireCapabilities(actor, pluginIds, tool, input), ...this.paths(s), sessionId: s.sdk_session_id, pluginIds: (s.plugins || []).filter(p => p.added).map(p => p.id), prompt, identity: { tenant: s.tenant, user: s.user },
-        resources: s.resources.filter(r => ids.includes(r.id)), signal: run.controller.signal,
+        currentResourceIds: ids, resources: s.resources.filter(r => s.messages.some(message => message.role === 'user' && message.resource_ids?.includes(r.id))), signal: run.controller.signal,
         onSession: async id => { ensureCurrent(); if (s.sdk_session_id && s.sdk_session_id !== id) throw conflict('原生会话映射不一致，请核对后继续'); s.sdk_session_id = id; await this.save(s); },
         onEvent: (type, data) => { ensureCurrent(); return this.emit(s, type, data); },
         ask: (kind, tool, input, toolUseId) => this.ask(s, run, kind, tool, input, toolUseId),

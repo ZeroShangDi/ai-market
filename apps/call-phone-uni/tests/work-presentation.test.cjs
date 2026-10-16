@@ -32,7 +32,9 @@ test('process deduplicates streamed tool calls and distinguishes failure from co
 
 test('resource categories only advertise provisioned document and table formats and reject unsupported selections', () => {
   const { workFileCategories, acceptsWorkFile, fileAppearance } = exportsObject;
-  const docs = workFileCategories[0].accept, sheets = workFileCategories[1].accept;
+  assert.deepEqual(Array.from(workFileCategories, item => item.label), ['图片', '视频', '文件']);
+  assert.equal(workFileCategories[0].supported, false); assert.equal(workFileCategories[1].supported, false);
+  const docs = exportsObject.supportedWorkFileExtensions, sheets = docs;
   for (const name of ['合同.DOCX', '资料.pdf', '说明.txt', '讲稿.pptx']) assert.equal(acceptsWorkFile(name, docs), true);
   for (const name of ['数据.xlsx', '数据.CSV', '数据.tsv']) assert.equal(acceptsWorkFile(name, sheets), true);
   for (const name of ['视频.mp4', '照片.png', '旧文件.doc', '旧数据.xls', '伪装.xlsx.exe']) assert.equal(acceptsWorkFile(name, docs + ',' + sheets), false);

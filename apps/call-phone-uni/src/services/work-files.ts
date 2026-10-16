@@ -3,7 +3,7 @@ import { request, downloadWorkArtifact } from '@/api/http';
 
 const limit = 8 * 1024 * 1024;
 export interface WorkUpload { name: string; content_base64: string }
-export async function chooseWorkFile(accept = '', mime = '*/*'): Promise<WorkUpload | undefined> {
+export async function chooseWorkFile(accept = '', mime = '*/*', readContent = true, supports: (name: string) => boolean = () => true): Promise<WorkUpload | undefined> {
   // #ifdef H5
   if (typeof document !== 'undefined') return new Promise((resolve, reject) => {
     const input = document.createElement('input'); input.type = 'file'; input.accept = accept;
@@ -11,6 +11,7 @@ export async function chooseWorkFile(accept = '', mime = '*/*'): Promise<WorkUpl
     input.onchange = async () => {
       const file = input.files?.[0]; input.remove(); if (!file) return resolve(undefined);
       try {
+        if (!readContent || !supports(file.name)) return resolve({ name: file.name, content_base64: '' });
         if (file.size > limit) throw new Error('文件最多 8 MiB');
         const bytes = new Uint8Array(await file.arrayBuffer());
         let binary = ''; for (let i = 0; i < bytes.length; i += 8192) binary += String.fromCharCode(...bytes.subarray(i, i + 8192));
@@ -21,8 +22,9 @@ export async function chooseWorkFile(accept = '', mime = '*/*'): Promise<WorkUpl
   });
   // #endif
   // #ifdef APP-PLUS
-  if (typeof plus !== 'undefined' && plus.os.name === 'Android') return chooseAndroidDocument(limit,
+  if (typeof plus !== 'undefined' && plus.os.name === 'Android') return chooseAndroidDocument(readContent ? limit : Number.MAX_SAFE_INTEGER,
     name => !!name && name.length <= 120 && !name.startsWith('.') && !/[/\\\x00-\x1f]/.test(name), (android, stream, name) => {
+      if (!readContent || !supports(name)) return { name, content_base64: '' };
       const output = android.newObject('java.io.ByteArrayOutputStream');
       try {
         const byteClass = android.importClass('java.lang.Byte').TYPE;
@@ -35,7 +37,7 @@ export async function chooseWorkFile(accept = '', mime = '*/*'): Promise<WorkUpl
         }
         return { name, content_base64: String(android.invoke('android.util.Base64', 'encodeToString', android.invoke(output, 'toByteArray'), 2)) };
       } finally { android.invoke(output, 'close'); }
-    }, mime);
+    }, mime, name => !readContent || !supports(name));
   // #endif
   throw new Error('当前平台暂不支持原始文件选择');
 }

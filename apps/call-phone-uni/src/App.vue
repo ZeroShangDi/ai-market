@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onLaunch, onShow, onHide, onError, onUnhandledRejection } from "@dcloudio/uni-app";
 import { logger, resumeLogging, pauseLogging, installRequestLogging, runtimeFailure, diagnosticEnvironment } from '@/services/logger';
+import { receiveIncomingWorkFiles } from '@/services/incoming-work-files';
 import { testConnectivity } from "@/services/connectivity";
 import { resumeDeviceSession } from "@/services/session";
 import { onApplicationShow } from "@/modules/device-readiness";
@@ -34,7 +35,7 @@ onShow(() => {
   appVisible = true;
   void onApplicationShow();
   void refreshMobilePet();
-  void resumeDeviceSession().then(() => { if (appVisible) startForeground(); }).catch(() => {
+  void resumeDeviceSession().then(() => { if (appVisible) { startForeground(); receiveIncomingWorkFiles(); } }).catch(() => {
     // Leave the workbench open; retry on the next foreground/network event.
     uni.showToast({ title: "暂未连接电脑，可扫码连接或稍后重试", icon: "none" });
   });

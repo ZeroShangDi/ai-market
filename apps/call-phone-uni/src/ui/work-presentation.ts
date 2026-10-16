@@ -46,9 +46,11 @@ export function approvalFields(tool: string, input: Record<string, unknown>) {
   return fields;
 }
 
+export const supportedWorkFileExtensions = '.txt,.md,.json,.pdf,.docx,.pptx,.xlsx,.csv,.tsv';
 export const workFileCategories = [
-  { label: '文件与文档', icon: 'file', color: '#5885ce', accept: '.txt,.md,.json,.pdf,.docx,.pptx', mime: '*/*' },
-  { label: '表格与数据', icon: 'table', color: '#3c9a79', accept: '.xlsx,.csv,.tsv', mime: '*/*' },
+  { label: '图片', icon: 'image', color: '#9c77c9', accept: 'image/*', mime: 'image/*', supported: false },
+  { label: '视频', icon: 'video', color: '#d4964b', accept: 'video/*', mime: 'video/*', supported: false },
+  { label: '文件', icon: 'file', color: '#5885ce', accept: '', mime: '*/*', supported: true },
 ];
 export function fileAppearance(name: string) {
   if (/\.(xlsx?|csv|tsv)$/i.test(name)) return { icon: 'table', color: '#3c9a79' };

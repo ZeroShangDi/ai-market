@@ -74,7 +74,7 @@ export function createWorkExecutor({ provider = process.env.AGENT_PROVIDER || 'a
         allowRead: [cwd, join(config, 'skills'), ...pluginPaths] },
       credentials: { envVars: credentialNames.map(name => ({ name, mode: 'deny' })), files: protectedConfig.map(path => ({ path, mode: 'deny' })) } };
     const registered = sdk.createSdkMcpServer({ name: 'work', version: '1.0.0', alwaysLoad: true, tools: [
-      sdk.tool('workspace_info', 'Read the authorized workspace and available resources. No business credentials are available to native commands.', {}, async () => toolResult({ cwd, resources: ctx.resources, native_files: true }), { annotations: { readOnlyHint: true } }),
+      sdk.tool('workspace_info', 'Read the authorized workspace and available resources. No business credentials are available to native commands.', {}, async () => toolResult({ cwd, resources: ctx.resources, current_resource_ids: ctx.currentResourceIds || ctx.resources.map(resource => resource.id), native_files: true }), { annotations: { readOnlyHint: true } }),
       sdk.tool('present_files', 'Publish finished workspace files as authenticated downloadable artifacts. Use for every user deliverable; no Markdown conversion is required.', { paths: z.array(z.string()).min(1).max(10) }, async ({ paths }) => {
         const artifacts = []; for (const path of paths) artifacts.push(await ctx.publish(path)); return toolResult({ artifacts });
       }, { annotations: { readOnlyHint: false, destructiveHint: false } }),
@@ -153,10 +153,11 @@ export function createWorkExecutor({ provider = process.env.AGENT_PROVIDER || 'a
         return hookDecision(decision.behavior, decision.message || '服务端执行边界已核验', decision.updatedInput);
       }] }] },
     };
+    const currentResources = ctx.resources.filter(resource => !ctx.currentResourceIds || ctx.currentResourceIds.includes(resource.id));
     let finishInput;
     const inputDone = new Promise(resolve => { finishInput = resolve; });
     async function* promptStream() {
-      yield { type: 'user', message: { role: 'user', content: `${ctx.prompt}${ctx.resources.length ? `\n关联的原始资源：${JSON.stringify(ctx.resources.map(({ id, name, path }) => ({ id, name, path })))}` : ''}` }, parent_tool_use_id: null, session_id: ctx.sessionId || '' };
+      yield { type: 'user', message: { role: 'user', content: `${ctx.prompt}${currentResources.length ? `\n本条消息关联的原始资源：${JSON.stringify(currentResources.map(({ id, name, path }) => ({ id, name, path })))}` : ''}` }, parent_tool_use_id: null, session_id: ctx.sessionId || '' };
       await inputDone;
     }
     let query;

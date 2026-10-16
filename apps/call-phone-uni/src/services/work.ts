@@ -7,7 +7,7 @@ import { previewRequestId } from './ai-chat-preview';
 const base = '/api/v1/mobile/work/sessions';
 export interface WorkInteraction { id: string; kind: 'question' | 'approval'; binding: string; status: string; tool: string; input: any }
 export interface WorkPlugin {
-  id: string; name: string; description: string; installed: boolean; enabled: boolean; tools: { id: string; label: string }[]; skills: { id?: string; name: string; description: string; enabled: boolean }[];
+  id: string; name: string; description: string; installed: boolean; enabled: boolean; tools: { id: string; label: string }[]; skills: { id?: string; name: string; description: string; enabled: boolean; standalone?: boolean }[];
   connection: { label?: string; actionLabel?: string; description?: string };
   account: string; connected: boolean; added: boolean;
 }
@@ -40,8 +40,9 @@ export function workStatus(item: WorkSummary) {
 }
 
 export function createWorkController() {
-  const state = reactive({ session: null as WorkSession | null, error: '', draft: '', loading: false, submitting: false,
+  const state = reactive({ session: null as WorkSession | null, error: '', draft: '', loading: false, submitting: false, uploading: false,
     plugins: [] as WorkPlugin[], pluginLoading: false, liveText: '', activity: '', selected: [] as string[], events: [] as WorkEvent[], conversation: '', visible: false });
+  let identityEpoch = 0;
   let epoch = 0, cursor = 0, stream: ReturnType<typeof xhr> | undefined;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let liveMessage = '';
@@ -49,12 +50,20 @@ export function createWorkController() {
   const fence = () => ({ epoch, conversation: state.conversation });
   const current = (f: ReturnType<typeof fence>) => epoch === f.epoch && state.visible && state.conversation === f.conversation;
   function detach() { clearTimeout(timer); const previous = stream; stream = undefined; previous?.abort(); }
-  function reset() { epoch++; detach(); state.session = null; state.plugins = []; state.pluginLoading = false; state.draft = ''; state.selected = []; state.events = []; state.liveText = ''; state.activity = ''; state.error = ''; state.submitting = false; state.loading = false; pending = undefined; cursor = 0; }
+  function reset() { identityEpoch++; state.uploading = false; epoch++; detach(); state.session = null; state.plugins = []; state.pluginLoading = false; state.draft = ''; state.selected = []; state.events = []; state.liveText = ''; state.activity = ''; state.error = ''; state.submitting = false; state.loading = false; pending = undefined; cursor = 0; }
   const unsub = [onSessionChange(reset), onDeviceChange(reset)];
+  function retainResources(session: WorkSession) {
+    if (state.session?.id === session.id) {
+      const files = new Map(state.session.resources.map(file => [file.id, file]));
+      for (const file of session.resources) files.set(file.id, file);
+      session.resources = [...files.values()];
+    }
+    return session;
+  }
   async function refresh(token = fence()) {
     if (!current(token) || !state.session) return;
     const result = await request<WorkSession>('GET', `${base}/${state.session.id}`);
-    if (current(token) && result.sequence >= (state.session?.sequence || 0)) state.session = result;
+    if (current(token) && result.sequence >= (state.session?.sequence || 0)) state.session = retainResources(result);
   }
   function apply(event: WorkEvent, token: ReturnType<typeof fence>) {
     if (!current(token) || event.sequence <= cursor) return;
@@ -128,7 +137,7 @@ export function createWorkController() {
     try {
       const result = await request<WorkSession>('POST', base, { conversation_id: conversation });
       if (!current(token)) return;
-      state.session = result;
+      state.session = retainResources(result);
       if (pending && result.messages.some(m => m.id === pending!.key)) { state.draft = ''; state.selected = []; pending = undefined; }
       // Replay the durable log for in-progress text/tool traces, even after leaving the page.
       cursor = 0; state.liveText = ''; state.events = []; observe(token);
@@ -139,13 +148,13 @@ export function createWorkController() {
     if (state.session && state.visible) await request('POST', `${base}/${state.session.id}/seen`, { sequence });
   }
   async function send() {
-    if (!state.session || state.submitting || !state.draft.trim()) return;
+    if (!state.session || state.submitting || state.uploading || !state.draft.trim()) return;
     const token = fence(), prompt = state.draft.trim(), ids = JSON.stringify(state.selected);
     if (!pending || pending.prompt !== prompt || pending.ids !== ids) pending = { prompt, ids, key: previewRequestId() };
     const key = pending.key; state.submitting = true; state.error = '';
     try {
       const session = await request<WorkSession>('POST', `${base}/${state.session.id}/messages`, { request_id: key, prompt, resource_ids: state.selected }, key);
-      if (current(token)) { if (session.sequence >= (state.session?.sequence || 0)) state.session = session; state.draft = ''; state.selected = []; pending = undefined; }
+      if (current(token)) { if (session.sequence >= (state.session?.sequence || 0)) state.session = retainResources(session); state.draft = ''; state.selected = []; pending = undefined; }
     } catch (e: any) { if (current(token)) { state.error = `${e.message}；请先查看记录，重复提交会复用当前请求`; await refresh(token).catch(() => {}); } }
     finally { if (current(token)) state.submitting = false; }
   }
@@ -173,15 +182,24 @@ export function createWorkController() {
     const token = fence(); state.submitting = true;
     try {
       const session = await request<WorkSession>('POST', `${base}/${state.session.id}/plugins`, { plugin_id: plugin.id, action });
-      if (current(token)) { state.session = session; await loadPlugins(); }
+      if (current(token)) { state.session = retainResources(session); await loadPlugins(); }
     } finally { if (current(token)) state.submitting = false; }
   }
-  async function upload(file: { name: string; content_base64: string }) {
-    if (!state.session || state.submitting) return;
-    const token = fence(); state.submitting = true;
-    try { const item = await request<{ id: string }>('POST', `${base}/${state.session.id}/files`, file); if (current(token)) state.selected.push(item.id); await refresh(token); }
-    catch (e: any) { if (current(token)) state.error = e.message; }
-    finally { if (current(token)) state.submitting = false; }
+  async function upload(file: { name: string; content_base64: string }): Promise<boolean> {
+    if (!state.session || state.submitting || state.uploading) throw new Error('请等待当前操作完成');
+    const sessionId = state.session.id, conversation = state.conversation, identity = identityEpoch;
+    // A system picker hides the page; observation visibility must not cancel its upload.
+    const belongs = () => identity === identityEpoch && state.conversation === conversation && state.session?.id === sessionId;
+    state.uploading = true; state.error = '';
+    try {
+      const item = await request<{ id: string; name?: string }>('POST', `${base}/${sessionId}/files`, file);
+      if (!belongs()) return false;
+      if (!item?.id) throw new Error('文件上传未返回有效资源，请重试');
+      if (!state.session!.resources.some(resource => resource.id === item.id)) state.session!.resources.push({ id: item.id, name: item.name || file.name });
+      if (!state.selected.includes(item.id)) state.selected.push(item.id);
+      return true;
+    } catch (e: any) { if (belongs()) state.error = e.message || '文件上传失败'; throw e; }
+    finally { if (belongs()) state.uploading = false; }
   }
   return { state, loadPlugins, configurePlugin, attach, send, answer, interrupt, upload, refresh, markSeen, dispose: () => { reset(); unsub.forEach(fn => fn()); } };
 }

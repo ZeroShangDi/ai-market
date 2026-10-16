@@ -1,0 +1,17 @@
+import { UTSAndroid } from 'io.dcloud.uts'
+import { WorkFileInbox } from 'dev.aimarket.workfiles'
+export function pendingFiles(): string {
+  const context = UTSAndroid.getAppContext()
+  if (context == null) return '[]'
+  return WorkFileInbox.pending(context)
+}
+export function readPendingFile(id: string): string {
+  const context = UTSAndroid.getAppContext()
+  if (context == null) throw new Error('应用尚未就绪')
+  return WorkFileInbox.read(context, id)
+}
+export function discardPendingFile(id: string): boolean {
+  const context = UTSAndroid.getAppContext()
+  if (context == null) return false
+  return WorkFileInbox.discard(context, id)
+}

@@ -55,7 +55,7 @@ const tabLabel = computed(() => typeLabel(tab.value));
 const entries = computed(() => capabilityEntries(props.items));
 const detail = computed(() => entries.value.find(e => e.key === detailId.value));
 const children = computed(() => entries.value.filter(e => e.plugin.id === detail.value?.plugin.id && e.type !== 'plugins'));
-const filtered = computed(() => entries.value.filter(e => e.type === tab.value && (filter.value === '发现' || e.installed) && `${e.name} ${e.description} ${e.plugin.name}`.toLocaleLowerCase().includes(query.value.trim().toLocaleLowerCase())));
+const filtered = computed(() => entries.value.filter(e => !e.parentId && e.type === tab.value && (filter.value === '发现' || e.installed) && `${e.name} ${e.description} ${e.plugin.name}`.toLocaleLowerCase().includes(query.value.trim().toLocaleLowerCase())));
 function changeTab(id: string) { tab.value = id; query.value = ''; detailId.value = ''; }
 function more() { uni.showActionSheet({ itemList: ['MCP 服务'], success: () => changeTab('mcp') }); }
 function act(plugin: WorkPlugin, action: string, skill?: string) { emit('configure', plugin.id, action, skill); }

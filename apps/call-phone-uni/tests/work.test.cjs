@@ -108,3 +108,35 @@ test('capability management is independent of conversation and fences late accou
   assert.equal(module.capabilities.items.length,0);
   assert.equal(calls[0][1],'/api/v1/mobile/work/sessions/capabilities');
 });
+
+test('upload survives native picker hide/show, renders its resource and sends the exact associated id', async () => {
+  const uploaded = deferred(), resumed = deferred(); let attaches = 0;
+  const h = harness((method, url, body) => {
+    if (url.endsWith('/files')) return uploaded.promise;
+    if (url.endsWith('/messages')) return session({ messages: [{ id: body.request_id, role: 'user', content: body.prompt, resource_ids: body.resource_ids }], resources: [{ id: 'csv', name: '线索.csv' }] });
+    if (method === 'POST' && ++attaches === 2) return resumed.promise;
+    return session();
+  });
+  await h.attach('1', true);
+  await h.attach('1', false); // Android opens its document picker.
+  const upload = h.upload({ name: '线索.csv', content_base64: 'YQ==' });
+  assert.equal(h.state.uploading, true);
+  h.state.draft = '检查线索'; await h.send(); assert.equal(h.calls.some(c => c[1].endsWith('/messages')), false);
+  const show = h.attach('1', true); // Older pre-upload snapshot arrives last.
+  uploaded.resolve({ id: 'csv', name: '线索.csv' }); assert.equal(await upload, true);
+  resumed.resolve(session()); await show;
+  assert.equal(h.state.uploading, false); assert.equal(h.state.session.resources[0].name, '线索.csv');
+  assert.equal(h.state.selected[0], 'csv');
+  await h.send(); const sent = h.calls.find(c => c[1].endsWith('/messages'));
+  assert.deepEqual(Array.from(sent[2].resource_ids), ['csv']);
+  assert.equal(h.state.session.messages[0].resource_ids[0], 'csv'); h.dispose();
+});
+test('upload rejects failures and discards late attachments after conversation or identity changes', async () => {
+  const late = deferred(); const h = harness((method, url) => url.endsWith('/files') ? late.promise : session());
+  await h.attach('1', true); const uploading = h.upload({ name: 'a.csv', content_base64: 'YQ==' });
+  h.observers.forEach(fn => fn()); late.resolve({ id: 'old' }); assert.equal(await uploading, false);
+  assert.equal(h.state.selected.length, 0); assert.equal(h.state.session, null); h.dispose();
+  const bad = harness((method, url) => url.endsWith('/files') ? Promise.reject(new Error('upload unavailable')) : session());
+  await bad.attach('1', true); await assert.rejects(bad.upload({ name: 'a.csv', content_base64: 'YQ==' }), /upload unavailable/);
+  assert.equal(bad.state.uploading, false); assert.equal(bad.state.selected.length, 0); bad.dispose();
+});

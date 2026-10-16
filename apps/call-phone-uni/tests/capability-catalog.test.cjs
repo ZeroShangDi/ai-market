@@ -16,3 +16,8 @@ test('disabled skill does not invent disabled tools, and local-only capabilities
  assert.equal(entries.length,3);assert.ok(entries.every(e=>!e.hasConnection));
  assert.equal(entries.find(e=>e.type==='skills').enabled,false);assert.equal(entries.find(e=>e.type==='mcp').enabled,true);
 });
+test('bundled skills, MCP and connections remain in plugin details rather than duplicate catalog roots', () => {
+ const entries=moduleExports.capabilityEntries([plugin]);
+ assert.equal(entries.filter(e=>!e.parentId).length,1);
+ assert.equal(entries.filter(e=>e.parentId===plugin.id).length,3);
+});

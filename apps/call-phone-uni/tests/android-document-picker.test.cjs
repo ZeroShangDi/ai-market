@@ -12,7 +12,7 @@ function fixture({size=4,failLaunch=false,name='原始.xlsx'}={}) {
   const source=fs.readFileSync(path.join(__dirname,'../src/services/android-document-picker.ts'),'utf8');
   vm.runInNewContext(ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2020}}).outputText,
     {exports,plus:{android},Number,String,Error,Promise,setTimeout,clearTimeout});
-  const choose=()=>exports.chooseAndroidDocument(8*1024*1024,()=>true,(_android,input,fileName)=>({name:fileName,bytes:input.bytes}));
+  const choose=(metadataOnly=false)=>exports.chooseAndroidDocument(8*1024*1024,()=>true,(_android,input,fileName)=>({name:fileName,bytes:input?.bytes}), '*/*', metadataOnly);
   return {choose,activity,old,closed,forwarded,result:{getData:()=>({})}};
 }
 test('shared Android document picker preserves original bytes, activity callbacks and closes handles',async()=>{
@@ -26,4 +26,10 @@ test('shared Android picker cancellation, oversize files and failed launch relea
   const cancelled=fixture(),first=cancelled.choose();cancelled.activity.onActivityResult(41263,0,null);assert.equal(await first,undefined);
   const large=fixture({size:8*1024*1024+1}),second=large.choose();large.activity.onActivityResult(41263,-1,large.result);await assert.rejects(second,/最多/);assert.deepEqual(large.closed,['cursor']);
   const broken=fixture({failLaunch:true});await assert.rejects(broken.choose(),/无法打开/);assert.equal(broken.activity.onActivityResult,broken.old);await assert.rejects(broken.choose(),/无法打开/);
+});
+
+test('unsupported media selection inspects its name without reading or rejecting its large contents first', async () => {
+ const h=fixture({size:100*1024*1024,name:'视频.mp4'}), pending=h.choose(true);
+ h.activity.onActivityResult(41263,-1,h.result); const value=await pending;
+ assert.equal(value.name,'视频.mp4'); assert.equal(value.bytes,undefined); assert.deepEqual(h.closed,['cursor']);
 });

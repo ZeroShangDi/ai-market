@@ -1,0 +1,1 @@
+{"id":"work-file-receiver","displayName":"Work file receiver","version":"1.0.0","description":"Receive Android files into a private pending inbox","engines":{"HBuilderX":"^4.81"},"dcloudext":{"type":"uts"},"uni_modules":{"dependencies":[],"encrypt":[],"platforms":{"client":{"Vue":{"vue3":"y"},"App":{"app-android":"y","app-ios":"n"}}}}}
