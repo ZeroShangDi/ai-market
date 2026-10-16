@@ -24,6 +24,7 @@ export class WorkStore {
       this.sessions.set(state.id, state);
       if (active(state)) {
         state.status = 'interrupted';
+        for (const message of state.messages) if (['queued', 'running'].includes(message.delivery)) message.delivery = message.delivery === 'running' ? 'interrupted' : 'cancelled';
         for (const i of state.interactions) if (i.status === 'pending') i.status = 'expired';
         await this.emit(state, 'status', { status: state.status, reason: '服务已重启；上次操作结果可能不确定，请核对后继续，不会自动重放' });
       }
@@ -169,12 +170,21 @@ export class WorkStore {
     if (!Array.isArray(resourceIds) || resourceIds.length > 20 || resourceIds.some(id => !s.resources.some(r => r.id === id))) invalid('关联资源无效');
     const hash = digest({ prompt, resourceIds });
     if (s.receipts[key]) { if (s.receipts[key] !== hash) throw conflict('相同请求标识不能用于不同指令'); return this.view(s); }
-    if (!this.accepting || active(s) || s._pluginBusy || s.status === 'closed') throw conflict('工作会话忙碌或已关闭，请刷新');
+    if (!this.accepting || s._pluginBusy || s.status === 'closed') throw conflict('工作会话忙碌或已关闭，请刷新');
+    if (active(s) || this.runs.has(s.id)) {
+      const run = this.runs.get(s.id);
+      if (input.enqueue !== true || !run?.accepting || run.controller.signal.aborted) throw conflict('当前执行正在结束，请稍后发送');
+      if (s.messages.filter(message => message.delivery === 'queued').length >= 10) throw conflict('最多排队 10 条消息，请等待处理');
+      s.receipts[key] = hash;
+      s.messages.push({ id: key, role: 'user', content: prompt, resource_ids: resourceIds, delivery: 'queued', created_at: new Date().toISOString() });
+      await this.emit(s, 'message_queued', { id: key });
+      return this.view(s);
+    }
     if (this.runs.size >= this.concurrency) throw new ApiError(429, 'RATE_LIMITED', '工作执行较多，请稍后再试');
     s.run_id = key; s.status = 'running'; s.receipts[key] = hash;
-    s.messages.push({ id: key, role: 'user', content: prompt, resource_ids: resourceIds, created_at: new Date().toISOString() });
+    s.messages.push({ id: key, role: 'user', content: prompt, resource_ids: resourceIds, delivery: 'running', created_at: new Date().toISOString() });
     const controller = new AbortController();
-    const run = { controller, pending: new Map(), done: null, authorization: new Map() }; this.runs.set(s.id, run);
+    const run = { controller, accepting: true, pending: new Map(), done: null, authorization: new Map() }; this.runs.set(s.id, run);
     try { await this.emit(s, 'status', { status: 'running' }); }
     catch (e) { this.runs.delete(s.id); s.status = 'interrupted'; throw e; }
     run.done = this.execute(s, run, prompt, resourceIds);
@@ -186,8 +196,31 @@ export class WorkStore {
       const ensureCurrent = () => { if (run.controller.signal.aborted || this.runs.get(s.id) !== run) throw conflict('当前执行已失效'); };
       const actor = { tenant: s.tenant, user: s.user }, pluginIds = (s.plugins || []).filter(p => p.added).map(p => p.id);
       await this.requireCapabilities(actor, pluginIds);
-      const result = await this.executor.run({ validatePlugins: (tool, input) => this.requireCapabilities(actor, pluginIds, tool, input), ...this.paths(s), sessionId: s.sdk_session_id, pluginIds: (s.plugins || []).filter(p => p.added).map(p => p.id), prompt, identity: { tenant: s.tenant, user: s.user },
-        currentResourceIds: ids, resources: s.resources.filter(r => s.messages.some(message => message.role === 'user' && message.resource_ids?.includes(r.id))), signal: run.controller.signal,
+      let handled = false;
+      const finishTurn = async result => {
+        ensureCurrent(); handled = true;
+        const message = s.messages.find(message => message.id === s.run_id);
+        if (message) message.delivery = result.success ? 'completed' : 'failed';
+        s.messages.push({ id: randomUUID(), role: 'assistant', content: result.text || '', created_at: new Date().toISOString(), run_id: s.run_id });
+        const next = result.success && s.messages.find(message => message.delivery === 'queued');
+        // Close admission before yielding: a late submission must not be lost at the result boundary.
+        if (!next) {
+          run.accepting = false;
+          for (const message of s.messages) if (message.delivery === 'queued') message.delivery = 'cancelled';
+        }
+        s.status = next ? 'running' : result.success ? 'idle' : 'failed';
+        await this.emit(s, 'result', { ...result, status: s.status });
+        ensureCurrent();
+        if (!next) return null;
+        await this.requireCapabilities(actor, pluginIds);
+        next.delivery = 'running'; s.run_id = next.id; run.authorization.clear();
+        await this.emit(s, 'status', { status: 'running' });
+        handled = false;
+        return { prompt: next.content, currentResourceIds: next.resource_ids || [],
+          resources: s.resources.filter(r => s.messages.some(m => m.role === 'user' && !['queued', 'cancelled'].includes(m.delivery) && m.resource_ids?.includes(r.id))) };
+      };
+      const result = await this.executor.run({ onTurnResult: finishTurn, validatePlugins: (tool, input) => this.requireCapabilities(actor, pluginIds, tool, input), ...this.paths(s), sessionId: s.sdk_session_id, pluginIds: (s.plugins || []).filter(p => p.added).map(p => p.id), prompt, identity: { tenant: s.tenant, user: s.user },
+        currentResourceIds: ids, resources: s.resources.filter(r => s.messages.some(message => message.role === 'user' && !['queued', 'cancelled'].includes(message.delivery) && message.resource_ids?.includes(r.id))), signal: run.controller.signal,
         onSession: async id => { ensureCurrent(); if (s.sdk_session_id && s.sdk_session_id !== id) throw conflict('原生会话映射不一致，请核对后继续'); s.sdk_session_id = id; await this.save(s); },
         onEvent: (type, data) => { ensureCurrent(); return this.emit(s, type, data); },
         ask: (kind, tool, input, toolUseId) => this.ask(s, run, kind, tool, input, toolUseId),
@@ -195,14 +228,15 @@ export class WorkStore {
         publish: async path => { ensureCurrent(); const item = await publishFile(this.paths(s).cwd, join(this.paths(s).base, 'artifacts'), path); ensureCurrent(); s.artifacts.push(item); await this.emit(s, 'artifact', item); return item; },
       });
       if (run.controller.signal.aborted) throw new Error('interrupted');
-      s.messages.push({ id: randomUUID(), role: 'assistant', content: result.text || '', created_at: new Date().toISOString(), run_id: s.run_id });
-      s.status = result.success ? 'idle' : 'failed';
-      await this.emit(s, 'result', { ...result, status: s.status });
+      if (!handled) await finishTurn(result);
     } catch (e) {
+      run.accepting = false;
+      for (const message of s.messages) if (['queued', 'running'].includes(message.delivery)) message.delivery = message.delivery === 'running' ? 'interrupted' : 'cancelled';
       s.status = run.controller.signal.aborted ? 'interrupted' : 'failed';
       await this.emit(s, 'error', { status: s.status, code: e instanceof ApiError ? e.code : 'WORK_EXECUTION_FAILED', message: e instanceof ApiError ? e.message : '执行中断或未完成，请核对操作记录后继续' });
     } finally {
-      clearTimeout(timer);
+      clearTimeout(timer); run.accepting = false;
+      for (const message of s.messages) if (['queued', 'running'].includes(message.delivery)) message.delivery = message.delivery === 'running' ? 'interrupted' : 'cancelled';
       for (const i of s.interactions) if (i.status === 'pending') i.status = 'expired';
       for (const resolve of run.pending.values()) resolve(null);
       this.runs.delete(s.id); await this.save(s);

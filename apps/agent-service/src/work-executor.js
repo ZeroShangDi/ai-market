@@ -153,12 +153,18 @@ export function createWorkExecutor({ provider = process.env.AGENT_PROVIDER || 'a
         return hookDecision(decision.behavior, decision.message || '服务端执行边界已核验', decision.updatedInput);
       }] }] },
     };
-    const currentResources = ctx.resources.filter(resource => !ctx.currentResourceIds || ctx.currentResourceIds.includes(resource.id));
-    let finishInput;
-    const inputDone = new Promise(resolve => { finishInput = resolve; });
+    // Keep a single native streaming query alive between turns. Release the next input
+    // only after its predecessor's result, so tool authorizations remain bound to one turn.
+    let wakeInput, closed = false;
+    const inputs = [ctx];
+    const finishInput = () => { closed = true; wakeInput?.(); };
     async function* promptStream() {
-      yield { type: 'user', message: { role: 'user', content: `${ctx.prompt}${currentResources.length ? `\n本条消息关联的原始资源：${JSON.stringify(currentResources.map(({ id, name, path }) => ({ id, name, path })))}` : ''}` }, parent_tool_use_id: null, session_id: ctx.sessionId || '' };
-      await inputDone;
+      while (!closed) {
+        if (!inputs.length) { await new Promise(resolve => { wakeInput = resolve; }); wakeInput = undefined; continue; }
+        const input = inputs.shift();
+        const resources = input.resources.filter(resource => !input.currentResourceIds || input.currentResourceIds.includes(resource.id));
+        yield { type: 'user', message: { role: 'user', content: `${input.prompt}${resources.length ? `\n本条消息关联的原始资源：${JSON.stringify(resources.map(({ id, name, path }) => ({ id, name, path })))}` : ''}` }, parent_tool_use_id: null, session_id: ctx.sessionId || '' };
+      }
     }
     let query;
     const streams = new Map(), webTools = new Map(), sources = new Map();
@@ -200,7 +206,10 @@ export function createWorkExecutor({ provider = process.env.AGENT_PROVIDER || 'a
           if (message.type === 'assistant') { lastText = blocks.filter(b => b.type === 'text').map(b => b.text).join('\n'); await ctx.onEvent('assistant', { id: message.uuid, content: lastText, parent_tool_use_id: message.parent_tool_use_id }); }
         } else if (message.type === 'result') {
           final = { success: message.subtype === 'success' && !message.is_error, text: message.result || lastText, subtype: message.subtype, usage: message.usage };
-          finishInput(); break;
+          const next = await ctx.onTurnResult?.(final);
+          if (!next) { finishInput(); break; }
+          Object.assign(ctx, next); inputs.push(next); wakeInput?.();
+          final = undefined; lastText = ''; streams.clear(); webTools.clear(); sources.clear(); decisions.clear();
         } else if (['tool_progress', 'system', 'task_started', 'task_notification'].includes(message.type)) {
           await ctx.onEvent('progress', { type: message.type, subtype: message.subtype, tool_use_id: message.tool_use_id, tool_name: message.tool_name, status: message.status });
         }

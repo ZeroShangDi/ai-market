@@ -20,7 +20,7 @@ Client, require = chat.Client, chat.require
 ROOT = "/api/v1/mobile/work/sessions"
 
 
-def exercise(base, boundaries_only=False):
+def exercise(base, boundaries_only=False, queue=False):
     admin, mobile = Client(base), Client(base)
     auth = admin.request("POST", "/admin-api/system/auth/login", {
         "username": os.getenv("AI_SMOKE_ADMIN_USER", "admin"), "password": os.getenv("AI_SMOKE_ADMIN_PASSWORD", "admin123")})
@@ -50,11 +50,18 @@ def exercise(base, boundaries_only=False):
             "用 Read 核对并调用 work.present_files 发布 work-smoke.csv。不要重试失败命令、安装依赖、联网或使用未隔离执行；"
             "若 Bash 失败请如实停止，不改用 Write/Edit 绕过验收。无需提问。")
 
-        def run(prompt, resources=None):
+        def run(prompt, resources=None, queued_prompt=None):
             key = str(uuid.uuid4())
             body = {"request_id": key, "prompt": prompt, "resource_ids": resources or []}
             accepted = mobile.request("POST", f"{ROOT}/{work}/messages", body, key)
             require(mobile.request("POST", f"{ROOT}/{work}/messages", body, key)["run_id"] == accepted["run_id"], "Duplicate submission started a new run")
+            queued_key = None
+            if queued_prompt:
+                queued_key = str(uuid.uuid4())
+                queued_body = {"request_id": queued_key, "prompt": queued_prompt, "enqueue": True}
+                queued = mobile.request("POST", f"{ROOT}/{work}/messages", queued_body, queued_key)
+                require(any(m["id"] == queued_key and m.get("delivery") == "queued" for m in queued["messages"]), "Follow-up was not queued")
+                mobile.request("POST", f"{ROOT}/{work}/messages", queued_body, queued_key)
             deadline = time.monotonic() + 210
             heartbeat = 0
             while time.monotonic() < deadline:
@@ -65,6 +72,11 @@ def exercise(base, boundaries_only=False):
                         raise RuntimeError("Unexpected interaction: no high-risk action is approved by this check")
                 if state["status"] not in ("running", "waiting"):
                     require(state["status"] == "idle", "Work execution did not finish successfully")
+                    if queued_key:
+                        require(sum(m["id"] == queued_key for m in state["messages"]) == 1, "Queue request duplicated")
+                        require(any(m.get("run_id") == queued_key and m["role"] == "assistant" and "QUEUE_OK" in m["content"] for m in state["messages"]), "Queued result missing")
+                        require(any(m["id"] == queued_key and m.get("delivery") == "completed" for m in state["messages"]), "Queue did not complete")
+                        print("PASS running input queue / idempotent admission / separate final result", flush=True)
                     return state
                 if time.monotonic() - heartbeat > 15:
                     mobile.request("POST", "/api/v1/mobile/devices/heartbeat")
@@ -92,7 +104,7 @@ def exercise(base, boundaries_only=False):
             print("PASS sandbox blocks private mapping / provider environment / outer process visibility / configuration writes", flush=True)
             return
 
-        state = run(prompt, [resource["id"]])
+        state = run(prompt, [resource["id"]], "补充验收：调用 work.workspace_info，确认刚才上传的 synthetic-input.csv 仍在 resources 中；不再改动文件，成功时只回复 QUEUE_OK。" if queue else None)
         require(state["artifacts"], "No downloadable artifact")
         sdk_id = state["sdk_session_id"]
         artifact = state["artifacts"][-1]
@@ -139,10 +151,11 @@ if __name__ == "__main__":
     parser.add_argument("--base", default="http://127.0.0.1:48080")
     parser.add_argument("--exercise", required=True, action="store_true")
     parser.add_argument("--boundaries-only", action="store_true")
+    parser.add_argument("--queue", action="store_true")
     args = parser.parse_args()
     if urllib.parse.urlsplit(args.base).hostname not in ("127.0.0.1", "localhost", "100.87.254.68"):
         raise SystemExit("This synthetic-write check is restricted to the configured local/mobile deployment.")
     try:
-        exercise(args.base, args.boundaries_only)
+        exercise(args.base, args.boundaries_only, args.queue)
     except Exception as error:
         raise SystemExit(str(error))

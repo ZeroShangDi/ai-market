@@ -6,6 +6,7 @@
         <view v-if="state.loading">正在读取工作会话…</view>
         <view v-if="!state.session?.messages.length" class="work-welcome">这次想完成什么？</view>
         <view v-for="message in state.session?.messages" :key="message.id" class="work-message" :class="message.role">
+          <text v-if="message.delivery === 'queued' || message.delivery === 'cancelled' || message.delivery === 'interrupted'" class="work-note">{{ message.delivery === 'queued' ? '排队中' : message.delivery === 'interrupted' ? '执行已中断' : '已取消执行' }}</text>
           <text v-if="message.role === 'user'" class="work-text">{{ message.content }}</text>
           <TChatMarkdown v-else :content="message.content" @click="handleMarkdownClick" />
           <scroll-view v-if="message.role === 'user' && message.resource_ids?.length" scroll-x class="sent-files"><view class="sent-files-track"><view v-for="file in messageResources(message.resource_ids)" :key="file.id" class="sent-file"><TIcon :name="fileAppearance(file.name).icon" :color="fileAppearance(file.name).color" size="16px" /><text>{{ file.name }}</text></view></view></scroll-view>
@@ -91,7 +92,7 @@
       <slot name="mode" />
       <view v-if="pendingIncoming.length && incomingWorkFiles.error" class="work-error" role="button" @tap="retryIncoming">{{ incomingWorkFiles.error }} · 重试</view>
       <text v-if="state.uploading" class="work-note">正在上传文件…</text>
-      <TChatSender v-if="!interactions.length" :value="state.draft" :loading="busy || state.submitting || state.uploading || picking" :disabled="state.session?.status === 'closed'" placeholder="交办工作，说明期望的结果…"
+      <TChatSender v-if="!interactions.length" :value="state.draft" :loading="false" :disabled="state.session?.status === 'closed' || state.submitting || state.uploading || picking" :placeholder="busy ? '补充消息，当前一轮结束后继续处理…' : '交办工作，说明期望的结果…'"
         :textarea-props="{ autosize: { minHeight: '48px', maxHeight: '160px' } }" :render-presets="[{ name: 'send', type: 'icon' }]" :adjust-position="false" :auto-rise-with-keyboard="false"
         @update:value="state.draft = $event" @send="send" @stop="controller.interrupt()">
         <template #header><ComposerAttachments :resources="selectedResources" :capabilities="selectedCapabilities" :disabled="busy || state.submitting || state.uploading || picking" @remove-resource="removeResource" @remove-capability="removePlugin" /></template>
@@ -226,7 +227,7 @@ async function addFile(accept: string, mime = '*/*', supported = true) {
   finally { picking.value = false; }
 }
 
-function send() { if (hasUnfinishedCall()) return toast('请先完成当前通话并保存结果'); if (state.session?.status === 'closed') return toast('工作会话已关闭，请新建对话'); if (!busy.value && !state.uploading && !picking.value && !pendingIncoming.value.length && state.draft.trim()) { emit('started'); adding.value = false; followLatest.value = true; void controller.send(); } }
+function send() { if (hasUnfinishedCall()) return toast('请先完成当前通话并保存结果'); if (state.session?.status === 'closed') return toast('工作会话已关闭，请新建对话'); if (!state.uploading && !picking.value && !pendingIncoming.value.length && state.draft.trim()) { emit('started'); adding.value = false; followLatest.value = true; void controller.send(); } }
 function approve(item: WorkInteraction) { if (hasUnfinishedCall()) return toast('请先完成当前通话并保存结果'); void controller.answer(item, { approved: true }); }
 
 async function download(file: { id: string; name: string }) { if (downloading.value) return; downloading.value = file.id; try { if (state.session) await openWorkArtifact(state.session.id, file); } catch (e: any) { toast(e.message); } finally { downloading.value = ''; } }

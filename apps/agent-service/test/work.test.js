@@ -190,3 +190,72 @@ test('workspace retains previously sent resources across turns but excludes uplo
   await store.send(actor, s.id, { request_id: randomUUID(), prompt: '继续使用刚才的附件', resource_ids: [] }); await settle(store, s.id);
   assert.deepEqual(seen, [{ resources: [attached.id], selected: [attached.id] }, { resources: [attached.id], selected: [] }]);
 });
+
+test('Streaming queue keeps one SDK query, ordered turn bindings and idempotent queued inputs', async t => {
+  const dataDir = await mkdtemp(join(tmpdir(), 'work-queue-'));
+  let release, queries = 0;
+  const gate = new Promise(resolve => { release = resolve; });
+  const inputs = [];
+  const sdk = { tool: (name, description, schema, handler) => ({ name, handler }), createSdkMcpServer: value => value,
+    query: args => { queries++; return { close() {}, async *[Symbol.asyncIterator]() {
+      for (let i = 0; i < 3; i++) {
+        const input = await args.prompt.next(); assert.equal(input.done, false); inputs.push(input.value.message.content);
+        if (!i) { yield { type: 'system', subtype: 'init', session_id: 'native-queue' }; await gate; }
+        yield { type: 'result', subtype: 'success', result: `答复${i + 1}` };
+      }
+    } }; } };
+  const store = new WorkStore({ dataDir, executor: createWorkExecutor({ apiKey: 'test', loadSdk: async () => sdk }) }); await store.init();
+  t.after(async () => { release(); await store.close(); await rm(dataDir, { recursive: true, force: true }); });
+  const s = await store.create(actor, { conversation_id: '4' });
+  const messages = ['第一条', '第二条', '第三条'].map(prompt => ({ request_id: randomUUID(), prompt, enqueue: true }));
+  await store.send(actor, s.id, messages[0]); await waitFor(() => inputs.length);
+  for (const input of messages.slice(1)) await store.send(actor, s.id, input);
+  await store.send(actor, s.id, messages[1]);
+  assert.equal(store.get(actor, s.id).messages.length, 3);
+  assert.equal(store.get(actor, s.id).run_id, messages[0].request_id);
+  assert.equal(store.get(actor, s.id).messages[1].delivery, 'queued');
+  release(); const result = await settle(store, s.id);
+  assert.equal(queries, 1); assert.deepEqual(inputs, messages.map(m => m.prompt));
+  assert.equal(result.status, 'idle'); assert.equal(result.sdk_session_id, 'native-queue');
+  assert.deepEqual(result.messages.filter(m => m.role === 'user').map(m => m.delivery), ['completed', 'completed', 'completed']);
+  assert.deepEqual(result.messages.filter(m => m.role === 'assistant').map(m => m.run_id), messages.map(m => m.request_id));
+  assert.deepEqual(store.get(actor, s.id).events.filter(e => e.type === 'result').map(e => e.run_id), messages.map(m => m.request_id));
+});
+
+test('Stopping and restarting cancel pending queue without replaying business actions', async t => {
+  const { store, s, dataDir } = await fixture(t, async ctx => {
+    await ctx.ask('approval', 'mcp__test__write', { value: 1 }, 'write');
+    if (ctx.signal.aborted) throw new Error('aborted');
+    return { success: true, text: '' };
+  });
+  await store.send(actor, s.id, { request_id: randomUUID(), prompt: '执行' });
+  await waitFor(() => store.get(actor, s.id).status === 'waiting');
+  const input = { request_id: randomUUID(), prompt: '补充', enqueue: true };
+  await store.send(actor, s.id, input);
+  const restarted = new WorkStore({ dataDir, executor: { run: () => { throw new Error('must not replay'); } } }); await restarted.init();
+  assert.deepEqual(restarted.get(actor, s.id).messages.map(m => m.delivery), ['interrupted', 'cancelled']);
+  await restarted.close(); await store.stop(actor, s.id);
+  assert.deepEqual(store.get(actor, s.id).messages.map(m => m.delivery), ['interrupted', 'cancelled']);
+  await store.send(actor, s.id, input); assert.equal(store.get(actor, s.id).status, 'interrupted');
+});
+
+test('Queue capacity and failed turn cancel pending work before completion is observed', async t => {
+  let finish; const gate = new Promise(resolve => { finish = resolve; });
+  const { store, s } = await fixture(t, async ctx => {
+    await gate;
+    const result = { success: false, text: '未完成' };
+    assert.equal(await ctx.onTurnResult(result), null); return result;
+  });
+  t.after(() => finish());
+  await store.send(actor, s.id, { request_id: randomUUID(), prompt: '开始' });
+  for (let i = 0; i < 10; i++) await store.send(actor, s.id, { request_id: randomUUID(), prompt: `补充${i}`, enqueue: true });
+  await assert.rejects(store.send(actor, s.id, { request_id: randomUUID(), prompt: '超限', enqueue: true }), e => e.status === 409);
+  let observed;
+  const detach = store.subscribe(actor, s.id, store.get(actor, s.id).sequence, event => {
+    if (event.type === 'result') observed = store.get(actor, s.id).messages.filter(m => m.delivery === 'queued').length;
+  });
+  finish(); const result = await settle(store, s.id); detach();
+  assert.equal(observed, 0); assert.equal(result.status, 'failed');
+  assert.equal(result.messages[0].delivery, 'failed');
+  assert.equal(result.messages.filter(m => m.delivery === 'cancelled').length, 10);
+});

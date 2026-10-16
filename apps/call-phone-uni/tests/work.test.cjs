@@ -140,3 +140,30 @@ test('upload rejects failures and discards late attachments after conversation o
   await bad.attach('1', true); await assert.rejects(bad.upload({ name: 'a.csv', content_base64: 'YQ==' }), /upload unavailable/);
   assert.equal(bad.state.uploading, false); assert.equal(bad.state.selected.length, 0); bad.dispose();
 });
+
+test('Work accepts queued sends while running and preserves text typed during submission', async () => {
+  const accepted = deferred(); let body;
+  const h = harness((method, url, input) => {
+    if (url.endsWith('/messages')) { body = input; return accepted.promise; }
+    return session({ status: 'running', run_id: 'first' });
+  });
+  await h.attach('1', true); h.state.draft = '补充条件'; const sending = h.send();
+  assert.equal(body.enqueue, true); h.state.draft = '下一条';
+  accepted.resolve(session({ status: 'running', run_id: 'first', sequence: 2, messages: [{ id: body.request_id, role: 'user', content: body.prompt, delivery: 'queued' }] }));
+  await sending; assert.equal(h.state.draft, '下一条'); assert.equal(h.state.session.messages[0].delivery, 'queued'); h.dispose();
+});
+
+test('A previous turn result refresh never clears text streaming for the next queued turn', async () => {
+  const late = deferred(); let reads = 0;
+  const h = harness((method, url) => {
+    if (url.endsWith('/s1')) return ++reads === 1 ? late.promise : session({ status: 'running', run_id: 'next', sequence: 2 });
+    return session({ status: 'running', run_id: 'first' });
+  });
+  await h.attach('1', true); const x = h.connections[0];
+  x.chunk({ sequence: 1, type: 'result', data: { success: true }, run_id: 'first' });
+  x.chunk({ sequence: 2, type: 'status', data: { status: 'running' }, run_id: 'next' });
+  x.chunk({ sequence: 3, type: 'text_delta', data: { message_id: 'next-response', delta: '正在继续' }, run_id: 'next' });
+  late.resolve(session({ status: 'running', run_id: 'next', sequence: 2 }));
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(h.state.liveText, '正在继续'); h.dispose();
+});

@@ -14,7 +14,7 @@ export interface WorkPlugin {
 export interface WorkSession {
   plugins?: { id: string; name?: string; added: boolean }[];
   id: string; conversation_id: string; status: string; sequence: number; run_id?: string | null;
-  messages: { id: string; role: string; content: string; resource_ids?: string[] }[];
+  messages: { id: string; role: string; content: string; resource_ids?: string[]; delivery?: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled' | 'interrupted' }[];
   interactions: WorkInteraction[]; resources: { id: string; name: string }[];
   artifacts: { id: string; name: string; size: number }[];
 }
@@ -78,8 +78,8 @@ export function createWorkController() {
     if (currentRun && event.type === 'assistant' && !event.data.parent_tool_use_id) state.liveText = event.data.content;
     if (currentRun && ['tool_start', 'tool_call', 'audit'].includes(event.type)) state.activity = `正在执行 ${event.data.name || event.data.tool || ''}`;
     if (currentRun && event.type === 'error') state.error = event.data.message;
-    if (['result', 'error', 'interaction', 'interaction_answered', 'artifact', 'resource', 'status'].includes(event.type)) {
-      if (currentRun) void refresh(token).then(() => { if (current(token) && ['result', 'error'].includes(event.type)) { state.liveText = ''; state.activity = ''; } }).catch(e => { if (current(token)) state.error = e.message; });
+    if (['result', 'error', 'interaction', 'interaction_answered', 'artifact', 'resource', 'status', 'message_queued'].includes(event.type)) {
+      if (currentRun) void refresh(token).then(() => { if (current(token) && event.run_id === state.session?.run_id && ['result', 'error'].includes(event.type)) { state.liveText = ''; state.activity = ''; } }).catch(e => { if (current(token)) state.error = e.message; });
     }
   }
   function observe(token: ReturnType<typeof fence>) {
@@ -153,8 +153,8 @@ export function createWorkController() {
     if (!pending || pending.prompt !== prompt || pending.ids !== ids) pending = { prompt, ids, key: previewRequestId() };
     const key = pending.key; state.submitting = true; state.error = '';
     try {
-      const session = await request<WorkSession>('POST', `${base}/${state.session.id}/messages`, { request_id: key, prompt, resource_ids: state.selected }, key);
-      if (current(token)) { if (session.sequence >= (state.session?.sequence || 0)) state.session = retainResources(session); state.draft = ''; state.selected = []; pending = undefined; }
+      const session = await request<WorkSession>('POST', `${base}/${state.session.id}/messages`, { request_id: key, prompt, resource_ids: state.selected, enqueue: true }, key);
+      if (current(token)) { if (session.sequence >= (state.session?.sequence || 0)) state.session = retainResources(session); if (state.draft.trim() === prompt) state.draft = ''; if (JSON.stringify(state.selected) === ids) state.selected = []; pending = undefined; }
     } catch (e: any) { if (current(token)) { state.error = `${e.message}；请先查看记录，重复提交会复用当前请求`; await refresh(token).catch(() => {}); } }
     finally { if (current(token)) state.submitting = false; }
   }
