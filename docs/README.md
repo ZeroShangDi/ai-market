@@ -1,4 +1,24 @@
-# Call Phone PC 初稿设计
+# 项目文档库
+
+## 常用入口
+
+- [变更日志](../CHANGELOG.md)：每次实际提交的用户可感知变化及版本发布记录。
+- [文档归档审查](reviews/2026-10-16-document-library-audit.md)：文档归属、历史归档及仍需整理的部分。
+- [历史后台 BUG 修复](reviews/2026-10-05-backend-bug-fixes.md)：2026-10-05 的排查记录。
+
+下面的 PC 初稿范围与页面清单保留为设计基线，不能据此判断当前产品完成程度。
+
+## 代码旁的操作说明
+
+这些文档随代码、工具或素材维护，文档库提供入口，不另存重复正文。
+
+- [手机工程](../apps/call-phone-uni/README.md)、[轻量 AI 对话服务](../apps/ai-service/README.md)、[Agent 执行服务](../apps/agent-service/README.md)。
+- [后端本地开发](../apps/ruoyi-vue-pro/LOCAL-DEV.md)、[Call Phone 业务模块](../apps/ruoyi-vue-pro/yudao-module-callphone/README.md)。
+- [应用更新发布工具](../tools/app-update/README.md)、[公开图片资源工具](../tools/assets/README.md)。
+- [品牌素材](../resources/branding/README.md)、[共享图标](../resources/icons/README.md)。
+- [仓库协作规则](../AGENTS.md)、[项目开发与协作约定](../CONTRIBUTING.md)。
+
+## PC 初稿设计
 
 ## 范围与约定
 
@@ -57,7 +77,7 @@
 
 ## Issue 记录
 
-待办、讨论结论和后续实施事项统一记录在 `docs/issues/`；`docs/reviews/` 用于审查与验收报告。
+实际完成的需求修改、BUG 修复和 UI 调整统一记录在根目录 [CHANGELOG](../CHANGELOG.md)，不要求为每项改动另建台账。尚待实施的需求或需要保留的讨论放在 `docs/issues/`；必要的审查与验收证据放在 `docs/reviews/`。
 
 - [秘书型 Work 助手总 issue](issues/ai-agent-capability-roadmap-issue.md)：Chat/Work 边界、资源入口、统一流式展示、系统控制、自动接单与部署讨论的统一入口。
 - [多应用入口的 uni 与 H5 应用划分及管理边界](issues/multi-app-entry-boundaries-issue.md)。
@@ -72,7 +92,7 @@
 
 - [uni 修复实施与验收记录](reviews/2026-10-10-uni-remediation-progress.md)：F01–F10 代码接入、回归证据与真实环境验收边界。
 - [uni 功能复查与待修复清单](reviews/2026-10-10-uni-functional-readiness.md)：5 项核心问题、验证证据与用户已确认范围；不做手机报表或独立本机录音库，录音跟随客户沟通记录播放，代码修复待后续。
-- [通用应用更新模块](modules/app-update-module.md)：待实现方案，明确已有升级能力复用、版本源/平台适配、通用流程与验收标准。
+- [通用应用更新模块](modules/app-update-module.md)：更新能力与发布边界，包含版本源、平台适配和验收限制；最新修复与发布情况以 CHANGELOG 和对应交付记录为准。
 - [模块边界与独立部署 ADR](architecture/modular-deployment-adr.md)：本次新增需求的推荐方案，明确前端独立制品、业务服务、公共能力、跨域流程、迁移和验收。
 - [PC / 移动端审查报告](reviews/2026-10-10-mobile-pc-audit.md)与[联调验收清单](reviews/mobile-pc-acceptance.md)：本轮修复、测试证据、未验证项与真实环境复现步骤。
 - [PC 端模块化架构罗盘](architecture/pc-module-architecture.md)：Electron + Vue 3 模块化单体、共享层边界、模块依赖方向、跨模块页面组合和菜单路由注册规则。
