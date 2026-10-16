@@ -1,0 +1,5 @@
+{
+  "name": "callphone",
+  "version": "0.1.0",
+  "description": "Call Phone 客户业务能力：首轮支持 CSV 线索导入。"
+}

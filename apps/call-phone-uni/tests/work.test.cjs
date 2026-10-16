@@ -79,3 +79,32 @@ test('Long streamed replies retain tool progress and a new assistant message doe
   assert.equal(h.state.liveText, '新的过程'); assert.equal(h.state.events[0].data.name, 'WebSearch');
   await h.markSeen(250); assert.ok(h.calls.some(c => c[1].endsWith('/seen') && c[2].sequence === 250)); h.dispose();
 });
+
+test('conversation picker only adds configured capabilities and clears account data on identity change', async () => {
+  const plugin = {id:'example',name:'示例',connected:true,installed:true,enabled:true,added:false,account:'当前账号'}; let revision=0;
+  const h=harness((method,url,body) => {
+    if (url.endsWith('/plugins')) {
+      if(method==='GET') return {items:[{...plugin}]};
+      assert.equal(body.plugin_id,'example');
+      if(body.action==='connect') {plugin.connected=true;plugin.account='当前账号';}
+      if(body.action==='add') plugin.added=true;
+      return session({sequence:++revision,plugins:[{...plugin}]});
+    }
+    return session();
+  });
+  await h.attach('1',true); await h.loadPlugins(); assert.equal(h.state.plugins[0].connected,true); assert.equal(h.state.plugins[0].added,false);
+  await h.configurePlugin(plugin,'add'); assert.equal(h.state.session.plugins[0].added,true);
+  h.observers.forEach(fn=>fn()); assert.equal(h.state.plugins.length,0); h.dispose();
+});
+
+test('capability management is independent of conversation and fences late account responses', async () => {
+  const observers=[], calls=[], pending=deferred();
+  const module=load('capabilities',{vue,'@/api/http':{
+    request:async (...args)=>{calls.push(args);return pending.promise;},
+    onSessionChange:fn=>observers.push(fn),onDeviceChange:fn=>observers.push(fn)
+  }});
+  const loading=module.loadCapabilities(); observers.forEach(fn=>fn());
+  pending.resolve({items:[{id:'private',account:'old'}]}); await loading;
+  assert.equal(module.capabilities.items.length,0);
+  assert.equal(calls[0][1],'/api/v1/mobile/work/sessions/capabilities');
+});

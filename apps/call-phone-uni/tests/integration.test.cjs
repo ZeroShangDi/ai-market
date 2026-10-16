@@ -375,6 +375,18 @@ test('install revalidates package and refuses a changed artifact', async () => {
   assert.equal(verifies, 2); assert.equal(installs, 0)
   assert.equal(service.getState().stage, 'verify'); assert.deepEqual(removed, ['/update.apk'])
 })
+test('native revalidation errors stay in verification stage, clean the file and never launch the installer', async () => {
+  let verifies = 0, installs = 0
+  const { service, removed } = updateHarness({
+    verify: async () => { if (++verifies > 1) throw new Error('无法读取安装包签名，已禁止安装'); return true },
+    install: async () => { installs++; return 'requested' },
+  })
+  await service.check(); await service.download(); await service.install()
+  assert.equal(installs, 0); assert.equal(service.getState().stage, 'verify')
+  assert.equal(service.getState().message, '无法读取安装包签名，已禁止安装')
+  assert.deepEqual(removed, ['/update.apk'])
+  await service.check(); assert.equal(service.getState().status, 'available')
+})
 test('download refreshes once and preserves distinct forbidden/not-found/server errors', async () => {
   for (const [status, code] of [[403, 'FORBIDDEN'], [404, 'NOT_FOUND'], [503, 'SERVICE_UNAVAILABLE']]) {
     let downloads = 0, refreshes = 0

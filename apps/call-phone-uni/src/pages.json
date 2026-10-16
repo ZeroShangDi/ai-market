@@ -12,6 +12,7 @@
         "navigationStyle": "custom"
       }
     },
+    { "path": "pages/capabilities/index", "style": { "navigationStyle": "custom" } },
     {
       "path": "pages/apps/manage",
       "style": {

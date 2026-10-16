@@ -60,6 +60,17 @@ public class MobileWorkController {
         return ok(json.createObjectNode().set("data", json.createObjectNode().set("items", items)));
     }
 
+    @GetMapping("/capabilities")
+    @ApiAccessLog(requestEnable = false, responseEnable = false)
+    public ResponseEntity<JsonNode> capabilities(HttpServletRequest request) {
+        return ok(relay.request("GET", "/capabilities", null, null, actor(request)));
+    }
+    @PostMapping("/capabilities")
+    @ApiAccessLog(requestEnable = false, responseEnable = false)
+    public ResponseEntity<JsonNode> configureCapability(HttpServletRequest request, @RequestBody JsonNode body) {
+        return ok(relay.request("POST", "/capabilities", body, null, actor(request)));
+    }
+
     @PostMapping
     @ApiAccessLog(requestEnable = false, responseEnable = false)
     public ResponseEntity<JsonNode> create(HttpServletRequest request, @RequestBody JsonNode body) {
@@ -70,7 +81,14 @@ public class MobileWorkController {
     @ApiAccessLog(requestEnable = false, responseEnable = false)
     public ResponseEntity<JsonNode> get(HttpServletRequest request, @PathVariable String sessionId) { return ok(owned(actor(request), id(sessionId))); }
 
-    @PostMapping("/{sessionId}/{operation:messages|files|interrupt|close|seen}")
+    @GetMapping("/{sessionId}/plugins")
+    @ApiAccessLog(requestEnable = false, responseEnable = false)
+    public ResponseEntity<JsonNode> plugins(HttpServletRequest request, @PathVariable String sessionId) {
+        AgentActor actor = actor(request); String sid = id(sessionId); owned(actor, sid);
+        return ok(relay.request("GET", "/" + sid + "/plugins", null, null, actor));
+    }
+
+    @PostMapping("/{sessionId}/{operation:messages|files|interrupt|close|seen|plugins}")
     @ApiAccessLog(requestEnable = false, responseEnable = false)
     public ResponseEntity<JsonNode> action(HttpServletRequest request, @PathVariable String sessionId, @PathVariable String operation, @RequestBody JsonNode body) {
         AgentActor actor = actor(request); String sid = id(sessionId); owned(actor, sid);

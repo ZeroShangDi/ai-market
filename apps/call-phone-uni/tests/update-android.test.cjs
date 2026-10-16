@@ -145,58 +145,103 @@ test('unreadable Android SDK never bypasses the installation permission check', 
   assert.equal(h.installs, 0);
 });
 
-function verificationHarness({ size = 100, hash = 'a'.repeat(64), name = current.packageName, version = 109, signer = 'same', unreadable = false, digestError = false } = {}) {
-  const archive = {}, installed = {}, logs = [];
-  const signature = id => ({ id });
-  const fields = new Map([[archive, { packageName: name, versionCode: version, signatures: { 0: signature(signer), length: 1 } }], [installed, { signatures: { 0: signature('same'), length: 1 } }]]);
+function verificationHarness(options = {}) {
+  const logs = [], mode = {}, installed = {}, archive = {};
+  let closed = 0;
+  const array = values => options.arrayLike ? Object.assign({ length: values.length }, values) : values;
+  const originalSigner = { hex: 'aabbccdd' }, nextSigner = { hex: options.signer || originalSigner.hex };
+  const fields = new Map([
+    [installed, { signatures: array([originalSigner]) }],
+    [archive, { packageName: options.packageName ?? current.packageName,
+      versionCode: options.versionCode === undefined ? release.versionCode : options.versionCode,
+      signatures: options.missingSignatures ? null : array([nextSigner]) }],
+  ]);
   const android = {
     runtimeMainActivity: () => 'activity',
-    getAttribute: () => null, // Regression: Native.js field reads silently return null.
-    importClass(target) {
-      if (target === 'java.nio.channels.FileChannel$MapMode') return { READ_ONLY: 'map-mode' };
-      if (!unreadable) Object.assign(target, fields.get(target));
-      return target;
+    getAttribute(object, field) {
+      if (options.fallback) return null;
+      return object === 'java.nio.channels.FileChannel$MapMode' ? mode : fields.get(object)?.[field];
     },
-    newObject: type => type,
+    importClass(object) {
+      if (object === 'java.nio.channels.FileChannel$MapMode') return { READ_ONLY: mode };
+      Object.assign(object, fields.get(object)); return {};
+    },
+    newObject(type) { return { type }; },
     invoke(object, method, ...args) {
       if (method === 'getPackageManager') return 'manager';
-      if (method === 'length') return size;
+      if (method === 'length') return options.bytes ?? release.artifact.bytes;
       if (method === 'getChannel') return 'channel';
-      if (method === 'map') { assert.equal(args[0], 'map-mode'); return 'buffer'; }
+      if (method === 'map') { assert.equal(args[0], mode); return 'buffer'; }
       if (method === 'getInstance') return 'digest';
-      if (method === 'update') { if (digestError) throw new Error('native exception with private path'); return; }
-      if (method === 'digest') return 'bytes';
-      if (method === 'toString') return hash;
-      if (method === 'close') return;
+      if (method === 'update') { if (options.digestError) throw new Error('/private/update.apk secret raw error'); return; }
+      if (method === 'digest') return 'hash-bytes';
+      if (method === 'toString') return options.hash ?? release.artifact.sha256;
+      if (method === 'close') { closed++; return; }
       if (method === 'getPackageArchiveInfo') return archive;
       if (method === 'getPackageInfo') return installed;
-      if (method === 'getLongVersionCode') return version;
-      if (method === 'equals') return object.id === args[0].id;
-      throw Error(method);
+      if (method === 'getLongVersionCode') return options.longVersionCode;
+      if (method === 'toCharsString') return object.hex;
+      if (method === 'equals') return object.hex === args[0].hex;
+      throw Error('Unexpected method ' + method);
     },
   };
   const exports = {};
-  vm.runInNewContext(ts.transpileModule(fs.readFileSync(path.join(__dirname, '../src/modules/app-update/android.ts'), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 } }).outputText, {
-    exports, Error, plus: { android, io: { convertLocalFileSystemURL: value => value } }, uni: { getSystemInfoSync: () => ({ platform: 'android' }) },
-    require: () => ({ logger: { info: (...args) => logs.push(args), warn: (...args) => logs.push(args) } }),
+  const source = fs.readFileSync(path.join(__dirname, '../src/modules/app-update/android.ts'), 'utf8');
+  vm.runInNewContext(ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 } }).outputText, {
+    exports, Error, uni: { getSystemInfoSync: () => ({ platform: 'android' }) },
+    plus: { android, io: { convertLocalFileSystemURL: () => '/private/update.apk' } },
+    require: () => ({ logger: { info: (...args) => logs.push(args), warn: (...args) => logs.push(args), error: (...args) => logs.push(args) } }),
   });
-  return { adapter: exports.createAndroidUpdateAdapter('stable'), logs };
+  return { adapter: exports.createAndroidUpdateAdapter('stable'), logs, get closed() { return closed; } };
 }
-test('APK verification supports imported PackageInfo fields and Java array-like certificates', async () => {
-  const h = verificationHarness();
-  assert.equal(await h.adapter.verify('/private/update.apk', release, current), true);
-  assert.equal(h.logs.at(-1)[1], 'artifact.verified');
+
+test('APK verification handles null native attributes via imported fields, including READ_ONLY and long version code', async () => {
+  for (const options of [{}, { fallback: true }, { fallback: true, versionCode: null, longVersionCode: release.versionCode }]) {
+    const h = verificationHarness(options);
+    assert.equal(await h.adapter.verify('/update.apk', release, current), true);
+    assert.equal(h.closed, 1);
+  }
 });
-test('APK verification rejects corrupt bytes, wrong identity and different signers with specific errors', async () => {
-  for (const [options, error] of [
-    [{ size: 99 }, /大小不符/], [{ hash: 'b'.repeat(64) }, /内容校验不符/],
-    [{ name: 'other' }, /当前应用不匹配/], [{ version: 108 }, /版本与更新清单不符/],
-    [{ signer: 'other' }, /签名与已安装应用不一致/], [{ unreadable: true }, /无法读取安装包版本或包名/],
-    [{ digestError: true }, /校验接口异常（digest）/],
+
+test('APK signer verification accepts native array-like values without JavaScript array methods', async () => {
+  const h = verificationHarness({ fallback: true, arrayLike: true });
+  assert.equal(await h.adapter.verify('/update.apk', release, current), true);
+});
+
+test('size, digest, package, version and signing mismatches stay blocked with distinct diagnostics', async () => {
+  for (const [options, code] of [
+    [{ bytes: 99 }, 'APK_SIZE_MISMATCH'], [{ hash: 'b'.repeat(64) }, 'APK_HASH_MISMATCH'],
+    [{ packageName: 'other.app' }, 'APK_PACKAGE_MISMATCH'], [{ versionCode: 999 }, 'APK_VERSION_MISMATCH'],
+    [{ signer: '00112233' }, 'APK_SIGNER_MISMATCH'],
   ]) {
     const h = verificationHarness(options);
-    await assert.rejects(h.adapter.verify('/private/update.apk', release, current), error);
-    assert.equal(JSON.stringify(h.logs).includes('/private'), false);
-    assert.equal(JSON.stringify(h.logs).includes('native exception'), false);
+    await assert.rejects(h.adapter.verify('/update.apk', release, current), { code });
+    assert.equal(h.logs.at(-1)[1], 'artifact.rejected');
+    assert.equal(h.logs.at(-1)[2].code, code);
+    assert.equal(JSON.stringify(h.logs).includes('/private/update.apk'), false);
   }
+});
+
+test('unreadable native APK fields remain blocked instead of being treated as a mismatch or success', async () => {
+  for (const [options, code] of [
+    [{ missingSignatures: true }, 'APK_SIGNER_UNREADABLE'], [{ versionCode: null }, 'APK_VERSION_UNREADABLE'],
+    [{ hash: 'null' }, 'APK_HASH_UNREADABLE'],
+  ]) {
+    const h = verificationHarness(options);
+    await assert.rejects(h.adapter.verify('/update.apk', release, current), { code });
+    assert.equal(h.closed, 1);
+  }
+});
+
+test('native verification exceptions only log stage and code, never raw error or file path', async () => {
+  const h = verificationHarness({ digestError: true });
+  await assert.rejects(h.adapter.verify('/private/update.apk', release, current), { code: 'APK_NATIVE_VERIFY_FAILED' });
+  assert.equal(h.logs.at(-1)[2].stage, 'digest');
+  assert.equal(JSON.stringify(h.logs).includes('/private'), false);
+  assert.equal(JSON.stringify(h.logs).includes('secret'), false);
+  assert.equal(h.closed, 1);
+});
+test('archive identity must also match the signed artifact package', async () => {
+  const h = verificationHarness();
+  await assert.rejects(h.adapter.verify('/update.apk', { ...release, artifact: { ...release.artifact, packageName: 'other.app' } }, current), { code: 'APK_PACKAGE_MISMATCH' });
 });

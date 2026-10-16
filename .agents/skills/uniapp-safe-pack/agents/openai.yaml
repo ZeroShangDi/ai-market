@@ -1,0 +1,4 @@
+interface:
+  display_name: "uni-app 安心打包"
+  short_description: "用账号云端证书提交本仓库 Android APK 安心打包并查询结果"
+  default_prompt: "使用 $uniapp-safe-pack 为当前仓库提交安心 APK，使用我的云端证书，提交成功即可结束。"

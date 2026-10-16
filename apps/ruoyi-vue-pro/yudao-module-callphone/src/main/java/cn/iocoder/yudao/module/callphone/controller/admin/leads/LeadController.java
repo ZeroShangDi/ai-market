@@ -1,6 +1,5 @@
 package cn.iocoder.yudao.module.callphone.controller.admin.leads;
 
-import cn.hutool.core.util.IdUtil;
 import cn.iocoder.yudao.framework.common.pojo.CommonResult;
 import cn.iocoder.yudao.framework.apilog.core.annotation.ApiAccessLog;
 import cn.iocoder.yudao.framework.common.pojo.PageResult;
@@ -58,6 +57,7 @@ import static cn.iocoder.yudao.framework.security.core.util.SecurityFrameworkUti
 @Validated
 public class LeadController {
     @Resource private LeadMapper leadMapper;
+    @Resource private cn.iocoder.yudao.module.callphone.service.leads.LeadCreationService leadCreationService;
     @Resource private LeadConversionMapper leadConversionMapper;
     @Resource private LeadArchiveEventMapper leadArchiveEventMapper;
     @Resource private PiiCryptoService piiCryptoService;
@@ -89,19 +89,7 @@ public class LeadController {
     @Transactional(rollbackFor = Exception.class)
     public CommonResult<Long> save(@RequestHeader("Idempotency-Key") @NotBlank @Size(max = 80) String idempotencyKey,
                                   @RequestBody @Valid LeadSaveReqVO reqVO) {
-        LeadDO prior = leadMapper.selectOne(new LambdaQueryWrapperX<LeadDO>().eq(LeadDO::getIdempotencyKey, idempotencyKey));
-        if (prior != null) return success(prior.getId());
-        String phone = reqVO.getPhone().replaceAll("[ -]", "");
-        LeadDO lead = new LeadDO();
-        lead.setId(IdUtil.getSnowflake().nextId());
-        lead.setNameCiphertext(piiCryptoService.encrypt(reqVO.getName().trim()));
-        lead.setPhoneCiphertext(piiCryptoService.encrypt(phone));
-        lead.setPhoneDisplay(maskPhone(phone));
-        lead.setSourceCode(reqVO.getSourceCode()); lead.setScore(reqVO.getScore() == null ? 0 : reqVO.getScore());
-        lead.setStatus("new"); lead.setIdempotencyKey(idempotencyKey);
-        leadMapper.insert(lead);
-        leadAssignmentService.autoAssignNewLead(lead.getId(), getLoginUserId());
-        return success(lead.getId());
+        return success(leadCreationService.create(idempotencyKey, reqVO, getLoginUserId()));
     }
 
     @PostMapping("/claim")
@@ -296,7 +284,6 @@ public class LeadController {
         return user == null ? "成员已停用" : user.getNickname();
     }
 
-    private String maskPhone(String phone) { return phone.length() > 7 ? phone.substring(0, 3) + " **** " + phone.substring(phone.length() - 4) : "****"; }
 
     @lombok.Data public static class LeadClaimReqVO { @jakarta.validation.constraints.NotNull private Long id; }
     @lombok.Data public static class LeadAssignReqVO {

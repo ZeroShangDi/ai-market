@@ -27,7 +27,7 @@
 - 新增显式 `AGENT_PROVIDER=anthropic|deepseek`；DeepSeek 使用官方 Anthropic 兼容端点与独立密钥字段，仍复用 Claude Agent SDK，不引入 DeepSeek Harness。DeepSeek 不宣称 SDK 费用估算可作为可靠预算，保留轮数和时间限制。
 - `query_customer` 返回后端在提交时读出的授权客户快照，不是执行期间实时查询；后续真正的连接器可替换该适配。
 - 真实模型联调发现快照适配将缺失 notes 默认成空字符串，已修复为保留缺失，并明确专家不能把未提供字段解释为无记录；增加实际 HTTP 执行输入回归测试。
-- 详细交接见该目录的 `HANDOFF.md`（子任务完成时写入）及 `README.md`。
+- 当时的服务交接见[旧 Agent 服务交接归档](2026-10-14-agent-service-handoff.md)；当前运行说明见 [Agent README](../../apps/agent-service/README.md)。
 
 ### 客户后端桥接
 

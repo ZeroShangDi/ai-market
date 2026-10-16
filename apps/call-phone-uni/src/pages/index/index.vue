@@ -1,10 +1,11 @@
 <template>
-  <view class="page">
+  <view class="page" :class="{ full: fullList }">
     <view class="wrap">
-      <MobileHeader title="工作台" action-icon-name="scan" action-label="扫码连接电脑" @action="scanComputer" />
+      <MobileHeader v-if="fullList" title="继续处理" back-icon-name="chevron-left" back-fallback="/pages/index/index" />
+      <MobileHeader v-else title="工作台" action-icon-name="scan" action-label="扫码连接电脑" @action="scanComputer" />
       <PreviewBanner />
       <view class="content">
-        <view class="ai-entry" role="button" aria-label="打开 AI 对话" @tap="openMobileApp('ai-assistant')">
+        <view v-if="!fullList" class="ai-entry" role="button" aria-label="打开 AI 对话" @tap="openMobileApp('ai-assistant')">
           <view class="ai-heading">
             <view class="ai-mark"><AppIcon name="brand-assistant" :size="44" /></view>
             <view class="ai-copy"><view class="ai-title">统子哥<text v-if="mockEnabled" class="preview-tag">预览</text></view></view>
@@ -12,7 +13,7 @@
           <view class="ai-prompt"><text>有什么可以帮你？</text><AppIcon name="arrow-right" :size="23" color="#294fdb" /></view>
           <text class="ai-link">{{ recentConversations.length ? '继续上次对话' : '开始对话' }} <text aria-hidden="true">→</text></text>
         </view>
-        <view class="section">
+        <view v-if="!fullList" class="section">
           <view class="section-heading"><text class="section-title">常用应用</text><view class="section-link" role="button" aria-label="查看全部应用" @tap="openApps">全部应用 <AppIcon name="chevron-right" :size="14" color="#636e82" /></view></view>
           <view class="shortcuts">
             <view v-for="app in favoriteApps" :key="app.id" class="shortcut" role="button" :aria-label="'打开' + app.name" @tap="openMobileApp(app.id)">
@@ -22,32 +23,39 @@
             <view v-if="!favoriteApps.length" class="shortcut-empty" role="button" @tap="openApps">去应用广场添加常用应用 <text aria-hidden="true">→</text></view>
           </view>
         </view>
-        <view class="section">
-          <view class="section-heading"><text class="section-title">继续处理</text><text v-if="loadingRecent" class="section-caption">加载中…</text></view>
+        <view class="section" :class="{ 'full-section': fullList }">
+          <view v-if="!fullList" class="section-heading">
+            <text class="section-title">继续处理<text v-if="items.pending.length"> · {{ items.pending.length }}</text></text>
+            <view v-if="hasMore" class="section-link" role="button" aria-label="查看全部继续处理内容" @tap="openAll">查看全部 <AppIcon name="chevron-right" :size="14" color="#636e82" /></view>
+          </view>
+          <view v-else class="list-tabs">
+            <view class="list-tab" :class="{ selected: listTab === 'pending' }" role="button" @tap="listTab = 'pending'">待处理<text v-if="items.pending.length"> · {{ items.pending.length }}</text></view>
+            <view class="list-tab" :class="{ selected: listTab === 'history' }" role="button" @tap="listTab = 'history'">历史记录</view>
+          </view>
           <view class="recent-card">
-            <view v-for="work in pendingWork" :key="work.id" class="recent-row" @tap="openConversation(work.conversation_id)"><view class="recent-icon"><AppIcon name="pending" :size="22" color="#5264a5" /></view><view class="recent-copy"><text class="recent-title">{{ work.title }}</text><text class="work-badge" :class="{ attention: work.pending.length || work.unread }">{{ workStatus(work) }}</text></view><AppIcon name="chevron-right" :size="18" color="#8994a8" /></view>
-            <view v-if="workInbox.error" class="recent-error" @tap="refreshWorkInbox">工作状态暂不可用 · 重试</view>
-            <view v-for="conversation in recentConversations" :key="conversation.id" class="recent-row" role="button" :aria-label="'继续对话：' + conversation.title" @tap="openConversation(conversation.id)">
+            <view v-for="item in visibleItems" :key="item.id" class="recent-row" role="button" :aria-label="'打开：' + item.title" @tap="openConversation(item.id)">
               <view class="recent-icon"><AppIcon name="pending" :size="22" color="#5264a5" /></view>
-              <view class="recent-copy"><text class="recent-title">{{ conversation.title }}</text><text class="recent-time">{{ when(conversation.updated_at) }}</text></view>
+              <view class="recent-copy">
+                <text class="recent-title">{{ item.title }}</text>
+                <text class="work-badge" :class="{ attention: item.work && (item.work.pending.length || item.work.unread) }">{{ item.work ? workStatus(item.work) : '最近对话' }}</text>
+                <text class="recent-time">{{ when(item.updated_at) }}</text>
+              </view>
               <AppIcon name="chevron-right" :size="18" color="#8994a8" />
             </view>
-            <view v-if="!recentConversations.length && !pendingWork.length" class="recent-empty">
-              <view class="recent-icon"><AppIcon name="pending" :size="22" color="#5264a5" /></view>
-              <view class="recent-copy"><text class="recent-title">{{ recentError ? '暂时无法加载最近对话' : (loadingRecent ? '正在加载…' : '暂无最近对话') }}</text><text v-if="recentError" class="recent-time">{{ recentError }}</text></view>
-              <view v-if="recentError" class="retry" role="button" aria-label="重新加载最近对话" @tap="loadRecent">重试</view>
-            </view>
-            <view v-else-if="recentError" class="recent-error" role="button" @tap="loadRecent">{{ recentError }} · 重试</view>
+            <view v-if="!visibleItems.length" class="recent-empty"><text class="recent-title">{{ loadingRecent || workInbox.loading ? '正在加载…' : (workInbox.error || recentError ? '暂时无法加载' : (fullList && listTab === 'pending' ? '暂无待处理内容' : '暂无最近记录')) }}</text></view>
+            <view v-if="workInbox.error" class="recent-error" role="button" @tap="refreshWorkInbox">工作状态暂不可用 · 重试</view>
+            <view v-if="recentError" class="recent-error" role="button" @tap="loadRecent(failedMore)">{{ recentError }} · 重试</view>
+            <view v-if="fullList && listTab === 'history' && nextCursor" class="load-more" role="button" @tap="loadRecent(true)">{{ loadingRecent ? '加载中…' : '加载更多' }}</view>
           </view>
         </view>
       </view>
     </view>
-    <TabBar current="workbench" />
+    <TabBar v-if="!fullList" current="workbench" />
   </view>
 </template>
 <script setup lang="ts">
 import { computed, ref } from 'vue';
-import { onShow, onHide, onUnload } from '@dcloudio/uni-app';
+import { onLoad, onShow, onHide, onUnload } from '@dcloudio/uni-app';
 import MobileHeader from '@/components/MobileHeader.vue';
 import TabBar from '@/components/TabBar.vue';
 import PreviewBanner from '@/components/PreviewBanner.vue';
@@ -62,34 +70,51 @@ import { remoteChatRepository } from '@/services/ai-chat-remote';
 import { ensureSession } from '@/services/session';
 import { hasUnfinishedCall } from '@/services/calls';
 import { openRootTab } from '@/modules/root-navigation';
-import { hasAccessToken, getSessionVersion, messageOf, onSessionChange } from '@/api/http';
+import { hasAccessToken, getSessionVersion, messageOf, onSessionChange, onDeviceChange } from '@/api/http';
 import { mockEnabled } from '@/config';
+import { continueItems } from '@/ui/work-presentation';
 import { when, toast } from '@/ui/format';
 import type { ConversationSummary } from '@/types/ai-chat';
 
-const pendingWork = computed(() => workInbox.items.filter(item => item.started).slice().sort((a, b) => Number(!!(b.pending.length || b.unread)) - Number(!!(a.pending.length || a.unread)) || b.updated_at.localeCompare(a.updated_at)).slice(0, 8));
+const fullList = ref(false);
+const listTab = ref<'pending' | 'history'>('pending');
+onLoad(query => { fullList.value = query?.view === 'all'; });
+const nextCursor = ref<string | null>(null);
+const failedMore = ref(false);
 const recent = ref<ConversationSummary[]>([]);
 const recentError = ref('');
 const loadingRecent = ref(false);
 let recentGeneration = 0;
-const recentConversations = computed(() => (mockEnabled
+const recentConversations = computed(() => mockEnabled
   ? aiChat.state.conversations.filter(item => item.messages.length)
-  : recent.value).filter(item => !workInbox.items.some(w => w.started && w.conversation_id === item.id)).slice().sort((a, b) => b.updated_at.localeCompare(a.updated_at)).slice(0, 3));
+  : recent.value);
+const items = computed(() => continueItems(workInbox.items, recentConversations.value));
+const visibleItems = computed(() => fullList.value ? items.value[listTab.value] : items.value.preview);
+const hasMore = computed(() => items.value.pending.length + items.value.history.length > 3 || !!nextCursor.value);
 
-async function loadRecent() {
+async function loadRecent(more = false) {
+  if (more && (loadingRecent.value || !nextCursor.value)) return;
   const generation = ++recentGeneration;
   const session = getSessionVersion();
   recentError.value = '';
-  if (mockEnabled || !hasAccessToken()) { recent.value = []; loadingRecent.value = false; return; }
+  failedMore.value = more;
+  if (mockEnabled || !hasAccessToken()) { recent.value = []; nextCursor.value = null; loadingRecent.value = false; return; }
   loadingRecent.value = true;
   try {
-    const result = await remoteChatRepository.list();
-    if (generation === recentGeneration && session === getSessionVersion()) recent.value = result.items;
+    const result = await remoteChatRepository.list(more ? nextCursor.value! : undefined);
+    if (generation === recentGeneration && session === getSessionVersion()) {
+      recent.value = more ? [...recent.value, ...result.items] : result.items;
+      nextCursor.value = result.next_cursor;
+    }
   } catch (error) {
     if (generation === recentGeneration && session === getSessionVersion()) recentError.value = messageOf(error);
   } finally {
     if (generation === recentGeneration) loadingRecent.value = false;
   }
+}
+function openAll() {
+  if (hasUnfinishedCall()) return toast('请先完成当前通话并保存结果');
+  if (ensureSession()) uni.navigateTo({ url: '/pages/index/index?view=all' });
 }
 function openApps() {
   openRootTab('apps');
@@ -103,22 +128,31 @@ async function scanComputer() {
   try { if (await scanAndPair()) { toast('手机已配对，电脑外呼将自动拨打'); void loadRecent(); } }
   catch (error) { toast(messageOf(error)); }
 }
-const stopSession = onSessionChange(() => {
+function resetRecent() {
   ++recentGeneration;
   recent.value = [];
   recentError.value = '';
+  nextCursor.value = null;
   loadingRecent.value = false;
-  void loadRecent();
-});
+  if (visible) void loadRecent();
+}
+const stopSession = onSessionChange(resetRecent);
+const stopDevice = onDeviceChange(resetRecent);
 let workPoll: ReturnType<typeof setTimeout> | undefined;
 let visible = false;
 async function pollWork() { if (!visible || mockEnabled) return; if (hasAccessToken()) await refreshWorkInbox(); if (visible) workPoll = setTimeout(pollWork, 10000); }
 onShow(() => { visible = true; refreshFavorites(); void loadRecent(); void pollWork(); });
 onHide(() => { visible = false; clearTimeout(workPoll); });
-onUnload(() => { visible = false; clearTimeout(workPoll); ++recentGeneration; stopSession(); });
+onUnload(() => { visible = false; clearTimeout(workPoll); ++recentGeneration; stopSession(); stopDevice(); });
 </script>
 <style scoped lang="scss">
 .page { min-height: 100vh; padding-bottom: calc(112px + env(safe-area-inset-bottom)); background: #f7f8fc; }
+.page.full { padding-bottom: calc(24px + env(safe-area-inset-bottom)); }
+.section.full-section { margin-top: 0; }
+.list-tabs { display: flex; gap: 20px; }
+.list-tab { padding: 8px 0; font-size: 14px; color: #8994a8; }
+.list-tab.selected { color: #294fdb; border-bottom: 2px solid #294fdb; }
+.load-more { text-align: center; padding: 16px; color: #294fdb; font-size: 13px; }
 .wrap { max-width: 500px; margin: auto; }
 .content { padding: 22px 20px 24px; }
 .ai-entry { padding: 21px 20px 19px; border: 1px solid #e5eafa; border-radius: 22px; background: linear-gradient(120deg, #eaf0ff, #f9fbff); box-shadow: 0 6px 18px rgba(41, 79, 219, .04); }

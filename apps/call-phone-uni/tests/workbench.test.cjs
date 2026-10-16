@@ -15,7 +15,7 @@ function harness() {
   }).outputText;
   const modules = {
     vue,
-    '@dcloudio/uni-app': { onShow() {}, onHide() {}, onUnload(fn) { unload = fn; } },
+    '@dcloudio/uni-app': { onLoad(fn) { fn({}); }, onShow() {}, onHide() {}, onUnload(fn) { unload = fn; } },
     '@/modules/app-registry': { mobileApps: [], openMobileApp() {} },
     '@/services/work': { workInbox: { items: [] }, refreshWorkInbox: async () => {}, workStatus: () => '' },
     '@/services/ai-chat': { aiChat: { state: { conversations: [] } } },
@@ -25,6 +25,7 @@ function harness() {
     '@/api/http': {
       hasAccessToken: () => authenticated, getSessionVersion: () => session,
       messageOf: error => error.message,
+      onDeviceChange() { return () => {}; },
       onSessionChange(fn) { sessionChanged = fn; return () => {}; },
     },
     '@/config': { mockEnabled: false },
@@ -44,8 +45,9 @@ test('recent conversations never expose a previous session response or an unload
   const h = harness();
   const old = h.loadRecent();
   h.changeSession();
+  const fresh = h.loadRecent(); // Hidden pages reload on return, not during session reset.
   h.requests[1].resolve({ items: [{ id: 'new', title: '当前账号' }] });
-  await Promise.resolve(); await Promise.resolve();
+  await fresh;
   h.requests[0].resolve({ items: [{ id: 'old', title: '旧账号' }] });
   await old;
   assert.equal(h.recent.value[0].id, 'new');

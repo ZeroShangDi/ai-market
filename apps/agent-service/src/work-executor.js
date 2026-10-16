@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { ApiError, digest } from './validation.js';
 import { collectSources } from './web-chat.js';
 import { providerConfig } from './provider.js';
+import { loadCapabilityPlugins, discoverCapabilityPlugins, pluginConnection } from './work-plugins.js';
 import { workspacePath, workspaceSize, contained } from './work-files.js';
 
 const bundledSkills = fileURLToPath(new URL('../resources/work-skills', import.meta.url));
@@ -42,11 +43,17 @@ export async function loadWorkConfig(path) {
 
 export function createWorkExecutor({ provider = process.env.AGENT_PROVIDER || 'anthropic', apiKey = process.env.ANTHROPIC_API_KEY,
   deepseekApiKey = process.env.DEEPSEEK_API_KEY, model = process.env.AGENT_MODEL, managedConfig = process.env.WORK_MANAGED_CONFIG,
-  loadSdk = () => import('@anthropic-ai/claude-agent-sdk'), loadZod = () => import('zod'), maxTurns = 40 } = {}) {
-  return { async run(ctx) {
+  loadSdk = () => import('@anthropic-ai/claude-agent-sdk'), loadZod = () => import('zod'), maxTurns = 40, capabilityPlugins } = {}) {
+  return {
+    plugins: ctx => discoverCapabilityPlugins({ ctx, entries: capabilityPlugins }),
+    connectPlugin: pluginConnection,
+    async run(ctx) {
     const selected = providerConfig({ provider, apiKey, deepseekApiKey, model });
     const [sdk, { z }, managed] = await Promise.all([loadSdk(), loadZod(), loadWorkConfig(managedConfig)]);
     const { cwd, config, home, base, signal } = ctx;
+    const capabilities = await loadCapabilityPlugins({ sdk, z, ctx, entries: capabilityPlugins });
+    for (const id of Object.keys(capabilities.servers)) if (managed.mcpServers[id]) throw new Error('Duplicate plugin MCP server');
+    const pluginPaths = [...new Set([...managed.plugins, ...capabilities.paths])];
     await prepareProtectedWorkspace(cwd);
     const protectedConfig = managedConfig ? [resolve(managedConfig), await realpath(resolve(managedConfig))] : [];
     await mkdir(join(config, 'skills'), { recursive: true, mode: 0o700 });
@@ -61,10 +68,10 @@ export function createWorkExecutor({ provider = process.env.AGENT_PROVIDER || 'a
     const sandbox = { enabled: true, failIfUnavailable: true, autoAllowBashIfSandboxed: false, allowUnsandboxedCommands: false,
       enableWeakerNestedSandbox: false,
       network: { allowedDomains: managed.networkDomains, allowAllUnixSockets: false, allowLocalBinding: false },
-      filesystem: { allowWrite: [cwd], denyWrite: [config, home, join(cwd, '.claude'), join(cwd, 'CLAUDE.md'), join(cwd, '.git'), ...managed.plugins],
+      filesystem: { allowWrite: [cwd], denyWrite: [config, home, join(cwd, '.claude'), join(cwd, 'CLAUDE.md'), join(cwd, '.git'), ...pluginPaths],
         // /dev/fd is a /proc alias, not a directory that bubblewrap can mask.
         denyRead: [dirname(dirname(base)), process.cwd(), process.env.HOME || '/root', '/proc', '/sys', '/run/secrets', '/var/run/secrets', ...protectedConfig],
-        allowRead: [cwd, join(config, 'skills'), ...managed.plugins] },
+        allowRead: [cwd, join(config, 'skills'), ...pluginPaths] },
       credentials: { envVars: credentialNames.map(name => ({ name, mode: 'deny' })), files: protectedConfig.map(path => ({ path, mode: 'deny' })) } };
     const registered = sdk.createSdkMcpServer({ name: 'work', version: '1.0.0', alwaysLoad: true, tools: [
       sdk.tool('workspace_info', 'Read the authorized workspace and available resources. No business credentials are available to native commands.', {}, async () => toolResult({ cwd, resources: ctx.resources, native_files: true }), { annotations: { readOnlyHint: true } }),
@@ -79,6 +86,7 @@ export function createWorkExecutor({ provider = process.env.AGENT_PROVIDER || 'a
     }
     async function authorize(tool, input, id) {
       if (signal.aborted) return { behavior: 'deny', message: '工作已打断' };
+      try { await ctx.validatePlugins?.(tool, input); } catch (e) { return { behavior: 'deny', message: e.message }; }
       const key = digest({ tool, input, id });
       if (decisions.has(key)) return decisions.get(key);
       const promise = (async () => {
@@ -87,7 +95,7 @@ export function createWorkExecutor({ provider = process.env.AGENT_PROVIDER || 'a
         try {
           if (readTools.has(tool) || ['Write', 'Edit', 'NotebookEdit'].includes(tool)) {
             const path = input.file_path || input.notebook_path || input.path || '.';
-            const managedRoot = [join(config, 'skills'), ...managed.plugins].find(root => contained(root, resolve(cwd, path)));
+            const managedRoot = [join(config, 'skills'), ...pluginPaths].find(root => contained(root, resolve(cwd, path)));
             const target = await workspacePath(readTools.has(tool) && managedRoot ? managedRoot : cwd, path, { write: !readTools.has(tool) });
             if (tool === 'Glob') await workspacePath(cwd, join(target, input.pattern || '*'), { write: true });
             await workspaceSize(cwd);
@@ -99,18 +107,27 @@ export function createWorkExecutor({ provider = process.env.AGENT_PROVIDER || 'a
             // No network, business credentials or writes outside a restorable workspace.
             // Network-capable arbitrary commands require review; this is not a confirmed business side effect.
             risk = managed.networkDomains.length ? 2 : 1;
-          } else if (tool.startsWith('mcp__work__')) risk = 1;
+          } else if (capabilities.tools[tool]) risk = capabilities.tools[tool].risk;
+          else if (capabilities.availableIds.some(id => tool.startsWith(`mcp__${id}__`))) return { behavior: 'deny', message: '此插件未添加到当前会话' };
+          else if (tool.startsWith('mcp__work__')) risk = 1;
           else if (tool.startsWith('mcp__')) risk = managed.toolRisk[tool] || 3;
           else if (controlTools.has(tool)) {
             if (input.run_in_background || input.isolation) return { behavior: 'deny', message: '本阶段子任务必须在当前工作区内前台完成' };
             risk = ['Agent', 'Task'].includes(tool) ? 2 : 1;
           } else return { behavior: 'deny', message: '此原生工具尚未接入 Work 的执行边界' };
         } catch (e) { return { behavior: 'deny', message: e instanceof ApiError ? e.message : '无法核验文件边界或保存恢复点' }; }
-        await ctx.onEvent('audit', { tool_use_id: id, tool, risk, input });
+        await ctx.onEvent('audit', { tool_use_id: id, tool, label: capabilities.tools[tool]?.label, risk, input });
         if (risk > 1) {
-          const answer = await ctx.ask('approval', tool, { ...input, _risk: risk }, id);
+          const definition = capabilities.tools[tool];
+          let fields = [];
+          if (definition) {
+            try { fields = await definition.approval(input); }
+            catch { return { behavior: 'deny', message: '操作预览已变化或无法核验，请重新检查' }; }
+          }
+          const answer = await ctx.ask('approval', tool, { ...input, _display: definition ? { label: definition.label, fields } : undefined, _risk: risk }, id);
           if (!answer?.approved || signal.aborted) return { behavior: 'deny', message: '用户拒绝、取消或批准失效' };
         }
+        try { await ctx.validatePlugins?.(tool, input); } catch (e) { return { behavior: 'deny', message: e.message }; }
         return { behavior: 'allow', updatedInput: input };
       })();
       decisions.set(key, promise); return promise;
@@ -125,10 +142,10 @@ export function createWorkExecutor({ provider = process.env.AGENT_PROVIDER || 'a
       settings: { sandbox, disableAllHooks: false, autoMemoryEnabled: false }, sandbox,
       permissionMode: 'default', persistSession: true, includePartialMessages: true, includeHookEvents: true,
       ...(ctx.sessionId ? { resume: ctx.sessionId } : {}),
-      plugins: managed.plugins.map(path => ({ type: 'local', path })),
+      plugins: pluginPaths.map(path => ({ type: 'local', path })),
       strictMcpConfig: true, mcpServers: { ...Object.fromEntries(Object.entries(managed.mcpServers).map(([name, server]) => [name,
         ['http', 'sse'].includes(server.type) ? { ...server, headers: { ...server.headers, 'X-AI-Tenant': ctx.identity?.tenant || '', 'X-AI-User': ctx.identity?.user || '' } }
-          : { ...server, env: { ...server.env, WORK_TENANT_ID: ctx.identity?.tenant || '', WORK_USER_ID: ctx.identity?.user || '' } }])), work: registered },
+          : { ...server, env: { ...server.env, WORK_TENANT_ID: ctx.identity?.tenant || '', WORK_USER_ID: ctx.identity?.user || '' } }])), work: registered, ...capabilities.servers },
       canUseTool: (tool, input, meta) => authorize(tool, input, meta.toolUseID),
       hooks: { PreToolUse: [{ hooks: [async event => {
         if (event.tool_name === 'AskUserQuestion') return hookDecision('ask', '需要用户答复');
@@ -139,7 +156,7 @@ export function createWorkExecutor({ provider = process.env.AGENT_PROVIDER || 'a
     let finishInput;
     const inputDone = new Promise(resolve => { finishInput = resolve; });
     async function* promptStream() {
-      yield { type: 'user', message: { role: 'user', content: `${ctx.prompt}${ctx.resources.length ? `\n关联的原始资源：${JSON.stringify(ctx.resources.map(({ name, path }) => ({ name, path })))}` : ''}` }, parent_tool_use_id: null, session_id: ctx.sessionId || '' };
+      yield { type: 'user', message: { role: 'user', content: `${ctx.prompt}${ctx.resources.length ? `\n关联的原始资源：${JSON.stringify(ctx.resources.map(({ id, name, path }) => ({ id, name, path })))}` : ''}` }, parent_tool_use_id: null, session_id: ctx.sessionId || '' };
       await inputDone;
     }
     let query;
@@ -162,7 +179,7 @@ export function createWorkExecutor({ provider = process.env.AGENT_PROVIDER || 'a
           const stream = streams.get(parent);
           if (e.type === 'content_block_start') {
             stream?.blocks.set(e.index, e.content_block.id);
-            if (e.content_block.type === 'tool_use') await ctx.onEvent('tool_start', { id: e.content_block.id, name: e.content_block.name, index: e.index, message_id: stream?.id, parent_tool_use_id: message.parent_tool_use_id });
+            if (e.content_block.type === 'tool_use') await ctx.onEvent('tool_start', { id: e.content_block.id, name: e.content_block.name, label: capabilities.tools[e.content_block.name]?.label, index: e.index, message_id: stream?.id, parent_tool_use_id: message.parent_tool_use_id });
           } else if (e.type === 'content_block_delta') {
             if (e.delta.type === 'text_delta') await ctx.onEvent('text_delta', { delta: e.delta.text, message_id: stream?.id, parent_tool_use_id: message.parent_tool_use_id });
             if (e.delta.type === 'input_json_delta') await ctx.onEvent('tool_delta', { id: stream?.blocks.get(e.index), message_id: stream?.id, index: e.index, delta: e.delta.partial_json, parent_tool_use_id: message.parent_tool_use_id });
@@ -171,7 +188,7 @@ export function createWorkExecutor({ provider = process.env.AGENT_PROVIDER || 'a
           const blocks = Array.isArray(message.message?.content) ? message.message.content : [];
           for (const block of blocks) {
             if (block.type === 'tool_use' && ['WebSearch', 'WebFetch'].includes(block.name)) webTools.set(block.id, { name: block.name, url: block.input?.url });
-            if (block.type === 'tool_use') await ctx.onEvent('tool_call', { id: block.id, name: block.name, input: block.input, parent_tool_use_id: message.parent_tool_use_id });
+            if (block.type === 'tool_use') await ctx.onEvent('tool_call', { id: block.id, name: block.name, label: capabilities.tools[block.name]?.label, input: block.input, parent_tool_use_id: message.parent_tool_use_id });
             if (block.type === 'tool_result' && !block.is_error && webTools.has(block.tool_use_id)) {
               const tool = webTools.get(block.tool_use_id);
               collectSources(tool.name === 'WebFetch' ? { url: tool.url } : block.content, sources);
