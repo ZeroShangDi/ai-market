@@ -45,4 +45,5 @@ unpackage/
 *.swo
 *.tmp
 *~
+/apps/call-phone-uni/previews
 /.local/app-update/
