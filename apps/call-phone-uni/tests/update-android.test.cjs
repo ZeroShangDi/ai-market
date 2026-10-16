@@ -144,3 +144,59 @@ test('unreadable Android SDK never bypasses the installation permission check', 
   await assert.rejects(h.adapter.install('/update.apk'), /无法读取 Android 版本/);
   assert.equal(h.installs, 0);
 });
+
+function verificationHarness({ size = 100, hash = 'a'.repeat(64), name = current.packageName, version = 109, signer = 'same', unreadable = false, digestError = false } = {}) {
+  const archive = {}, installed = {}, logs = [];
+  const signature = id => ({ id });
+  const fields = new Map([[archive, { packageName: name, versionCode: version, signatures: { 0: signature(signer), length: 1 } }], [installed, { signatures: { 0: signature('same'), length: 1 } }]]);
+  const android = {
+    runtimeMainActivity: () => 'activity',
+    getAttribute: () => null, // Regression: Native.js field reads silently return null.
+    importClass(target) {
+      if (target === 'java.nio.channels.FileChannel$MapMode') return { READ_ONLY: 'map-mode' };
+      if (!unreadable) Object.assign(target, fields.get(target));
+      return target;
+    },
+    newObject: type => type,
+    invoke(object, method, ...args) {
+      if (method === 'getPackageManager') return 'manager';
+      if (method === 'length') return size;
+      if (method === 'getChannel') return 'channel';
+      if (method === 'map') { assert.equal(args[0], 'map-mode'); return 'buffer'; }
+      if (method === 'getInstance') return 'digest';
+      if (method === 'update') { if (digestError) throw new Error('native exception with private path'); return; }
+      if (method === 'digest') return 'bytes';
+      if (method === 'toString') return hash;
+      if (method === 'close') return;
+      if (method === 'getPackageArchiveInfo') return archive;
+      if (method === 'getPackageInfo') return installed;
+      if (method === 'getLongVersionCode') return version;
+      if (method === 'equals') return object.id === args[0].id;
+      throw Error(method);
+    },
+  };
+  const exports = {};
+  vm.runInNewContext(ts.transpileModule(fs.readFileSync(path.join(__dirname, '../src/modules/app-update/android.ts'), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 } }).outputText, {
+    exports, Error, plus: { android, io: { convertLocalFileSystemURL: value => value } }, uni: { getSystemInfoSync: () => ({ platform: 'android' }) },
+    require: () => ({ logger: { info: (...args) => logs.push(args), warn: (...args) => logs.push(args) } }),
+  });
+  return { adapter: exports.createAndroidUpdateAdapter('stable'), logs };
+}
+test('APK verification supports imported PackageInfo fields and Java array-like certificates', async () => {
+  const h = verificationHarness();
+  assert.equal(await h.adapter.verify('/private/update.apk', release, current), true);
+  assert.equal(h.logs.at(-1)[1], 'artifact.verified');
+});
+test('APK verification rejects corrupt bytes, wrong identity and different signers with specific errors', async () => {
+  for (const [options, error] of [
+    [{ size: 99 }, /大小不符/], [{ hash: 'b'.repeat(64) }, /内容校验不符/],
+    [{ name: 'other' }, /当前应用不匹配/], [{ version: 108 }, /版本与更新清单不符/],
+    [{ signer: 'other' }, /签名与已安装应用不一致/], [{ unreadable: true }, /无法读取安装包版本或包名/],
+    [{ digestError: true }, /校验接口异常（digest）/],
+  ]) {
+    const h = verificationHarness(options);
+    await assert.rejects(h.adapter.verify('/private/update.apk', release, current), error);
+    assert.equal(JSON.stringify(h.logs).includes('/private'), false);
+    assert.equal(JSON.stringify(h.logs).includes('native exception'), false);
+  }
+});

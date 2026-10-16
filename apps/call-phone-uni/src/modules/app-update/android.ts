@@ -184,62 +184,66 @@ export function createAndroidUpdateAdapter(channel: string): PlatformAdapter {
     },
     async verify(path, release, identity) {
       const { a, invoke, manager } = native();
-      const local = plus.io.convertLocalFileSystemURL(path);
-      const file = a.newObject("java.io.File", local);
-      if (Number(invoke(file, "length")) !== release.artifact.bytes)
-        return false;
-      const input = a.newObject("java.io.FileInputStream", file);
+      let stage = "file";
+      const reject = (code: string, message: string): never => {
+        logger.warn("update", "artifact.verify_failed", { stage, code });
+        throw new Error(message);
+      };
       try {
-        const channel = invoke(input, "getChannel");
-        const mapMode = a.getAttribute(
-          "java.nio.channels.FileChannel$MapMode",
-          "READ_ONLY",
-        );
-        const buffer = invoke(
-          channel,
-          "map",
-          mapMode,
-          0,
-          release.artifact.bytes,
-        );
-        const digest = invoke(
-          "java.security.MessageDigest",
-          "getInstance",
-          "SHA-256",
-        );
-        invoke(digest, "update", buffer);
-        const number = a.newObject(
-          "java.math.BigInteger",
-          1,
-          invoke(digest, "digest"),
-        );
-        const actual = String(invoke(number, "toString", 16)).padStart(64, "0");
-        if (actual.toLowerCase() !== release.artifact.sha256.toLowerCase())
-          return false;
-      } finally {
-        invoke(input, "close");
+        const local = plus.io.convertLocalFileSystemURL(path);
+        const file = a.newObject("java.io.File", local);
+        if (Number(invoke(file, "length")) !== release.artifact.bytes)
+          reject("SIZE_MISMATCH", "安装包大小不符，请重新下载");
+        stage = "digest";
+        const input = a.newObject("java.io.FileInputStream", file);
+        try {
+          const channel = invoke(input, "getChannel");
+          const mapMode = nativeValue(a, "java.nio.channels.FileChannel$MapMode", "READ_ONLY", value => value == null ? null : value);
+          if (mapMode === null) reject("MAP_MODE_UNAVAILABLE", "无法读取文件校验接口，请重新打开应用后重试");
+          const buffer = invoke(channel, "map", mapMode, 0, release.artifact.bytes);
+          const digest = invoke("java.security.MessageDigest", "getInstance", "SHA-256");
+          invoke(digest, "update", buffer);
+          const number = a.newObject("java.math.BigInteger", 1, invoke(digest, "digest"));
+          const actual = String(invoke(number, "toString", 16)).padStart(64, "0");
+          if (actual.toLowerCase() !== release.artifact.sha256.toLowerCase())
+            reject("DIGEST_MISMATCH", "安装包内容校验不符，请重新下载");
+        } finally { invoke(input, "close"); }
+        stage = "package";
+        const archive = invoke(manager, "getPackageArchiveInfo", local, 64);
+        if (!archive) reject("ARCHIVE_UNREADABLE", "系统无法识别安装包，请重新下载");
+        const packageName = nativeValue(a, archive, "packageName", value => typeof value === "string" && value ? value : null);
+        let versionCode = nativeValue(a, archive, "versionCode", positiveInteger);
+        if (versionCode === null) {
+          try { versionCode = positiveInteger(invoke(archive, "getLongVersionCode")); } catch { /* Fail closed below. */ }
+        }
+        if (packageName === null || versionCode === null)
+          reject("PACKAGE_INFO_UNAVAILABLE", "无法读取安装包版本或包名，已禁止安装");
+        if (packageName !== identity.packageName || packageName !== release.artifact.packageName)
+          reject("PACKAGE_MISMATCH", "安装包与当前应用不匹配，已禁止安装");
+        if (versionCode !== release.versionCode)
+          reject("VERSION_MISMATCH", "安装包版本与更新清单不符，已禁止安装");
+        stage = "certificate";
+        const installed = invoke(manager, "getPackageInfo", identity.packageName, 64);
+        // Native.js may expose Java arrays as array-like objects without .every().
+        const signatures = (value: any): any[] | null => {
+          if (!value || typeof value === "string" || !Number.isInteger(value.length) || value.length < 1 || value.length > 16) return null;
+          const result = [];
+          for (let i = 0; i < value.length; i++) { if (!value[i]) return null; result.push(value[i]); }
+          return result;
+        };
+        const expected = nativeValue(a, installed, "signatures", signatures);
+        const actual = nativeValue(a, archive, "signatures", signatures);
+        if (!expected || !actual) reject("CERTIFICATE_UNAVAILABLE", "无法读取安装包签名证书，已禁止安装");
+        // Compare signer sets, not Android's incidental array ordering. No key rotation bypass.
+        if (expected!.length !== actual!.length || !expected!.every(signature => actual!.some(candidate => invoke(signature, "equals", candidate) === true)))
+          reject("CERTIFICATE_MISMATCH", "安装包签名与已安装应用不一致，已禁止安装");
+        logger.info("update", "artifact.verified", { versionCode: release.versionCode });
+        return true;
+      } catch (error) {
+        if (error instanceof Error && /安装包|文件校验接口/.test(error.message)) throw error;
+        logger.warn("update", "artifact.verify_error", { stage });
+        throw new Error(`安装包校验接口异常（${stage}），请重试或导出诊断日志`);
       }
-      const archive = invoke(manager, "getPackageArchiveInfo", local, 64);
-      const installed = invoke(
-        manager,
-        "getPackageInfo",
-        identity.packageName,
-        64,
-      );
-      if (
-        !archive ||
-        String(a.getAttribute(archive, "packageName")) !==
-          identity.packageName ||
-        Number(a.getAttribute(archive, "versionCode")) !== release.versionCode
-      )
-        return false;
-      // Conservative same-signer policy. Signing-key rotation needs a dedicated adapter.
-      const expected = a.getAttribute(installed, "signatures"),
-        actual = a.getAttribute(archive, "signatures");
-      if (!expected?.length || expected.length !== actual?.length) return false;
-      return expected.every((signature: any, i: number) =>
-        invoke(signature, "equals", actual[i]),
-      );
     },
     async install(path) {
       const { a, invoke, manager } = native();
