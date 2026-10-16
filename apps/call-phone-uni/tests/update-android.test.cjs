@@ -144,3 +144,91 @@ test('unreadable Android SDK never bypasses the installation permission check', 
   await assert.rejects(h.adapter.install('/update.apk'), /无法读取 Android 版本/);
   assert.equal(h.installs, 0);
 });
+
+function verificationHarness(options = {}) {
+  const logs = [], mode = {}, installed = {}, archive = {};
+  let closed = 0;
+  const array = values => options.arrayLike ? Object.assign({ length: values.length }, values) : values;
+  const originalSigner = { hex: 'aabbccdd' }, nextSigner = { hex: options.signer || originalSigner.hex };
+  const fields = new Map([
+    [installed, { signatures: array([originalSigner]) }],
+    [archive, { packageName: options.packageName ?? current.packageName,
+      versionCode: options.versionCode === undefined ? release.versionCode : options.versionCode,
+      signatures: options.missingSignatures ? null : array([nextSigner]) }],
+  ]);
+  const android = {
+    runtimeMainActivity: () => 'activity',
+    getAttribute(object, field) {
+      if (options.fallback) return null;
+      return object === 'java.nio.channels.FileChannel$MapMode' ? mode : fields.get(object)?.[field];
+    },
+    importClass(object) {
+      if (object === 'java.nio.channels.FileChannel$MapMode') return { READ_ONLY: mode };
+      Object.assign(object, fields.get(object)); return {};
+    },
+    newObject(type) { return { type }; },
+    invoke(object, method, ...args) {
+      if (method === 'getPackageManager') return 'manager';
+      if (method === 'length') return options.bytes ?? release.artifact.bytes;
+      if (method === 'getChannel') return 'channel';
+      if (method === 'map') { assert.equal(args[0], mode); return 'buffer'; }
+      if (method === 'getInstance') return 'digest';
+      if (method === 'update') return;
+      if (method === 'digest') return 'hash-bytes';
+      if (method === 'toString') return options.hash ?? release.artifact.sha256;
+      if (method === 'close') { closed++; return; }
+      if (method === 'getPackageArchiveInfo') return archive;
+      if (method === 'getPackageInfo') return installed;
+      if (method === 'getLongVersionCode') return options.longVersionCode;
+      if (method === 'toCharsString') return object.hex;
+      if (method === 'equals') return object.hex === args[0].hex;
+      throw Error('Unexpected method ' + method);
+    },
+  };
+  const exports = {};
+  const source = fs.readFileSync(path.join(__dirname, '../src/modules/app-update/android.ts'), 'utf8');
+  vm.runInNewContext(ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 } }).outputText, {
+    exports, Error, uni: { getSystemInfoSync: () => ({ platform: 'android' }) },
+    plus: { android, io: { convertLocalFileSystemURL: () => '/private/update.apk' } },
+    require: () => ({ logger: { info: (...args) => logs.push(args), warn: (...args) => logs.push(args), error: (...args) => logs.push(args) } }),
+  });
+  return { adapter: exports.createAndroidUpdateAdapter('stable'), logs, get closed() { return closed; } };
+}
+
+test('APK verification handles null native attributes via imported fields, including READ_ONLY and long version code', async () => {
+  for (const options of [{}, { fallback: true }, { fallback: true, versionCode: null, longVersionCode: release.versionCode }]) {
+    const h = verificationHarness(options);
+    assert.equal(await h.adapter.verify('/update.apk', release, current), true);
+    assert.equal(h.closed, 1);
+  }
+});
+
+test('APK signer verification accepts native array-like values without JavaScript array methods', async () => {
+  const h = verificationHarness({ fallback: true, arrayLike: true });
+  assert.equal(await h.adapter.verify('/update.apk', release, current), true);
+});
+
+test('size, digest, package, version and signing mismatches stay blocked with distinct diagnostics', async () => {
+  for (const [options, code] of [
+    [{ bytes: 99 }, 'APK_SIZE_MISMATCH'], [{ hash: 'b'.repeat(64) }, 'APK_HASH_MISMATCH'],
+    [{ packageName: 'other.app' }, 'APK_PACKAGE_MISMATCH'], [{ versionCode: 999 }, 'APK_VERSION_MISMATCH'],
+    [{ signer: '00112233' }, 'APK_SIGNER_MISMATCH'],
+  ]) {
+    const h = verificationHarness(options);
+    await assert.rejects(h.adapter.verify('/update.apk', release, current), { code });
+    assert.equal(h.logs.at(-1)[1], 'artifact.rejected');
+    assert.equal(h.logs.at(-1)[2].code, code);
+    assert.equal(JSON.stringify(h.logs).includes('/private/update.apk'), false);
+  }
+});
+
+test('unreadable native APK fields remain blocked instead of being treated as a mismatch or success', async () => {
+  for (const [options, code] of [
+    [{ missingSignatures: true }, 'APK_SIGNER_UNREADABLE'], [{ versionCode: null }, 'APK_VERSION_UNREADABLE'],
+    [{ hash: 'null' }, 'APK_HASH_UNREADABLE'],
+  ]) {
+    const h = verificationHarness(options);
+    await assert.rejects(h.adapter.verify('/update.apk', release, current), { code });
+    assert.equal(h.closed, 1);
+  }
+});

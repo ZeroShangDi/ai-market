@@ -34,6 +34,15 @@ function positiveInteger(value: unknown): number | null {
   const number = Number(value);
   return Number.isSafeInteger(number) && number > 0 ? number : null;
 }
+function packageVersionCode(a: any, info: any): number | null {
+  const value = nativeValue(a, info, "versionCode", positiveInteger);
+  if (value !== null) return value;
+  try { return positiveInteger(a.invoke(info, "getLongVersionCode")); } catch { return null; }
+}
+function rejectArtifact(code: string, message: string, details: Record<string, unknown> = {}): never {
+  logger.warn("update", "artifact.rejected", { code, ...details });
+  throw Object.assign(new Error(message), { code });
+}
 function native() {
   if (
     typeof plus === "undefined" ||
@@ -98,11 +107,7 @@ export function createAndroidUpdateAdapter(channel: string): PlatformAdapter {
       if (typeof packageName !== "string" || !/^[A-Za-z0-9_.]+$/.test(packageName))
         throw new Error("无法读取当前应用包名，请重新打开应用后重试");
       const info = invoke(manager, "getPackageInfo", packageName, 0);
-      let versionCode = nativeValue(a, info, "versionCode", positiveInteger);
-      if (versionCode === null) {
-        // Android 9+ exposes the actual installed APK version as a public method.
-        try { versionCode = positiveInteger(invoke(info, "getLongVersionCode")); } catch { /* Fail explicitly below. */ }
-      }
+      const versionCode = packageVersionCode(a, info);
       if (versionCode === null) throw new Error("无法读取当前安装版本，请重新打开应用后重试");
       const versionName = nativeValue(a, info, "versionName", value => typeof value === "string" && value.trim() ? value.trim() : null);
       if (!versionName) throw new Error("无法读取当前版本名称，请重新打开应用后重试");
@@ -183,63 +188,63 @@ export function createAndroidUpdateAdapter(channel: string): PlatformAdapter {
       });
     },
     async verify(path, release, identity) {
-      const { a, invoke, manager } = native();
-      const local = plus.io.convertLocalFileSystemURL(path);
-      const file = a.newObject("java.io.File", local);
-      if (Number(invoke(file, "length")) !== release.artifact.bytes)
-        return false;
-      const input = a.newObject("java.io.FileInputStream", file);
       try {
-        const channel = invoke(input, "getChannel");
-        const mapMode = a.getAttribute(
-          "java.nio.channels.FileChannel$MapMode",
-          "READ_ONLY",
-        );
-        const buffer = invoke(
-          channel,
-          "map",
-          mapMode,
-          0,
-          release.artifact.bytes,
-        );
-        const digest = invoke(
-          "java.security.MessageDigest",
-          "getInstance",
-          "SHA-256",
-        );
-        invoke(digest, "update", buffer);
-        const number = a.newObject(
-          "java.math.BigInteger",
-          1,
-          invoke(digest, "digest"),
-        );
-        const actual = String(invoke(number, "toString", 16)).padStart(64, "0");
-        if (actual.toLowerCase() !== release.artifact.sha256.toLowerCase())
-          return false;
-      } finally {
-        invoke(input, "close");
+        const { a, invoke, manager } = native();
+        const local = plus.io.convertLocalFileSystemURL(path);
+        const file = a.newObject("java.io.File", local);
+        const actualBytes = positiveInteger(invoke(file, "length"));
+        if (actualBytes === null) rejectArtifact("APK_SIZE_UNREADABLE", "无法读取安装包大小，请重新下载");
+        if (actualBytes !== release.artifact.bytes)
+          rejectArtifact("APK_SIZE_MISMATCH", "安装包下载不完整，已禁止安装，请重新下载", { expectedBytes: release.artifact.bytes, actualBytes });
+        const input = a.newObject("java.io.FileInputStream", file);
+        try {
+          const channel = invoke(input, "getChannel");
+          const mapMode = nativeValue(a, "java.nio.channels.FileChannel$MapMode", "READ_ONLY",
+            value => value && typeof value === "object" ? value : null);
+          if (!mapMode) rejectArtifact("APK_HASH_UNREADABLE", "无法读取安装包校验数据，请重试");
+          const buffer = invoke(channel, "map", mapMode, 0, release.artifact.bytes);
+          const digest = invoke("java.security.MessageDigest", "getInstance", "SHA-256");
+          invoke(digest, "update", buffer);
+          const number = a.newObject("java.math.BigInteger", 1, invoke(digest, "digest"));
+          const hash = invoke(number, "toString", 16);
+          if (typeof hash !== "string" || !/^[a-f0-9]{1,64}$/i.test(hash))
+            rejectArtifact("APK_HASH_UNREADABLE", "无法读取安装包校验数据，请重试");
+          if (hash.padStart(64, "0").toLowerCase() !== release.artifact.sha256.toLowerCase())
+            rejectArtifact("APK_HASH_MISMATCH", "安装包内容校验不一致，已禁止安装，请重新下载");
+        } finally { invoke(input, "close"); }
+        const archive = invoke(manager, "getPackageArchiveInfo", local, 64);
+        if (!archive) rejectArtifact("APK_METADATA_UNREADABLE", "系统无法解析安装包，已禁止安装");
+        const packageName = nativeValue(a, archive, "packageName", value => typeof value === "string" && /^[A-Za-z0-9_.]+$/.test(value) ? value : null);
+        if (!packageName) rejectArtifact("APK_METADATA_UNREADABLE", "无法读取安装包信息，已禁止安装");
+        if (packageName !== identity.packageName) rejectArtifact("APK_PACKAGE_MISMATCH", "安装包不属于当前应用，已禁止安装");
+        const versionCode = packageVersionCode(a, archive);
+        if (versionCode === null) rejectArtifact("APK_VERSION_UNREADABLE", "无法读取安装包版本，已禁止安装");
+        if (versionCode !== release.versionCode)
+          rejectArtifact("APK_VERSION_MISMATCH", "安装包版本与更新信息不一致，已禁止安装", { expectedVersion: release.versionCode, actualVersion: versionCode });
+        const installed = invoke(manager, "getPackageInfo", identity.packageName, 64);
+        // Read into JS strings; Native.js arrays do not guarantee Array.prototype.every.
+        // Exact current certificates are still required; signing-key rotation is unsupported.
+        const signatures = (info: any) => nativeValue<string[]>(a, info, "signatures", value => {
+          if (!value || !Number.isInteger(value.length) || value.length < 1 || value.length > 16) return null;
+          const result: string[] = [];
+          for (let i = 0; i < value.length; i++) {
+            const hex = invoke(value[i], "toCharsString");
+            if (typeof hex !== "string" || hex.length > 65536 || !/^(?:[a-f0-9]{2})+$/i.test(hex)) return null;
+            result.push(hex.toLowerCase());
+          }
+          return result.sort();
+        });
+        const expected = signatures(installed), actual = signatures(archive);
+        if (!expected || !actual) rejectArtifact("APK_SIGNER_UNREADABLE", "无法读取安装包签名，已禁止安装");
+        if (expected.length !== actual.length || expected.some((value, i) => value !== actual[i]))
+          rejectArtifact("APK_SIGNER_MISMATCH", "安装包签名与当前应用不一致，已禁止安装");
+        logger.info("update", "artifact.verified", { versionCode });
+        return true;
+      } catch (cause) {
+        if (typeof (cause as any)?.code === "string" && (cause as any).code.startsWith("APK_")) throw cause;
+        logger.error("update", "artifact.verify.failed", { code: "APK_NATIVE_VERIFY_FAILED", error: cause });
+        throw Object.assign(new Error("安装包校验读取失败，请导出日志后重试"), { code: "APK_NATIVE_VERIFY_FAILED" });
       }
-      const archive = invoke(manager, "getPackageArchiveInfo", local, 64);
-      const installed = invoke(
-        manager,
-        "getPackageInfo",
-        identity.packageName,
-        64,
-      );
-      if (
-        !archive ||
-        String(a.getAttribute(archive, "packageName")) !==
-          identity.packageName ||
-        Number(a.getAttribute(archive, "versionCode")) !== release.versionCode
-      )
-        return false;
-      // Conservative same-signer policy. Signing-key rotation needs a dedicated adapter.
-      const expected = a.getAttribute(installed, "signatures"),
-        actual = a.getAttribute(archive, "signatures");
-      if (!expected?.length || expected.length !== actual?.length) return false;
-      return expected.every((signature: any, i: number) =>
-        invoke(signature, "equals", actual[i]),
-      );
     },
     async install(path) {
       const { a, invoke, manager } = native();

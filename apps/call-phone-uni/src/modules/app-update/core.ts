@@ -263,6 +263,7 @@ export function createUpdateService(
       release = state.release;
     set({ status: "installing", release });
     installing = (async () => {
+      let verified = false;
       try {
         if (!release || !identity || !(await platform.verify(file, release, identity))) {
           path = undefined;
@@ -270,6 +271,7 @@ export function createUpdateService(
           if (live(v)) fail("verify", new Error("安装前校验失败，已禁止安装"), false);
           return;
         }
+        verified = true;
         if (!live(v)) return;
         const result = await platform.install(file);
         if (!live(v)) return;
@@ -287,7 +289,11 @@ export function createUpdateService(
             new Error("系统未允许安装，请开启此来源安装权限后重试"),
           );
       } catch (e) {
-        if (live(v)) fail("install", e);
+        if (!verified) {
+          path = undefined;
+          try { await clean(file); } catch { /* The rejected file must never remain installable. */ }
+        }
+        if (live(v)) fail(verified ? "install" : "verify", e, verified);
       } finally {
         if (live(v)) installing = undefined;
       }
