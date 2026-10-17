@@ -5,7 +5,9 @@ import { receiveIncomingWorkFiles } from '@/services/incoming-work-files';
 import { testConnectivity } from "@/services/connectivity";
 import { resumeDeviceSession } from "@/services/session";
 import { onApplicationShow } from "@/modules/device-readiness";
-import { configureMobilePet, refreshMobilePet } from "@/modules/mobile-pet";
+import { configureMobilePet, refreshMobilePet, onPetAction, setMobilePetText } from "@/modules/mobile-pet";
+import { voiceBubble } from "@/modules/voice/transcript";
+import { openVoice, closeVoice, onVoiceTranscript } from "@/modules/voice";
 import { checkUpdates } from "@/services/updates";
 import { configureAssets } from "@/modules/assets";
 import assetManifest from "@/modules/assets/manifest.json";
@@ -17,6 +19,12 @@ import {
 configureMobilePet({ preferenceKey: "callphone.mobile-pet.enabled" });
 configureAssets({ baseUrl: import.meta.env.VITE_ASSET_BASE_URL || "", manifest: assetManifest });
 let appVisible = false;
+let pendingPetVoice = false;
+onVoiceTranscript(value => { void setMobilePetText(value ? voiceBubble(value) : ''); });
+onPetAction(() => {
+  if (appVisible) void openVoice();
+  else pendingPetVoice = true;
+});
 onError(reason => logger.error('runtime', 'uncaught', runtimeFailure(reason)));
 onUnhandledRejection(event => logger.error('runtime', 'unhandled-rejection', runtimeFailure(event.reason)));
 onLaunch(() => {
@@ -33,6 +41,7 @@ onLaunch(() => {
 onShow(() => {
   resumeLogging(); logger.info('app', 'shown');
   appVisible = true;
+  if (pendingPetVoice) { pendingPetVoice = false; void openVoice(); }
   void onApplicationShow();
   void refreshMobilePet();
   void resumeDeviceSession().then(() => { if (appVisible) { startForeground(); receiveIncomingWorkFiles(); } }).catch(() => {
@@ -42,7 +51,7 @@ onShow(() => {
   startForeground();
   void checkUpdates();
 });
-onHide(() => { logger.info('app', 'hidden'); pauseLogging(); appVisible = false; stopForeground(); });
+onHide(() => { closeVoice(); logger.info('app', 'hidden'); pauseLogging(); appVisible = false; stopForeground(); });
 </script>
 <style lang="scss">
 page {

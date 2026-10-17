@@ -49,7 +49,7 @@ export function createNativePetAdapter(getBridge: () => NativeBridge, appearance
     bridge().onOverlayEvent(value => {
       try {
         const event = JSON.parse(value) as PetEvent;
-        if (!disposed && ['closed', 'lost', 'error'].includes(event.type)) {
+        if (!disposed && ['closed', 'lost', 'error', 'voice'].includes(event.type)) {
           listeners.forEach(fn => { try { fn(event); } catch { /* Isolate subscribers. */ } });
         }
       } catch { /* Ignore malformed events; status polling independently verifies the window. */ }

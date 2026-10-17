@@ -1,0 +1,4 @@
+export function openVoice(url: string, callback: (event: string) => void) {
+  callback('error')
+}
+export function closeVoice() {}

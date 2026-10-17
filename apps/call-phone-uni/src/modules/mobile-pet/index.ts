@@ -22,3 +22,8 @@ export const openOverlaySettings = controller.openSettings;
 export const onPetChange = controller.onChange;
 export const isPetActive = controller.isActive;
 export const disposeMobilePet = controller.dispose;
+
+/** Optional host actions; the pet does not own the attached capability. */
+export function onPetAction(listener: (action: string) => void) {
+  return petAdapter.subscribe(event => { if (event.type === 'voice') listener(event.type); });
+}

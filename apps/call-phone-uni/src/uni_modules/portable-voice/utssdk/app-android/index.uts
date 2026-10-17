@@ -1,0 +1,8 @@
+import { UTSAndroid } from 'io.dcloud.uts'
+import { VoiceSurface } from 'dev.portablevoice'
+
+@UTSJS.keepAlive
+export function openVoice(url: string, callback: (event: string) => void) {
+  VoiceSurface.open(UTSAndroid.getUniActivity(), url, (event: string) => { callback(event) })
+}
+export function closeVoice() { VoiceSurface.close() }

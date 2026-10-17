@@ -591,8 +591,12 @@ object PetOverlayNative {
         val scroll = ScrollView(layout.context).apply { addView(content) }
         panel.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
         val footer = LinearLayout(layout.context)
-        footer.addView(text("打个招呼").apply {
-            isFocusable = true; setOnClickListener { closeActionMenu(); showBubble("我在呢，有什么可以帮你？") }
+        footer.addView(text("语音聊天").apply {
+            isFocusable = true; setOnClickListener {
+                closeActionMenu()
+                try { bringToFront(layout.context); event("voice") }
+                catch (_: Exception) { event("error", "OPEN_APP_FAILED", "请返回 App 开启语音") }
+            }
         }, LinearLayout.LayoutParams(0, dp(44), 1f))
         footer.addView(text("收起").apply { isFocusable = true; setOnClickListener { closeActionMenu() } }, LinearLayout.LayoutParams(0, dp(44), 1f))
         panel.addView(footer)
