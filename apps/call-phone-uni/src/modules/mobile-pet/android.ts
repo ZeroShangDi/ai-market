@@ -19,6 +19,6 @@ export const petAdapter = createNativePetAdapter(() => {
   const player = localSource('/static/mobile-pet/player.html');
   return {
     renderer: 'rgb-alpha-sbs-v1', playerPath: player.videoPath, playerAssetPath: player.assetPath,
-    actions: petActions.map(({ video, ...action }) => ({ ...action, ...localSource(video) })), sizeDp: 160,
+    actions: petActions.map(({ video, ...action }) => ({ ...action, ...localSource(video) })), sizeDp: 104,
   };
 });

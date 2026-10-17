@@ -20,5 +20,10 @@ fun main() {
     down(); check(gesture.accept(1, 150f, 100f, 2000) == PetGesture.NONE) // missing move event
     check(gesture.accept(1, 100f, 100f, 2100) == PetGesture.NONE) // stray up
     down(); check(gesture.accept(1, 100f, 100f, 1100) == PetGesture.TAP) // next gesture recovers
+    down(); check(gesture.takeHold()); check(!gesture.takeHold())
+    check(gesture.accept(1, 100f, 100f, 2000) == PetGesture.NONE) // menu opens while holding; release cannot close/reopen it
+    down(); gesture.accept(2, 102f, 102f, 1400); check(gesture.canHold())
+    check(gesture.takeHold()); check(gesture.accept(1, 102f, 102f, 2000) == PetGesture.NONE)
+    down(); gesture.accept(5, 100f, 100f, 1400); check(!gesture.takeHold()); check(!gesture.isDragging())
     println("PetGesture: hold/menu, drag, cancellation and multi-touch boundaries passed")
 }

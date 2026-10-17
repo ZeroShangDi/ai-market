@@ -1,9 +1,7 @@
-// Call Phone presentation policy. The reusable pet module only receives plain text.
+// Connection state remains in the host UI; the pet text channel is reserved for transient messages.
 import { setMobilePetText } from '@/modules/mobile-pet';
-let stale: ReturnType<typeof setTimeout> | undefined;
-export function reportPetConnection(connected: boolean, busy = false) {
-  if (stale) clearTimeout(stale);
-  stale = undefined;
-  void setMobilePetText(busy ? '通话中' : connected ? '已连接' : '未连接');
-  if (connected) stale = setTimeout(() => { void setMobilePetText('连接待确认'); }, 15000);
+let wasBusy = false;
+export function reportPetConnection(_connected: boolean, busy = false) {
+  if (busy && !wasBusy) void setMobilePetText('正在通话，稍后聊。');
+  wasBusy = busy;
 }

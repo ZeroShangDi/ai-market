@@ -2,7 +2,6 @@ package dev.portablepet.overlay
 
 import android.app.Activity
 import android.app.Application
-import android.animation.ValueAnimator
 import android.content.Context
 import android.content.Intent
 import android.content.ComponentCallbacks
@@ -28,7 +27,6 @@ import android.view.MotionEvent
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
-import android.widget.ProgressBar
 import android.widget.ScrollView
 import com.lzf.easyfloat.EasyFloat
 import com.lzf.easyfloat.enums.ShowPattern
@@ -60,8 +58,12 @@ object PetOverlayNative {
     private var height = 0
     private var requested = false
     private var statusText = ""
-    private var progress: ProgressBar? = null
-    private var holdAnimator: ValueAnimator? = null
+    private var bubble: LinearLayout? = null
+    private var bubbleDismiss: Runnable? = null
+    private var videoBounds = emptyMap<String, IntArray>()
+    private var currentBounds: IntArray? = null
+    private var videoScale = 1f
+    private var resumeAfterMenu = false
     private var holdReady: Runnable? = null
     private var returnToIdle: Runnable? = null
     private var menu: LinearLayout? = null
@@ -120,7 +122,7 @@ object PetOverlayNative {
                         val text = JSONObject(payload).optString("text", "")
                         require(text.length <= 80) { "INVALID_TEXT" }
                         statusText = text
-                        if (holdAnimator == null) label?.text = text
+                        showBubble(text)
                         safe(reply, result(true))
                     }
                     "settings" -> {
@@ -160,13 +162,31 @@ object PetOverlayNative {
         require(text.length <= 80) { "INVALID_TEXT" }
         val density = activity.resources.displayMetrics.density
         fun dp(value: Int) = (value * density).toInt().coerceAtLeast(1)
-        width = dp(size); height = dp(size + 27)
+        width = dp(size); height = dp(size)
         petSize = width; petHeight = height; statusText = text
         videoMode = options.optString("renderer") == "rgb-alpha-sbs-v1"
         configureActions(options)
+        currentBounds = videoBounds["idle"]
+        if (videoMode) currentBounds?.let {
+            videoScale = dp(size).toFloat() / it[3]
+            width = (it[2] * videoScale).toInt().coerceAtLeast(1)
+            height = dp(size); petSize = width; petHeight = height
+        }
         val drawable = if (videoMode) null else decodeAnimation(activity, options)
         if (drawable != null) actions.firstOrNull()?.let { clips[it.id] = drawable }
-        val layout = LinearLayout(activity).apply {
+        var consumePetTouch: ((MotionEvent) -> Unit)? = null
+        val layout = object : LinearLayout(activity) {
+            private var ownsTouch = false
+            override fun dispatchTouchEvent(event: MotionEvent): Boolean {
+                if (event.actionMasked == MotionEvent.ACTION_DOWN) ownsTouch = menu == null
+                if (ownsTouch) {
+                    consumePetTouch?.invoke(event)
+                    if (event.actionMasked == MotionEvent.ACTION_UP || event.actionMasked == MotionEvent.ACTION_CANCEL) ownsTouch = false
+                    return true
+                }
+                return super.dispatchTouchEvent(event)
+            }
+        }.apply {
             orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER
             isClickable = true // Consume DOWN so a stationary hold receives its matching UP.
             contentDescription = "桌宠，点击返回应用，长按选择表情和动作"
@@ -176,13 +196,19 @@ object PetOverlayNative {
             setImageDrawable(drawable)
         }
         val currentGeneration = generation
-        val videoPortrait = if (videoMode) PetVideoView(activity, options) { type, _, token, code ->
+        val videoPortrait = if (videoMode) PetVideoView(activity, options) { type, id, token, code ->
             if (currentGeneration == generation && (token == selection || token == 0L)) {
                 when (type) {
-                    "frame" -> if (pending != null && visible()) { clamp(); finish(true) }
+                    "frame" -> {
+                        applyVideoBounds(id)
+                        if (pending != null && visible()) { clamp(); finish(true); showBubble(statusText) }
+                    }
                     "ended" -> {
-                        val next = if (automaticVideo) randomVideoAction() else actions.firstOrNull()
-                        next?.let { playAction(it, true) }
+                        if (menu != null) resumeAfterMenu = true
+                        else {
+                            val next = if (automaticVideo) randomVideoAction() else actions.firstOrNull()
+                            next?.let { playAction(it, true) }
+                        }
                     }
                     "error" -> {
                         if (pending != null) {
@@ -197,20 +223,33 @@ object PetOverlayNative {
             }
         } else null
         video = videoPortrait
-        layout.addView(videoPortrait ?: portrait, LinearLayout.LayoutParams(width, dp(size)))
         val caption = TextView(activity).apply {
-            this.text = text; gravity = Gravity.CENTER; textSize = 10f
-            setTextColor(Color.WHITE)
-            maxLines = 1
-            background = GradientDrawable().apply { setColor(Color.rgb(22, 101, 52)); cornerRadius = dp(10).toFloat() }
+            gravity = Gravity.START; textSize = 13f; maxLines = 6
+            setTextColor(Color.rgb(48, 57, 80)); setPadding(dp(13), dp(10), dp(13), dp(10))
+            maxWidth = dp(208)
+            background = GradientDrawable().apply {
+                setColor(Color.WHITE); cornerRadius = dp(15).toFloat()
+                setStroke(dp(1), Color.rgb(225, 230, 242))
+            }
+            elevation = dp(3).toFloat()
         }
-        layout.addView(caption, LinearLayout.LayoutParams(width, dp(24)))
-        val holdProgress = ProgressBar(activity, null, android.R.attr.progressBarStyleHorizontal).apply {
-            max = 1000; visibility = View.INVISIBLE
-            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+        val speech = LinearLayout(activity).apply {
+            orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER
+            setPadding(dp(5), dp(5), dp(5), dp(6)); visibility = View.GONE
+            addView(caption, LinearLayout.LayoutParams(-2, -2))
+            addView(object : View(activity) {
+                private val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE }
+                override fun onDraw(canvas: android.graphics.Canvas) {
+                    val path = android.graphics.Path().apply {
+                        moveTo(0f, 0f); lineTo(width.toFloat(), 0f); lineTo(width * 0.5f, height.toFloat()); close()
+                    }
+                    canvas.drawPath(path, paint)
+                }
+            }, LinearLayout.LayoutParams(dp(12), dp(7)))
         }
-        layout.addView(holdProgress, LinearLayout.LayoutParams(width, dp(3)))
-        progress = holdProgress
+        bubble = speech
+        layout.addView(speech, LinearLayout.LayoutParams(-2, -2))
+        layout.addView(videoPortrait ?: portrait, LinearLayout.LayoutParams(petSize, petHeight))
         root = layout; image = portrait; label = caption; animation = drawable
         owner = WeakReference(activity); requested = true
         register(activity.application)
@@ -224,10 +263,41 @@ object PetOverlayNative {
         }.also { main.postDelayed(it, 5000) }
         val slop = ViewConfiguration.get(activity).scaledTouchSlop
         val gesture = PetGesture(slop.toFloat())
-        // Handle taps after EasyFloat has finished processing the current MotionEvent.
+        var downX = 0f; var downY = 0f; var windowX = 0; var windowY = 0
+        var dragging = false
+        consumePetTouch = { motion ->
+            if (menu == null) {
+                if (motion.actionMasked == MotionEvent.ACTION_DOWN) {
+                    downX = motion.rawX; downY = motion.rawY; dragging = false
+                    val position = IntArray(2); (layout.parent as? View)?.getLocationOnScreen(position)
+                    windowX = position[0]; windowY = position[1] - statusBarHeight(activity)
+                }
+                val action = gesture.accept(motion.actionMasked, motion.rawX, motion.rawY, motion.eventTime)
+                if (motion.actionMasked == MotionEvent.ACTION_DOWN) startHold(gesture)
+                if (!gesture.canHold()) cancelHold()
+                if (motion.actionMasked == MotionEvent.ACTION_MOVE && gesture.isDragging()) {
+                    dragging = true
+                    EasyFloat.updateFloat(TAG, windowX + (motion.rawX - downX).toInt(), windowY + (motion.rawY - downY).toInt())
+                }
+                if (motion.actionMasked == MotionEvent.ACTION_UP && dragging) {
+                    clamp()
+                    val position = IntArray(2); (layout.parent as? View)?.getLocationOnScreen(position)
+                    val screenWidth = activity.resources.displayMetrics.widthPixels
+                    EasyFloat.updateFloat(TAG, if (position[0] + width / 2 < screenWidth / 2) 0 else (screenWidth - width).coerceAtLeast(0),
+                        position[1] - statusBarHeight(activity))
+                }
+                if (action != PetGesture.NONE) main.post {
+                    if (current == generation) {
+                        if (action == PetGesture.MENU) openActionMenu()
+                        else try { bringToFront(activity.applicationContext) }
+                        catch (_: Exception) { event("error", "OPEN_APP_FAILED", "请点击桌面图标返回应用") }
+                    }
+                }
+            }
+        }
         EasyFloat.with(if (videoMode) VideoOverlayContext(activity) else activity)
             .setTag(TAG).setLayout(layout).setShowPattern(ShowPattern.ALL_TIME)
-            .setSidePattern(SidePattern.RESULT_HORIZONTAL).setDragEnable(true)
+            .setSidePattern(SidePattern.RESULT_HORIZONTAL).setDragEnable(false)
             .setAnimator(null).setImmersionStatusBar(false)
             .setLocation(dp(12), dp(160))
             .registerCallback {
@@ -243,21 +313,6 @@ object PetOverlayNative {
                         }
                     }
                 }
-                touchEvent { _, motion ->
-                    if (menu != null) return@touchEvent
-                    val action = gesture.accept(motion.actionMasked, motion.rawX, motion.rawY, motion.eventTime)
-                    if (motion.actionMasked == MotionEvent.ACTION_DOWN) startHold(gesture)
-                    if (!gesture.canHold()) cancelHold()
-                    if (action != PetGesture.NONE) main.post {
-                        if (current == generation) {
-                            if (action == PetGesture.MENU) openActionMenu()
-                            else try { bringToFront(activity.applicationContext) }
-                            catch (e: Exception) { event("error", "OPEN_APP_FAILED", e.message ?: "请点击桌面图标返回应用") }
-                        }
-                    }
-                }
-                drag { _, _ -> gesture.markDragged(); cancelHold() }
-                dragEnd { clamp() }
             }.show()
     }
 
@@ -318,6 +373,15 @@ object PetOverlayNative {
                 Action(id, label, group, 0, JSONArray(), repeats)
             }
             require(parsed.first().id == "idle" && parsed.map { it.id }.distinct().size == parsed.size) { "INVALID_IDLE_ACTION" }
+            videoBounds = (0 until source.length()).associate { i ->
+                val item = source.getJSONObject(i)
+                val bounds = item.getJSONArray("bounds")
+                require(bounds.length() == 4) { "INVALID_VIDEO_BOUNDS" }
+                val values = IntArray(4) { bounds.getInt(it) }
+                require(values[0] >= 0 && values[1] >= 0 && values[2] > 0 && values[3] > 0 &&
+                    values[0] + values[2] <= 640 && values[1] + values[3] <= 640) { "INVALID_VIDEO_BOUNDS" }
+                item.getString("id") to values
+            }
             videoWeights = (0 until source.length()).associate { i ->
                 val item = source.getJSONObject(i)
                 val weight = item.optDouble("randomWeight", 0.0)
@@ -361,25 +425,63 @@ object PetOverlayNative {
 
     private fun startHold(gesture: PetGesture) {
         cancelHold()
-        progress?.visibility = View.VISIBLE
-        holdAnimator = ValueAnimator.ofInt(0, 1000).apply {
-            duration = PetGesture.HOLD_MS
-            addUpdateListener { progress?.progress = it.animatedValue as Int }
-            start()
-        }
         holdReady = Runnable {
-            if (gesture.canHold() && visible()) {
-                label?.text = "松开选择动作"
+            if (visible() && gesture.takeHold()) {
                 root?.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                openActionMenu()
             }
         }.also { main.postDelayed(it, PetGesture.HOLD_MS) }
     }
 
     private fun cancelHold() {
-        holdAnimator?.cancel(); holdAnimator = null
         holdReady?.let { main.removeCallbacks(it) }; holdReady = null
-        progress?.visibility = View.INVISIBLE; progress?.progress = 0
-        label?.text = statusText
+
+    }
+
+    private fun reflowPet(nextWidth: Int = petSize, nextHeight: Int = petHeight, deltaX: Int = 0, deltaY: Int = 0) {
+        val layout = root ?: return
+        val portrait = video ?: image ?: return
+        val anchor = IntArray(2); portrait.getLocationOnScreen(anchor)
+        val mounted = layout.isAttachedToWindow
+        petSize = nextWidth; petHeight = nextHeight
+        portrait.layoutParams = LinearLayout.LayoutParams(petSize, petHeight)
+        val speech = bubble
+        var speechWidth = 0; var speechHeight = 0
+        if (speech != null && speech.visibility == View.VISIBLE) {
+            speech.measure(View.MeasureSpec.makeMeasureSpec((208 * layout.resources.displayMetrics.density).toInt(), View.MeasureSpec.AT_MOST),
+                View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED))
+            speechWidth = speech.measuredWidth; speechHeight = speech.measuredHeight
+        }
+        width = maxOf(petSize, speechWidth, menu?.layoutParams?.width ?: 0)
+        height = petHeight + speechHeight + (menu?.layoutParams?.height ?: 0)
+        layout.layoutParams?.let { it.width = width; it.height = height; layout.layoutParams = it }
+        if (mounted) EasyFloat.updateFloat(TAG, anchor[0] + deltaX - (width - petSize) / 2,
+            anchor[1] + deltaY - speechHeight - statusBarHeight(layout.context))
+        layout.requestLayout()
+        layout.post { if (root === layout) clamp() }
+    }
+
+    private fun applyVideoBounds(id: String) {
+        val next = videoBounds[id] ?: return
+        val previous = currentBounds ?: next
+        if (previous.contentEquals(next)) return
+        currentBounds = next
+        reflowPet((next[2] * videoScale).toInt().coerceAtLeast(1), (next[3] * videoScale).toInt().coerceAtLeast(1),
+            ((next[0] - previous[0]) * videoScale).toInt(), ((next[1] - previous[1]) * videoScale).toInt())
+    }
+
+    private fun showBubble(text: String) {
+        val speech = bubble ?: return
+        bubbleDismiss?.let { main.removeCallbacks(it) }; bubbleDismiss = null
+        label?.text = text
+        speech.visibility = if (text.isBlank()) View.GONE else View.VISIBLE
+        reflowPet()
+        if (text.isNotBlank()) {
+            val current = generation
+            bubbleDismiss = Runnable {
+                if (current == generation) { speech.visibility = View.GONE; reflowPet() }
+            }.also { main.postDelayed(it, 6500) }
+        }
     }
 
     private fun randomVideoAction(): Action? {
@@ -443,22 +545,22 @@ object PetOverlayNative {
         (layout.parent as? View)?.getLocationOnScreen(location)
         collapsedPosition = intArrayOf(location[0], location[1] - statusBarHeight(layout.context))
         val metrics = layout.resources.displayMetrics
-        width = dp(252).coerceAtMost(metrics.widthPixels)
-        val panelHeight = dp(292).coerceAtMost((metrics.heightPixels - petHeight - statusBarHeight(layout.context)).coerceAtLeast(dp(100)))
-        height = petHeight + panelHeight
+        val menuWidth = dp(252).coerceAtMost(metrics.widthPixels)
+        val panelHeight = dp(292).coerceAtMost((metrics.heightPixels - petHeight - (bubble?.takeIf { it.visibility == View.VISIBLE }?.measuredHeight ?: 0) - statusBarHeight(layout.context)).coerceAtLeast(dp(100)))
+
         val panel = LinearLayout(layout.context).apply {
             orientation = LinearLayout.VERTICAL; setPadding(dp(8), 0, dp(8), 0)
-            background = GradientDrawable().apply { setColor(Color.rgb(247, 250, 247)); cornerRadius = dp(16).toFloat() }
+            background = GradientDrawable().apply { setColor(Color.rgb(250, 251, 255)); cornerRadius = dp(16).toFloat() }
             elevation = dp(4).toFloat()
         }
         fun text(value: String, size: Float = 12f) = TextView(layout.context).apply {
             this.text = value; textSize = size; gravity = Gravity.CENTER
-            setTextColor(Color.rgb(35, 65, 46))
+            setTextColor(Color.rgb(48, 57, 80))
         }
         panel.addView(text("选择表情和动作", 14f), LinearLayout.LayoutParams(-1, dp(36)))
         val content = LinearLayout(layout.context).apply { orientation = LinearLayout.VERTICAL }
         fun button(value: String, click: () -> Unit) = text(value).apply {
-            background = GradientDrawable().apply { setColor(Color.rgb(225, 238, 228)); cornerRadius = dp(8).toFloat() }
+            background = GradientDrawable().apply { setColor(Color.rgb(240, 243, 250)); cornerRadius = dp(8).toFloat() }
             isFocusable = true
             setOnClickListener { click() }
         }
@@ -488,13 +590,18 @@ object PetOverlayNative {
         showGroups()
         val scroll = ScrollView(layout.context).apply { addView(content) }
         panel.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
-        panel.addView(text("收起").apply { isFocusable = true; setOnClickListener { closeActionMenu() } }, LinearLayout.LayoutParams(-1, dp(44)))
-        layout.setOnClickListener { closeActionMenu() }
-        menu = panel; layout.addView(panel, LinearLayout.LayoutParams(width, panelHeight))
-        image?.setOnClickListener { closeActionMenu() }
-        video?.setOnClickListener { closeActionMenu() }
+        val footer = LinearLayout(layout.context)
+        footer.addView(text("打个招呼").apply {
+            isFocusable = true; setOnClickListener { closeActionMenu(); showBubble("我在呢，有什么可以帮你？") }
+        }, LinearLayout.LayoutParams(0, dp(44), 1f))
+        footer.addView(text("收起").apply { isFocusable = true; setOnClickListener { closeActionMenu() } }, LinearLayout.LayoutParams(0, dp(44), 1f))
+        panel.addView(footer)
+
+        menu = panel; layout.addView(panel, LinearLayout.LayoutParams(menuWidth, panelHeight))
+
+
         EasyFloat.dragEnable(false, TAG)
-        EasyFloat.updateFloat(TAG, (location[0] - (width - petSize) / 2).coerceAtLeast(0), collapsedPosition!![1].coerceAtLeast(0))
+        reflowPet()
         layout.post { if (root === layout && menu === panel) clamp() }
     }
 
@@ -503,10 +610,11 @@ object PetOverlayNative {
         root?.removeView(panel); menu = null
         root?.setOnClickListener(null); root?.isClickable = true
         image?.apply { setOnClickListener(null); isClickable = false }
-        width = petSize; height = petHeight
-        EasyFloat.dragEnable(true, TAG)
+        reflowPet()
+        EasyFloat.dragEnable(false, TAG)
         collapsedPosition?.let { EasyFloat.updateFloat(TAG, it[0].coerceAtLeast(0), it[1].coerceAtLeast(0)) }
         collapsedPosition = null
+        if (resumeAfterMenu) { resumeAfterMenu = false; actions.firstOrNull()?.let { playAction(it, true) } }
         val layout = root
         layout?.post { if (root === layout) clamp() }
     }
@@ -543,6 +651,8 @@ object PetOverlayNative {
         menu?.let { root?.removeView(it) }; menu = null; collapsedPosition = null
         actions = emptyList(); sheets = emptyList(); clips.clear(); videoWeights = emptyMap()
         requested = false
+        bubbleDismiss?.let { main.removeCallbacks(it) }; bubbleDismiss = null
+        bubble = null; currentBounds = null; videoBounds = emptyMap(); resumeAfterMenu = false
         animation?.stop()
         video?.let { (it.parent as? ViewGroup)?.removeView(it); it.release() }; video = null
         timeout?.let { main.removeCallbacks(it) }; timeout = null
@@ -559,7 +669,7 @@ object PetOverlayNative {
         val removed = view?.isAttachedToWindow != true
         if (removed) {
             image?.setImageDrawable(null)
-            root = null; image = null; label = null; animation = null; progress = null
+            root = null; image = null; label = null; animation = null
             owner.clear(); unregister()
         } else event("error", "REMOVE_FAILED", "悬浮窗关闭失败，请返回应用重试")
         safe(previous, result(false, reason, "桌宠显示已取消"))

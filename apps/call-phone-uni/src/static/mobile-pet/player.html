@@ -7,7 +7,7 @@
 'use strict';
 (() => {
   const canvas = document.querySelector('canvas');
-  let gl, texture, video, raf = 0, serial = 0, timer, dead = false;
+  let gl, texture, cropUniform, video, raf = 0, serial = 0, timer, dead = false;
   let manifest = [], started = false;
   const signal = (type, id, token, code = '') => {
     if (!dead && window.PetHost) PetHost.signal(type, id, token, code);
@@ -22,7 +22,7 @@
     if (!gl) throw new Error('WEBGL_UNAVAILABLE');
     const program = gl.createProgram();
     gl.attachShader(program, shader(gl.VERTEX_SHADER, 'attribute vec2 p;varying vec2 uv;void main(){uv=vec2((p.x+1.0)*0.5,(1.0-p.y)*0.5);gl_Position=vec4(p,0.0,1.0);}'));
-    gl.attachShader(program, shader(gl.FRAGMENT_SHADER, 'precision mediump float;uniform sampler2D frame;varying vec2 uv;void main(){vec3 rgb=texture2D(frame,vec2(uv.x*0.5,uv.y)).rgb;float a=texture2D(frame,vec2(0.5+uv.x*0.5,uv.y)).r;a=a<0.02?0.0:(a>0.98?1.0:a);gl_FragColor=vec4(rgb,a);}'));
+    gl.attachShader(program, shader(gl.FRAGMENT_SHADER, 'precision mediump float;uniform sampler2D frame;uniform vec4 crop;varying vec2 uv;void main(){vec2 p=crop.xy+uv*crop.zw;vec3 rgb=texture2D(frame,vec2(p.x*0.5,p.y)).rgb;float a=texture2D(frame,vec2(0.5+p.x*0.5,p.y)).r;a=a<0.02?0.0:(a>0.98?1.0:a);gl_FragColor=vec4(rgb,a);}'));
     gl.linkProgram(program); if (!gl.getProgramParameter(program, gl.LINK_STATUS)) throw new Error('SHADER_LINK_FAILED');
     gl.useProgram(program);
     const buffer = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
@@ -31,6 +31,7 @@
     texture = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, texture);
     gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR); gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.LINEAR);
     gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE); gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);
+    cropUniform = gl.getUniformLocation(program,'crop');
     gl.uniform1i(gl.getUniformLocation(program,'frame'),0); gl.viewport(0,0,canvas.width,canvas.height);
   }
   function releaseVideo() {
@@ -66,6 +67,12 @@
         if (current.readyState >= 2 && current.videoWidth > 0 && frame !== lastFrame) {
           lastFrame = frame;
           try {
+            if (first) {
+              const bounds = action.bounds || [0,0,640,640];
+              canvas.width = bounds[2]; canvas.height = bounds[3];
+              gl.viewport(0,0,canvas.width,canvas.height);
+              gl.uniform4f(cropUniform,bounds[0]/640,bounds[1]/640,bounds[2]/640,bounds[3]/640);
+            }
             gl.bindTexture(gl.TEXTURE_2D, texture);
             gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,gl.RGBA,gl.UNSIGNED_BYTE,current);
             gl.drawArrays(gl.TRIANGLE_STRIP,0,4);

@@ -131,6 +131,9 @@ test('complete upstream DS video catalog preserves every animation and category'
   for (const action of petActions) {
     assert.match(action.id, /^[a-z][a-z0-9_-]{0,23}$/);
     assert.ok(action.group.length > 0);
+    assert.equal(action.bounds.length, 4);
+    const [left, top, width, height] = action.bounds;
+    assert.ok(left >= 0 && top >= 0 && width > 0 && height > 0 && left + width <= 640 && top + height <= 640);
     if (action.id !== 'idle') assert.equal(action.repeats, 1);
     const mp4 = fs.readFileSync(path.join(__dirname, '../src', action.video));
     assert.equal(mp4.subarray(4, 8).toString(), 'ftyp');

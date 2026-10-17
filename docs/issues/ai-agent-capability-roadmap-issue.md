@@ -379,6 +379,20 @@ aiso 使用 React，本项目移动端使用 Vue/uni-app。优先复用设计与
 
 待设计项包括：麦克风授权、连接/结束、识别与播报、用户打断、弱网重连、音频焦点与通话冲突；关闭语音、取消任务与等待用户三种行为；录音是否保存及保留期限；锁屏/后台/关键词唤醒的权限、耗电和系统限制。语音交办的任务、结果和确认回到相同助手上下文，延迟和识别质量在选定服务与设备后确定。不因终极目标包含“说句话”就默认启用全天候监听。
 
+#### 2026-10-17 桌宠气泡与语音接入评估
+
+本轮先实现按需显示的文字气泡，移除常驻连接状态条；现有 `setMobilePetText` 作为纯文字展示入口。语音仍处于调研，没有启用麦克风、持续监听或语音上传。
+
+第一阶段建议由用户主动触发单轮语音，走「ASR → 现有 Work 会话 → TTS」，任务上下文、回复、取消与授权沿用现有助手协议。仓库当前有流式文字回复，但没有完整 ASR/TTS、音频采集播放、打断控制可直接复用；需要原生音频适配与后端临时凭证，不应把服务密钥写进客户端。相比实时双向对话，单轮方案改造范围较小。粗略工程估算：服务账号与接口可用后，单轮联通原型约 3–5 个工作日；真机兼容和稳定性另需验证。此估算不构成排期承诺，也不包含自训练语音模型。
+
+可直接评估的官方资源：
+
+- [Android SpeechRecognizer](https://developer.android.com/reference/android/speech/SpeechRecognizer) 与 [TextToSpeech](https://developer.android.com/reference/android/speech/tts/TextToSpeech)：系统有接口，但要检查设备安装的识别/合成服务与中文能力，不能假定离线可用；官方明确 SpeechRecognizer 不适合持续识别。
+- [豆包端到端实时语音 Android SDK](https://docs.volcengine.com/docs/DoubaoVoice/End-to-endAndroidSDKinterfacedocumentation?lang=zh)：已有录音、播放和低延迟双向流式接入资源，可降低后期自建音频链路的工作量；仍需服务开通、鉴权与应用生命周期适配。
+- [阿里云实时多模交互 Android SDK](https://help.aliyun.com/zh/model-studio/multimodal-sdk-android/) 与 [Qwen-Omni 实时模型](https://help.aliyun.com/zh/model-studio/realtime)：也有现成接入方案，需先核实所选模型与 SDK 的匹配关系、地区与账号能力。
+
+实时全双工属于更大改造：除单轮链路外，还涉及回声消除、轮次判断、边听边说、用户打断、音频焦点、电话抢占、弱网重连与前后台恢复。初步按 1–2 周起的联通与联调量级评估，验收范围和设备差异可能继续增加投入。API 费用依供应商、模型、音频时长或音频 token 计费，待确定方案与预计用量后再核价；本轮不作金额承诺。DS 动作资源只负责外观，不能代替语音 SDK 或提供可商用的角色音色。
+
 ## 13. 当前代码复用与重做边界
 
 前期调研代码基线为 `19b06e47`，当时仅核对源码。后续本轮已实施原生 Work 并运行真实模型和契约验证，结果见第 0 节；仍未写入真实业务数据或部署。

@@ -1,6 +1,6 @@
 # 可迁移手机桌宠
 
-桌宠由本目录和 `src/uni_modules/portable-pet-overlay` 共同组成。Android 原生窗口使用 EasyFloat 2.0.4（Apache-2.0），通过 UTS 桥接，不再通过 Native.js 创建 UI。支持拖动、靠边停靠、点击返回宿主、按住至少 650ms 后松开展开动作菜单，以及本地视频透明合成动画。
+桌宠由本目录和 `src/uni_modules/portable-pet-overlay` 共同组成。Android 原生窗口使用 EasyFloat 2.0.4（Apache-2.0），通过 UTS 桥接，不再通过 Native.js 创建 UI。支持拖动、靠边停靠、点击返回宿主、按住至少 650ms 直接展开动作菜单，以及本地视频透明合成动画。
 
 ## 分层与独立迁移
 
@@ -15,7 +15,7 @@
 
 ## 宿主接口
 
-首次启动前调用 `configureMobilePet({ preferenceKey })`，原应用继续使用 `callphone.mobile-pet.enabled` 保留用户选择。App onShow 调用 `refreshMobilePet()`，设置开关调用并等待 `setMobilePetEnabled(boolean)`；状态文本使用 `setMobilePetText(string)`，最多 80 字符。`onPetChange` 返回取消订阅函数。
+首次启动前调用 `configureMobilePet({ preferenceKey })`，原应用继续使用 `callphone.mobile-pet.enabled` 保留用户选择。App onShow 调用 `refreshMobilePet()`，设置开关调用并等待 `setMobilePetEnabled(boolean)`；临时气泡使用 `setMobilePetText(string)`，最多 80 字符，约 6.5 秒后收起；空字符串立即隐藏，不常驻展示连接状态。`onPetChange` 返回取消订阅函数。
 
 `isPetActive()` 仅在开关开启、最近确认窗口已挂载、当前悬浮权限已允许时为 true。它不是后台服务存活或系统未遮挡窗口的保证。每 5 秒复查挂载和权限；系统暂停 JS 时复查也会暂停。`disposeMobilePet()` 为终止接口，清理定时器、监听与原生窗口；清理失败可重试 dispose，释放后不能重新开启同一控制器。
 
@@ -46,6 +46,6 @@
 
 `npm test` 覆盖状态机与桥接边界。`tests/native/PetGestureTest.kt` 与 `PetGesture.kt` 可一起用 Kotlin/JVM 编译运行，验证九组手势边界。原生代码还需与真实 EasyFloat AAR / Android SDK 编译匹配，最终以 HBuilderX 自定义基座和手机验证为准。
 
-小米 14 验收：授权前开启 → 授权返回 → 首次显示 → 连续开关 → 拖动后不误触 → 点击返回 → 长按松开展开动作菜单 → 旋转 → 撤销悬浮权限 → 恢复授权 → Home/锁屏/省电 → 清理进程再打开。检查状态文字、动画、无重复窗口和关闭后无残留。
+小米 14 验收：授权前开启 → 授权返回 → 首次显示 → 连续开关 → 拖动后不误触 → 点击返回 → 长按直接展开动作菜单 → 旋转 → 撤销悬浮权限 → 恢复授权 → Home/锁屏/省电 → 清理进程再打开。检查状态文字、动画、无重复窗口和关闭后无残留。
 
 当前使用 DS 鲸鱼娘完整 106 段视频动画，含「时节 → 舞狮头」，按原分类与权重播放。原精灵素材与配置备份在 `resources/mobile-pet/archive/elf-v3`；新素材来源和禁止商用的限制见 `resources/mobile-pet/dsh-source/README.md`。播放器采用 RGB/透明遮罩并排 MP4 + WebGL，保留原帧率；长按进入「分类 → 动作」。原生桥接升级为 API v2，需要重新原生构建；当前未发布或真机验证。

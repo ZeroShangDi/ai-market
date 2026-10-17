@@ -28,14 +28,16 @@ async function main() {
       await page.evaluate(({id,token}) => window.petPlayer.play(id, token), {id: action.id, token});
       await page.waitForFunction(token => window.events.some(e => e.type === 'frame' && e.token === token), token);
       const pixels = await page.evaluate(() => {
-        const gl = document.querySelector('canvas').getContext('webgl');
-        const data = new Uint8Array(640 * 640 * 4); gl.readPixels(0,0,640,640,gl.RGBA,gl.UNSIGNED_BYTE,data);
+        const canvas = document.querySelector('canvas'), gl = canvas.getContext('webgl');
+        const data = new Uint8Array(canvas.width * canvas.height * 4); gl.readPixels(0,0,canvas.width,canvas.height,gl.RGBA,gl.UNSIGNED_BYTE,data);
         let transparent = 0, opaque = 0, partial = 0;
         for (let i=3;i<data.length;i+=4) { if(data[i] === 0) transparent++; else if(data[i] === 255) opaque++; else partial++; }
-        return { transparent, opaque, partial, cornerAlpha: data[3] };
+        return { transparent, opaque, partial, cornerAlpha: data[3], width: canvas.width, height: canvas.height };
       });
       assert.equal(pixels.cornerAlpha, 0);
-      assert.ok(pixels.transparent > 200000 && pixels.opaque > 1000 && pixels.partial > 0, JSON.stringify(pixels));
+      assert.ok(pixels.transparent > 1000 && pixels.opaque > 1000 && pixels.partial > 0, JSON.stringify(pixels));
+      assert.equal(pixels.width, action.bounds[2]); assert.equal(pixels.height, action.bounds[3]);
+      if (action.id === 'idle') assert.ok(pixels.opaque / (pixels.width * pixels.height) > 0.35, 'idle viewport must fit the character');
       console.log(action.label, pixels);
     }
     await page.waitForFunction(() => window.events.some(e => e.type === 'ended' && e.token === 2), null, {timeout: 20000});

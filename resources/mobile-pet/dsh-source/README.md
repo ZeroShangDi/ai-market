@@ -13,7 +13,7 @@
 
 `clips.json` 记录原项目完整 106 段 WebM 动画，分类与原动作名称保留，包含「时节 → 舞狮头」。所有源文件均固定在上述上游版本，完整目录在 `upstream-tree.json`。
 
-执行 `python3 scripts/convert-dsh-video.py` 可从本目录重建视频与配置，需要 imageio-ffmpeg。转换显式使用 libvpx-vp9 解码透明通道，将 RGB 与灰度 alpha 并排打包为 H.264 MP4，保留原视频帧率和时长，完整保留原画面，仅上下补透明边以统一方形画布。播放器以 WebGL 合成透明输出，不依赖 WebM alpha 解码。
+执行 `python3 scripts/convert-dsh-video.py` 可从本目录重建视频与配置，需要 imageio-ffmpeg。转换显式使用 libvpx-vp9 解码透明通道，将 RGB 与灰度 alpha 并排打包为 H.264 MP4，保留原视频帧率和时长，完整保留原画面，仅上下补透明边以统一方形画布。`scripts/measure-dsh-video-bounds.py` 统计完整动作的透明边界并更新目录，播放器按 bounds 收紧显示，保留道具和统一角色比例；不需要重新编码视频。播放器以 WebGL 合成透明输出，不依赖 WebM alpha 解码。
 
 手机端只包含 MP4、播放器及署名；不打包源 WebM、PNG 图集或备份。当前全部视频约 105 MiB，按需播放，不预解码整套动画。随机播放沿用原配置的分类权重；点击回应、拖拽、工作状态、余额等事件动画可在菜单中手动点播，当前没有照搬 DSH 的业务事件。
 
