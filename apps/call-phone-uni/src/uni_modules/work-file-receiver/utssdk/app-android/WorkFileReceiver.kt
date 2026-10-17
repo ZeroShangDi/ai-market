@@ -10,6 +10,8 @@ import android.util.Base64
 import android.widget.Toast
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.ByteArrayOutputStream
+import java.io.InputStream
 import java.io.File
 import java.util.UUID
 
@@ -46,6 +48,24 @@ object WorkFileInbox {
             } }
             File(root, "$id.json").writeText(JSONObject().put("id", id).put("name", name).put("size", data.length()).toString())
         } catch (e: Exception) { data.delete(); File(root, "$id.json").delete(); throw e }
+    }
+    /** Keep mutable byte arrays entirely on the JVM; Native.js copies array arguments. */
+    @JvmStatic fun readBytes(source: InputStream): ByteArray {
+        val output = ByteArrayOutputStream()
+        val buffer = ByteArray(8192)
+        while (true) {
+            val count = source.read(buffer)
+            if (count < 0) break
+            require(output.size() + count <= LIMIT) { "文件最多 8 MiB" }
+            output.write(buffer, 0, count)
+        }
+        return output.toByteArray()
+    }
+    @JvmStatic fun readDocument(context: Context, value: String): String {
+        val uri = Uri.parse(value)
+        require(uri.scheme == "content") { "文件地址无效" }
+        val input = context.contentResolver.openInputStream(uri) ?: error("文件无法读取")
+        return input.use { Base64.encodeToString(readBytes(it), Base64.NO_WRAP) }
     }
     @JvmStatic @Synchronized fun pending(context: Context): String {
         clean(context); val result = JSONArray()

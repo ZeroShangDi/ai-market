@@ -44,6 +44,7 @@ export function decodeFile(value) {
   if (typeof value?.content_base64 !== 'string' || value.content_base64.length > Math.ceil(MAX_FILE / 3) * 4 || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(value.content_base64)) invalid('文件编码无效或超过 8 MiB');
   const bytes = Buffer.from(value.content_base64, 'base64');
   if (bytes.length > MAX_FILE) invalid('文件超过 8 MiB');
+  if (bytes.length && bytes.every(byte => byte === 0)) invalid('附件内容全部为空字节，可能读取异常，请更新应用后重新选择原始文件');
   return { name, bytes };
 }
 export async function uploadFile(root, value) {

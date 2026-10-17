@@ -1,3 +1,4 @@
+import { readDocument } from '@/uni_modules/work-file-receiver';
 import { chooseAndroidDocument } from './android-document-picker';
 import { request, downloadWorkArtifact } from '@/api/http';
 
@@ -23,20 +24,9 @@ export async function chooseWorkFile(accept = '', mime = '*/*', readContent = tr
   // #endif
   // #ifdef APP-PLUS
   if (typeof plus !== 'undefined' && plus.os.name === 'Android') return chooseAndroidDocument(readContent ? limit : Number.MAX_SAFE_INTEGER,
-    name => !!name && name.length <= 120 && !name.startsWith('.') && !/[/\\\x00-\x1f]/.test(name), (android, stream, name) => {
+    name => !!name && name.length <= 120 && !name.startsWith('.') && !/[/\\\x00-\x1f]/.test(name), (_android, uri, name) => {
       if (!readContent || !supports(name)) return { name, content_base64: '' };
-      const output = android.newObject('java.io.ByteArrayOutputStream');
-      try {
-        const byteClass = android.importClass('java.lang.Byte').TYPE;
-        const buffer = android.invoke('java.lang.reflect.Array', 'newInstance', byteClass, 8192);
-        let total = 0, count: number;
-        while ((count = Number(android.invoke(stream, 'read', buffer))) !== -1) {
-          if (!Number.isFinite(count) || count < 0) throw new Error('文件读取失败');
-          total += count; if (total > limit) throw new Error('文件最多 8 MiB');
-          android.invoke(output, 'write', buffer, 0, count);
-        }
-        return { name, content_base64: String(android.invoke('android.util.Base64', 'encodeToString', android.invoke(output, 'toByteArray'), 2)) };
-      } finally { android.invoke(output, 'close'); }
+      return { name, content_base64: readDocument(uri) };
     }, mime, name => !readContent || !supports(name));
   // #endif
   throw new Error('当前平台暂不支持原始文件选择');
@@ -71,4 +61,13 @@ export async function openWorkArtifact(session: string, artifact: { id: string; 
   }
   // #endif
   throw new Error('当前平台暂不支持文件下载');
+}
+
+/** Media uses the album picker; unsupported selections are never read or uploaded. */
+export function chooseWorkMedia(kind: 'image' | 'video'): Promise<boolean> {
+  return new Promise((resolve, reject) => {
+    const fail = (error: { errMsg?: string }) => /cancel/i.test(error.errMsg || '') ? resolve(false) : reject(new Error('相册暂不可用，请检查权限后重试'));
+    if (kind === 'image') uni.chooseImage({ count: 1, sourceType: ['album'], sizeType: ['original'], success: () => resolve(true), fail });
+    else uni.chooseVideo({ sourceType: ['album'], compressed: false, success: () => resolve(true), fail });
+  });
 }

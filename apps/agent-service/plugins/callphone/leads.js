@@ -11,6 +11,7 @@ const result = value => ({ content: [{ type: 'text', text: JSON.stringify(value)
 export function parseLeadCsv(text) {
   const rows = []; let row = [], field = '', quoted = false, closed = false;
   text = text.replace(/^\uFEFF/, '');
+  if (text.includes('\0')) fail('CSV 含空字节，可能是附件读取异常或 UTF-16 编码；请重新选择原始 UTF-8 CSV 文件');
   const cell = () => { row.push(field); field = ''; closed = false; if (row.length > 40) fail('最多支持 40 列'); };
   const record = () => { cell(); rows.push(row); row = []; if (rows.length > 501) fail('每次最多导入 500 行'); };
   for (let i = 0; i < text.length; i++) {

@@ -9,6 +9,7 @@
           <text v-if="message.delivery === 'queued' || message.delivery === 'cancelled' || message.delivery === 'interrupted'" class="work-note">{{ message.delivery === 'queued' ? '排队中' : message.delivery === 'interrupted' ? '执行已中断' : '已取消执行' }}</text>
           <text v-if="message.role === 'user'" class="work-text">{{ message.content }}</text>
           <TChatMarkdown v-else :content="message.content" @click="handleMarkdownClick" />
+          <view v-if="message.role === 'assistant' && message.content" class="reply-actions"><view role="button" aria-label="复制回复" @tap="copyReply(message.content)"><TIcon name="copy" size="16px" /></view></view>
           <scroll-view v-if="message.role === 'user' && message.resource_ids?.length" scroll-x class="sent-files"><view class="sent-files-track"><view v-for="file in messageResources(message.resource_ids)" :key="file.id" class="sent-file"><TIcon :name="fileAppearance(file.name).icon" :color="fileAppearance(file.name).color" size="16px" /><text>{{ file.name }}</text></view></view></scroll-view>
           <view v-if="message.role === 'user' && (workSteps(state.events, message.id).length || progressNotes(message.id).length)" class="process">
             <view class="process-heading" role="button" @tap="expanded[message.id] = !processOpen(message.id)"><TIcon :name="processOpen(message.id) ? 'chevron-down' : 'chevron-right'" size="14px" /><text>{{ processLabel(message.id) }}</text></view>
@@ -49,6 +50,7 @@
       </view>
     </scroll-view>
     <view v-if="!followLatest && busy" class="back-latest" @tap="followLatest = true; scrollTop += 100000">↓ 查看最新进展</view>
+    <WorkFilePicker :visible="filePickerOpen" :files="pickerFiles" @close="filePickerOpen = false" @browse="browseDocument" @select="pickExistingFile" />
     <view class="work-composer">
       <view v-if="interactions.length" class="interaction-dock"><text v-if="interactions.length > 1" class="work-note">还有 {{ interactions.length }} 项待处理</text><scroll-view scroll-y class="interaction-scroll">
         <view v-for="item in interactions.slice(0, 1)" :key="item.id" class="interaction" :class="{ red: item.input._risk === 3 }">
@@ -78,7 +80,7 @@
         <view class="add-heading"><text>添加</text><view role="button" aria-label="关闭添加面板" @tap="adding = false"><TIcon name="close" size="16px" /></view></view>
         <scroll-view class="add-scroll" scroll-y>
 
-          <view v-for="type in fileTypes" :key="type.label" class="add-menu-row" role="button" @tap="addFile(type.accept, type.mime, type.supported)"><TIcon :name="type.icon" :color="type.color" size="19px" /><text>{{ type.label }}</text><TIcon name="chevron-right" size="14px" color="#a1a1a6" /></view>
+          <view v-for="type in fileTypes" :key="type.label" class="add-menu-row" role="button" @tap="chooseCategory(type.accept, type.mime, type.supported)"><TIcon :name="type.icon" :color="type.color" size="19px" /><text>{{ type.label }}</text><TIcon name="chevron-right" size="14px" color="#a1a1a6" /></view>
           <text v-if="availableSkills.length" class="add-section-label">技能</text>
           <view v-for="item in availableSkills" :key="item.plugin.id + item.skill.name" class="add-menu-row capability-row" role="button" @tap="selectPlugin(item.plugin, item.skill.name)"><TIcon name="lightbulb" size="16px" color="#c89442" /><text>{{ item.skill.name }}</text><text class="capability-summary">{{ item.skill.description }}</text></view>
           <text v-if="availablePlugins.length" class="add-section-label">插件</text>
@@ -106,12 +108,14 @@
 import { incomingWorkFiles, readIncomingWorkFile, discardIncomingWorkFile } from '@/services/incoming-work-files';
 import { workReceipts, workSteps, workElapsed, approvalFields, workFileCategories, fileAppearance, acceptsWorkFile, supportedWorkFileExtensions } from '@/ui/work-presentation';
 import ComposerAttachments from './ComposerAttachments.vue';
+import WorkFilePicker, { type PickerFile } from './WorkFilePicker.vue';
+import { recentWorkFiles, rememberWorkFile, readRecentWorkFile } from '@/services/recent-work-files';
 import TIcon from '@tdesign/uniapp/icon/icon.vue';
 import { computed, onUnmounted, reactive, ref, watch } from 'vue';
 import TChatMarkdown from '@tdesign/uniapp-chat/chat-markdown/chat-markdown.vue';
 import TChatSender from '@tdesign/uniapp-chat/chat-sender/chat-sender.vue';
 import { createWorkController, type WorkInteraction, type WorkPlugin } from '@/services/work';
-import { chooseWorkFile, openWorkArtifact } from '@/services/work-files';
+import { chooseWorkFile, chooseWorkMedia, openWorkArtifact } from '@/services/work-files';
 import { mockEnabled } from '@/config';
 import { hasUnfinishedCall } from '@/services/calls';
 import { handleMarkdownClick, markdownHttpUrl } from '@/ui/chat-markdown';
@@ -120,7 +124,30 @@ import { toast } from '@/ui/format';
 const props = defineProps<{ conversationId: string; visible: boolean }>();
 const emit = defineEmits<{ (event: 'started'): void; (event: 'title', value: string): void }>();
 const controller = createWorkController(), state = controller.state;
-const pluginError = ref(''), picking = ref(false);
+const pluginError = ref(''), picking = ref(false), filePickerOpen = ref(false);
+const pickerFiles = computed<PickerFile[]>(() => [
+  ...recentWorkFiles.map(file => ({ ...file, source: file.received ? 'received' as const : 'recent' as const })),
+  ...(state.session?.resources || []).filter(file => !state.selected.includes(file.id)).map(file => ({ ...file, source: 'session' as const })),
+]);
+function browseDocument() { filePickerOpen.value = false; void addFile(supportedWorkFileExtensions); }
+async function pickExistingFile(file: PickerFile) {
+  if (busy.value || state.submitting || state.uploading || picking.value) return;
+  if (state.selected.length >= 20) return toast('每次最多关联 20 个文件');
+  filePickerOpen.value = false;
+  if (file.source === 'session') return selectResource(file.id);
+  try { await controller.upload(readRecentWorkFile(file.id)); } catch (e: any) { toast(e.message || '文件添加失败'); }
+}
+async function chooseCategory(accept: string, mime: string, supported: boolean) {
+  if (busy.value || state.submitting || state.uploading || picking.value) return;
+  adding.value = false;
+  if (supported) { filePickerOpen.value = true; return; }
+  picking.value = true;
+  try {
+    if (await chooseWorkMedia(mime.startsWith('image') ? 'image' : 'video')) uni.showModal({ title: '暂未支持的文件类型', content: '当前可处理文档和表格，图片、视频处理稍后开放。', showCancel: false });
+  } catch (e: any) { toast(e.message || '相册暂不可用'); }
+  finally { picking.value = false; }
+}
+function copyReply(content: string) { uni.setClipboardData({ data: content, fail: () => toast('复制失败，请重试') }); }
 function messageResources(ids: string[] = []) { return ids.map(id => state.session?.resources.find(file => file.id === id) || { id, name: '已关联文件' }); }
 const availablePlugins = computed(() => state.plugins.filter(p => p.installed && p.enabled && p.connected));
 const availableSkills = computed(() => availablePlugins.value.flatMap(plugin => plugin.skills.filter(s => s.enabled && s.standalone === true).map(skill => ({ plugin, skill }))));
@@ -141,7 +168,9 @@ async function importIncoming() {
     for (const file of [...pendingIncoming.value]) {
       if (props.conversationId !== conversation || state.selected.length >= 20) break;
       if (!importedIncoming.has(file.id)) {
-        const accepted = await controller.upload({ name: file.name, content_base64: readIncomingWorkFile(file.id) });
+        const upload = { name: file.name, content_base64: readIncomingWorkFile(file.id) };
+        const accepted = await controller.upload(upload);
+        if (accepted) rememberWorkFile(upload, true);
         if (!accepted) break;
         importedIncoming.add(file.id);
       }
@@ -222,7 +251,7 @@ async function addFile(accept: string, mime = '*/*', supported = true) {
       uni.showModal({ title: '暂未支持的文件类型', content: '当前可处理文档和表格，图片、视频处理稍后开放。', showCancel: false }); return;
     }
     if (state.session?.id !== id) return toast('会话已切换，请在当前会话重新选择文件');
-    await controller.upload(file);
+    if (await controller.upload(file)) rememberWorkFile(file);
   } catch (e: any) { toast(e.message || '文件添加失败'); }
   finally { picking.value = false; }
 }
@@ -262,6 +291,7 @@ async function download(file: { id: string; name: string }) { if (downloading.va
 .work-error { font-size: 12px; color: #ad6666; }.work-error text { display: block; padding: 8px 0; }.back-latest { align-self: center; background: #fff; border: 1px solid #e5e6e8; color: #868a93; border-radius: 20px; font-size: 11px; padding: 7px 12px; }
 :deep(.t-chat-sender) { margin: 0; border: 1px solid #dedfe3; border-radius: 22px; }:deep(.t-chat-markdown) { font-size: 14px; line-height: 1.8; }
 :deep(.t-chat-sender__textarea--control) { box-sizing: border-box; padding-bottom: 0; max-height: 160px; overflow-y: auto !important; }:deep(.t-chat-sender__textarea) { max-height: 160px; overflow: hidden; }:deep(.uni-textarea-wrapper) { max-height: 160px !important; overflow: hidden; }:deep(.uni-textarea-textarea) { max-height: 160px !important; overflow-y: auto !important; }.file-download { color: #5885ce; }.source-site :deep(.t-icon) { color: #659baf; }
+.reply-actions { display: flex; margin-top: 10px; color: #8b9099; }.reply-actions > view { padding: 8px; border-radius: 8px; }.reply-actions > view:active { background: #f0f2f5; }
 </style>
 
 <style scoped>
@@ -274,4 +304,5 @@ async function download(file: { id: string; name: string }) { if (downloading.va
 .plugin-chips > view { padding: 5px 9px; margin: 4px 0; border: 1px solid #dedfe2; border-radius: 7px; font-size: 12px; }
 .add-menu-row { height: auto; min-height: 36px; padding: 6px 8px; border-radius: 16px; }
 .add-menu-row:active { background: #eceef1; }
+.reply-actions { display: flex; margin-top: 10px; color: #8b9099; }.reply-actions > view { padding: 8px; border-radius: 8px; }.reply-actions > view:active { background: #f0f2f5; }
 </style>

@@ -259,3 +259,10 @@ test('Queue capacity and failed turn cancel pending work before completion is ob
   assert.equal(result.messages[0].delivery, 'failed');
   assert.equal(result.messages.filter(m => m.delivery === 'cancelled').length, 10);
 });
+
+test('All-zero corrupted uploads are rejected before entering the workspace', async t => {
+  const { store, s } = await fixture(t, async () => ({ success: true, text: '' }));
+  await assert.rejects(store.upload(actor, s.id, { name: 'leads.csv', content_base64: Buffer.alloc(128).toString('base64') }), /全部为空字节/);
+  assert.equal(store.get(actor, s.id).resources.length, 0);
+  assert.equal(store.get(actor, s.id).status, 'idle');
+});

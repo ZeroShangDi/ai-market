@@ -78,3 +78,8 @@ test('bridge rejects forged or incomplete receipts and surfaces revoked permissi
   const denied = createLeadBridge({ url: 'http://backend', token: 'x'.repeat(32), fetchImpl: async () => ({ ok: false, status: 403 }) });
   await assert.rejects(denied({ tenant: '1', user: '7' }, args, signal), /无权/);
 });
+
+test('CSV with NUL bytes has an attachment/encoding error rather than a misleading missing-header error', () => {
+  assert.throws(() => parseLeadCsv('\0'.repeat(20)), /CSV 含空字节/);
+  assert.throws(() => parseLeadCsv('name,phone\na\0,+12025550101'), /CSV 含空字节/);
+});

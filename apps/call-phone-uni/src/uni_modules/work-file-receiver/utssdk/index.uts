@@ -1,3 +1,4 @@
 export function pendingFiles(): string { return '[]' }
 export function readPendingFile(id: string): string { return '' }
 export function discardPendingFile(id: string): boolean { return false }
+export function readDocument(uri: string): string { throw new Error('当前平台不支持原生文档读取') }

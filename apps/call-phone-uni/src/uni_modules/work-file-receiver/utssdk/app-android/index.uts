@@ -15,3 +15,9 @@ export function discardPendingFile(id: string): boolean {
   if (context == null) return false
   return WorkFileInbox.discard(context, id)
 }
+
+export function readDocument(uri: string): string {
+  const context = UTSAndroid.getAppContext()
+  if (context == null) throw new Error('应用尚未就绪')
+  return WorkFileInbox.readDocument(context, uri)
+}

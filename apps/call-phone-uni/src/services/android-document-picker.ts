@@ -5,8 +5,8 @@ interface AndroidFileBridge {
   invoke(receiver: unknown, method: string, ...args: unknown[]): any;
   newObject(className: string, ...args: unknown[]): any;
 }
-/** Android Storage Access Framework; preserves raw bytes through the supplied reader. */
-export function chooseAndroidDocument<T>(maxSize: number, acceptName: (name: string) => boolean, read: (android: AndroidFileBridge, stream: any, name: string) => T, mime = '*/*', metadataOnly: boolean | ((name: string) => boolean) = false): Promise<T | undefined> {
+/** Android Storage Access Framework; passes only the URI string to the native reader; never bridge mutable byte arrays. */
+export function chooseAndroidDocument<T>(maxSize: number, acceptName: (name: string) => boolean, read: (android: AndroidFileBridge, uri: string, name: string) => T, mime = '*/*', metadataOnly: boolean | ((name: string) => boolean) = false): Promise<T | undefined> {
   if (choosing) return Promise.reject(new Error('文件选择器已打开，请先完成选择'));
   if (typeof plus === 'undefined' || !plus.android) return Promise.reject(new Error('系统文件选择器不可用'));
   choosing = true;
@@ -26,7 +26,7 @@ export function chooseAndroidDocument<T>(maxSize: number, acceptName: (name: str
       settled = true;
       restore();
       if (resultCode !== -1 || !result) { resolve(undefined); return; }
-      let cursor: any, stream: any;
+      let cursor: any;
       try {
         const uri = android.invoke(result, 'getData');
         if (!uri) throw new Error('文件地址无法读取，请重新选择');
@@ -40,14 +40,12 @@ export function chooseAndroidDocument<T>(maxSize: number, acceptName: (name: str
           if (sizeColumn >= 0 && !android.invoke(cursor, 'isNull', sizeColumn)) size = Number(android.invoke(cursor, 'getLong', sizeColumn));
         }
         if (!acceptName(name)) throw new Error('文件类型或名称无效');
-        if (typeof metadataOnly === 'function' ? metadataOnly(name) : metadataOnly) { resolve(read(android, null, name)); return; }
+        if (typeof metadataOnly === 'function' ? metadataOnly(name) : metadataOnly) { resolve(read(android, '', name)); return; }
         if (!Number.isFinite(size) || size < 0) throw new Error('无法确认文件大小，请保存到本机后重选');
         if (size > maxSize) throw new Error(`文件最多 ${maxSize / 1024} KiB，请缩减内容`);
-        stream = android.invoke(resolver, 'openInputStream', uri);
-        if (!stream) throw new Error('文件无法读取');
-        resolve(read(android, stream, name));
+        resolve(read(android, String(android.invoke(uri, 'toString')), name));
       } catch (reason) { reject(reason instanceof Error ? reason : new Error('文件读取失败')); }
-      finally { for (const handle of [stream, cursor]) if (handle) { try { android.invoke(handle, 'close'); } catch { /* Already closed by the reader. */ } } }
+      finally { for (const handle of [cursor]) if (handle) { try { android.invoke(handle, 'close'); } catch { /* Already closed by the reader. */ } } }
     }
     try {
       activity.onActivityResult = handler;
