@@ -2,8 +2,8 @@
     "name" : "统子哥",
     "appid" : "__UNI__D608100",
     "description" : "AI 办公私人助理与提效工具入口",
-    "versionName" : "1.0.16",
-    "versionCode" : 114,
+    "versionName" : "1.0.17",
+    "versionCode" : 115,
     "transformPx" : false,
     /* 5+App特有相关 */
     "app-plus" : {

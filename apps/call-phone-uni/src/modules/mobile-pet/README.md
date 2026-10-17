@@ -1,17 +1,17 @@
 # 可迁移手机桌宠
 
-桌宠由本目录和 `src/uni_modules/portable-pet-overlay` 共同组成。Android 原生窗口使用 EasyFloat 2.0.4（Apache-2.0），通过 UTS 桥接，不再通过 Native.js 创建 UI。支持拖动、靠边停靠、点击返回宿主、按住至少 650ms 后松开关闭，以及原生序列帧动画。
+桌宠由本目录和 `src/uni_modules/portable-pet-overlay` 共同组成。Android 原生窗口使用 EasyFloat 2.0.4（Apache-2.0），通过 UTS 桥接，不再通过 Native.js 创建 UI。支持拖动、靠边停靠、点击返回宿主、按住至少 650ms 后松开展开动作菜单，以及本地视频透明合成动画。
 
 ## 分层与独立迁移
 
 - `controller.ts`：独立于 Vue/uni 的状态机，注入平台适配器、存储和状态对象；负责开关、串行协调、过期请求、权限复查与释放。
 - `transport.ts`：原生协议校验、超时与事件订阅，无应用业务依赖。
-- `android.ts`：uni 平台和资源路径适配；`appearance.ts` / `assets` 提供角色与播放节奏。
+- `android.ts`：uni 平台和资源路径适配；`appearance.ts` / `static/mobile-pet` 提供完整动作目录与视频。
 - `index.ts`：Vue 响应式门面，只暴露桌宠能力。
 - `uni_modules/portable-pet-overlay`：独立原生插件，负责视图、动画、触摸、权限入口与窗口资源。
 - `services/pet-status.ts`：**宿主业务**负责把通话/连接状态转为文本，不属于桌宠模块。后台轮询策略也留在 `services/foreground.ts`。
 
-后续独立：复制 `modules/mobile-pet` 与 `uni_modules/portable-pet-overlay`，确保 `@` 指向新项目 `src`，配置匹配的 UTS 编译器；使用自己的存储键调用 `configureMobilePet`。原生包不含账号、电话、服务器地址或当前应用 ID。若使用非 Vue 宿主，可直接复用 controller/transport 并自行注入适配器。一个运行实例管理一个桌宠窗口，多角色并发不在当前协议范围内。
+后续独立：复制 `modules/mobile-pet`、`static/mobile-pet` 与 `uni_modules/portable-pet-overlay`，确保 `@` 指向新项目 `src`，配置匹配的 UTS 编译器；使用自己的存储键调用 `configureMobilePet`。原生包不含账号、电话、服务器地址或当前应用 ID。若使用非 Vue 宿主，可直接复用 controller/transport 并自行注入适配器。一个运行实例管理一个桌宠窗口，多角色并发不在当前协议范围内。
 
 ## 宿主接口
 
@@ -46,6 +46,6 @@
 
 `npm test` 覆盖状态机与桥接边界。`tests/native/PetGestureTest.kt` 与 `PetGesture.kt` 可一起用 Kotlin/JVM 编译运行，验证九组手势边界。原生代码还需与真实 EasyFloat AAR / Android SDK 编译匹配，最终以 HBuilderX 自定义基座和手机验证为准。
 
-小米 14 验收：授权前开启 → 授权返回 → 首次显示 → 连续开关 → 拖动后不误触 → 点击返回 → 长按松开关闭 → 旋转 → 撤销悬浮权限 → 恢复授权 → Home/锁屏/省电 → 清理进程再打开。检查状态文字、动画、无重复窗口和关闭后无残留。
+小米 14 验收：授权前开启 → 授权返回 → 首次显示 → 连续开关 → 拖动后不误触 → 点击返回 → 长按松开展开动作菜单 → 旋转 → 撤销悬浮权限 → 恢复授权 → Home/锁屏/省电 → 清理进程再打开。检查状态文字、动画、无重复窗口和关闭后无残留。
 
-素材为本模块原有透明三帧精灵图 `elf-sheet-v2.png`，播放节奏保持原样；`elf-animated.png` 为预览。
+当前使用 DS 鲸鱼娘完整 106 段视频动画，含「时节 → 舞狮头」，按原分类与权重播放。原精灵素材与配置备份在 `resources/mobile-pet/archive/elf-v3`；新素材来源和禁止商用的限制见 `resources/mobile-pet/dsh-source/README.md`。播放器采用 RGB/透明遮罩并排 MP4 + WebGL，保留原帧率；长按进入「分类 → 动作」。原生桥接升级为 API v2，需要重新原生构建；当前未发布或真机验证。

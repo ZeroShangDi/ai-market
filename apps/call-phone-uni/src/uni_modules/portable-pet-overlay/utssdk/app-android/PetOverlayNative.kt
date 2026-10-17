@@ -21,6 +21,7 @@ import android.provider.Settings
 import android.view.Gravity
 import android.view.WindowManager
 import android.view.View
+import android.view.ViewGroup
 import android.view.ViewConfiguration
 import android.view.HapticFeedbackConstants
 import android.view.MotionEvent
@@ -45,6 +46,10 @@ object PetOverlayNative {
     private var generation = 0L
     private var root: LinearLayout? = null
     private var image: ImageView? = null
+    private var video: PetVideoView? = null
+    private var videoMode = false
+    private var automaticVideo = true
+    private var videoWeights = emptyMap<String, Double>()
     private var label: TextView? = null
     private var animation: AnimationDrawable? = null
     private var owner = WeakReference<Activity>(null)
@@ -157,9 +162,10 @@ object PetOverlayNative {
         fun dp(value: Int) = (value * density).toInt().coerceAtLeast(1)
         width = dp(size); height = dp(size + 27)
         petSize = width; petHeight = height; statusText = text
+        videoMode = options.optString("renderer") == "rgb-alpha-sbs-v1"
         configureActions(options)
-        val drawable = decodeAnimation(activity, options)
-        actions.firstOrNull()?.let { clips[it.id] = drawable }
+        val drawable = if (videoMode) null else decodeAnimation(activity, options)
+        if (drawable != null) actions.firstOrNull()?.let { clips[it.id] = drawable }
         val layout = LinearLayout(activity).apply {
             orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER
             isClickable = true // Consume DOWN so a stationary hold receives its matching UP.
@@ -169,7 +175,29 @@ object PetOverlayNative {
             scaleType = ImageView.ScaleType.FIT_CENTER
             setImageDrawable(drawable)
         }
-        layout.addView(portrait, LinearLayout.LayoutParams(width, dp(size)))
+        val currentGeneration = generation
+        val videoPortrait = if (videoMode) PetVideoView(activity, options) { type, _, token, code ->
+            if (currentGeneration == generation && (token == selection || token == 0L)) {
+                when (type) {
+                    "frame" -> if (pending != null && visible()) { clamp(); finish(true) }
+                    "ended" -> {
+                        val next = if (automaticVideo) randomVideoAction() else actions.firstOrNull()
+                        next?.let { playAction(it, true) }
+                    }
+                    "error" -> {
+                        if (pending != null) {
+                            finish(false, code, "桌宠视频播放失败，请检查系统 WebView 后重试")
+                            remove(code)
+                        } else {
+                            remove(code)
+                            event("lost", code, "桌宠视频播放失败，请返回应用重新开启")
+                        }
+                    }
+                }
+            }
+        } else null
+        video = videoPortrait
+        layout.addView(videoPortrait ?: portrait, LinearLayout.LayoutParams(width, dp(size)))
         val caption = TextView(activity).apply {
             this.text = text; gravity = Gravity.CENTER; textSize = 10f
             setTextColor(Color.WHITE)
@@ -197,7 +225,7 @@ object PetOverlayNative {
         val slop = ViewConfiguration.get(activity).scaledTouchSlop
         val gesture = PetGesture(slop.toFloat())
         // Handle taps after EasyFloat has finished processing the current MotionEvent.
-        EasyFloat.with(activity)
+        EasyFloat.with(if (videoMode) VideoOverlayContext(activity) else activity)
             .setTag(TAG).setLayout(layout).setShowPattern(ShowPattern.ALL_TIME)
             .setSidePattern(SidePattern.RESULT_HORIZONTAL).setDragEnable(true)
             .setAnimator(null).setImmersionStatusBar(false)
@@ -207,7 +235,9 @@ object PetOverlayNative {
                     main.post {
                         if (current == generation && pending != null) {
                             if (created && visible()) {
-                                animation?.start(); clamp(); finish(true)
+                                if (video != null) {
+                                    actions.firstOrNull()?.let { playAction(it, true) }
+                                } else { animation?.start(); clamp(); finish(true) }
                             }
                             else { finish(false, "CREATE_FAILED", message ?: "悬浮窗创建失败"); remove("CREATE_FAILED") }
                         }
@@ -247,7 +277,7 @@ object PetOverlayNative {
         val rows = options.optInt("rows", 1)
         require(rows in 1..16) { "INVALID_ROWS" }
         val frames = options.getJSONArray("frames")
-        require(frames.length() in 1..64) { "INVALID_FRAMES" }
+        require(frames.length() in 1..256) { "INVALID_FRAMES" }
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         BitmapFactory.decodeFile(path, bounds)
         val useAsset = bounds.outWidth <= 0
@@ -267,7 +297,7 @@ object PetOverlayNative {
                 val drawable = cells.getOrPut(cell) {
                     val crop = Bitmap.createBitmap(bitmap, (cell % columns) * (bitmap.width / columns),
                         (cell / columns) * (bitmap.height / rows), bitmap.width / columns, bitmap.height / rows)
-                    BitmapDrawable(context.resources, Bitmap.createScaledBitmap(crop, 256, 256, true))
+                    BitmapDrawable(context.resources, Bitmap.createScaledBitmap(crop, 192, 192, true))
                 }
                 addFrame(drawable, duration)
             }
@@ -276,9 +306,29 @@ object PetOverlayNative {
     }
 
     private fun configureActions(options: JSONObject) {
+        if (videoMode) {
+            val source = options.getJSONArray("actions")
+            require(source.length() in 1..128) { "INVALID_VIDEO_ACTIONS" }
+            val parsed = (0 until source.length()).map { i ->
+                val value = source.getJSONObject(i)
+                val id = value.getString("id"); val label = value.getString("label"); val group = value.getString("group")
+                val repeats = value.getInt("repeats")
+                require(id.matches(Regex("[a-z][a-z0-9_-]{0,23}")) && label.length in 1..40 && group.length in 1..20 &&
+                    repeats in 0..6 && (id == "idle") == (repeats == 0)) { "INVALID_VIDEO_ACTION" }
+                Action(id, label, group, 0, JSONArray(), repeats)
+            }
+            require(parsed.first().id == "idle" && parsed.map { it.id }.distinct().size == parsed.size) { "INVALID_IDLE_ACTION" }
+            videoWeights = (0 until source.length()).associate { i ->
+                val item = source.getJSONObject(i)
+                val weight = item.optDouble("randomWeight", 0.0)
+                require(weight.isFinite() && weight in 0.0..100.0) { "INVALID_VIDEO_WEIGHT" }
+                item.getString("id") to weight
+            }
+            actions = parsed; sheets = emptyList(); return
+        }
         val sourceSheets = options.optJSONArray("sheets") ?: return
         val sourceActions = options.getJSONArray("actions")
-        require(sourceSheets.length() in 1..8 && sourceActions.length() in 1..24) { "INVALID_ACTIONS" }
+        require(sourceSheets.length() in 1..32 && sourceActions.length() in 1..32) { "INVALID_ACTIONS" }
         val parsedSheets = (0 until sourceSheets.length()).map { sourceSheets.getJSONObject(it) }
         val parsedActions = (0 until sourceActions.length()).map { i ->
             val value = sourceActions.getJSONObject(i)
@@ -289,7 +339,7 @@ object PetOverlayNative {
             val frames = value.getJSONArray("frames")
             val repeats = value.getInt("repeats")
             require(id.matches(Regex("[a-z][a-z0-9_-]{0,23}")) && label.length in 1..12 &&
-                group.length in 1..12 && sheet in parsedSheets.indices && frames.length() in 1..64 &&
+                group.length in 1..12 && sheet in parsedSheets.indices && frames.length() in 1..256 &&
                 repeats in 0..6) { "INVALID_ACTION" }
             val columns = parsedSheets[sheet].getInt("columns")
             val rows = parsedSheets[sheet].optInt("rows", 1)
@@ -332,11 +382,23 @@ object PetOverlayNative {
         label?.text = statusText
     }
 
-    private fun playAction(action: Action) {
+    private fun randomVideoAction(): Action? {
+        val total = videoWeights.values.sum()
+        if (total <= 0.0) return actions.firstOrNull()
+        var position = Math.random() * total
+        for (action in actions) {
+            position -= videoWeights[action.id] ?: 0.0
+            if (position < 0.0) return action
+        }
+        return actions.firstOrNull()
+    }
+
+    private fun playAction(action: Action, automatic: Boolean = false) {
         val context = root?.context?.applicationContext ?: return
         returnToIdle?.let { main.removeCallbacks(it) }; returnToIdle = null
         val current = generation
         val request = ++selection
+        if (videoMode) { automaticVideo = automatic; video?.play(action.id, request); return }
         fun applyClip(drawable: AnimationDrawable) {
             if (current != generation || request != selection || !visible()) return
             animation?.stop(); image?.setImageDrawable(drawable); animation = drawable
@@ -395,28 +457,42 @@ object PetOverlayNative {
         }
         panel.addView(text("选择表情和动作", 14f), LinearLayout.LayoutParams(-1, dp(36)))
         val content = LinearLayout(layout.context).apply { orientation = LinearLayout.VERTICAL }
-        for (group in actions.map { it.group }.distinct()) {
-            content.addView(text(group), LinearLayout.LayoutParams(-1, dp(24)))
-            for (row in actions.filter { it.group == group }.chunked(3)) {
+        fun button(value: String, click: () -> Unit) = text(value).apply {
+            background = GradientDrawable().apply { setColor(Color.rgb(225, 238, 228)); cornerRadius = dp(8).toFloat() }
+            isFocusable = true
+            setOnClickListener { click() }
+        }
+        fun rowButtons(values: List<Pair<String, () -> Unit>>) {
+            for (row in values.chunked(2)) {
                 val buttons = LinearLayout(layout.context)
-                for (action in row) {
-                    val button = text(action.label).apply {
-                        background = GradientDrawable().apply { setColor(Color.rgb(225, 238, 228)); cornerRadius = dp(8).toFloat() }
-                        contentDescription = "播放" + action.label + "动画"
-                        isFocusable = true
-                        setOnClickListener { closeActionMenu(); playAction(action) }
-                    }
-                    buttons.addView(button, LinearLayout.LayoutParams(0, dp(44), 1f).apply { setMargins(dp(3), dp(3), dp(3), dp(3)) })
-                }
-                repeat(3 - row.size) { buttons.addView(View(layout.context), LinearLayout.LayoutParams(0, dp(44), 1f)) }
+                for ((name, click) in row) buttons.addView(button(name, click),
+                    LinearLayout.LayoutParams(0, dp(52), 1f).apply { setMargins(dp(3), dp(3), dp(3), dp(3)) })
+                repeat(2 - row.size) { buttons.addView(View(layout.context), LinearLayout.LayoutParams(0, dp(52), 1f)) }
                 content.addView(buttons)
             }
         }
+        lateinit var showGroups: () -> Unit
+        fun showGroup(group: String) {
+            content.removeAllViews()
+            content.addView(button("返回分类 · " + group) { showGroups() }, LinearLayout.LayoutParams(-1, dp(40)))
+            rowButtons(actions.filter { it.group == group }.map { action ->
+                Pair(action.label, { closeActionMenu(); playAction(action) })
+            })
+        }
+        showGroups = {
+            content.removeAllViews()
+            rowButtons(actions.map { it.group }.distinct().map { group ->
+                Pair(group + "（" + actions.count { it.group == group } + "）", { showGroup(group) })
+            })
+        }
+        showGroups()
         val scroll = ScrollView(layout.context).apply { addView(content) }
         panel.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
         panel.addView(text("收起").apply { isFocusable = true; setOnClickListener { closeActionMenu() } }, LinearLayout.LayoutParams(-1, dp(44)))
+        layout.setOnClickListener { closeActionMenu() }
         menu = panel; layout.addView(panel, LinearLayout.LayoutParams(width, panelHeight))
         image?.setOnClickListener { closeActionMenu() }
+        video?.setOnClickListener { closeActionMenu() }
         EasyFloat.dragEnable(false, TAG)
         EasyFloat.updateFloat(TAG, (location[0] - (width - petSize) / 2).coerceAtLeast(0), collapsedPosition!![1].coerceAtLeast(0))
         layout.post { if (root === layout && menu === panel) clamp() }
@@ -425,6 +501,7 @@ object PetOverlayNative {
     private fun closeActionMenu() {
         val panel = menu ?: return
         root?.removeView(panel); menu = null
+        root?.setOnClickListener(null); root?.isClickable = true
         image?.apply { setOnClickListener(null); isClickable = false }
         width = petSize; height = petHeight
         EasyFloat.dragEnable(true, TAG)
@@ -464,9 +541,10 @@ object PetOverlayNative {
         cancelHold()
         returnToIdle?.let { main.removeCallbacks(it) }; returnToIdle = null
         menu?.let { root?.removeView(it) }; menu = null; collapsedPosition = null
-        actions = emptyList(); sheets = emptyList(); clips.clear()
+        actions = emptyList(); sheets = emptyList(); clips.clear(); videoWeights = emptyMap()
         requested = false
         animation?.stop()
+        video?.let { (it.parent as? ViewGroup)?.removeView(it); it.release() }; video = null
         timeout?.let { main.removeCallbacks(it) }; timeout = null
         val previous = pending; pending = null
         val view = root

@@ -1,8 +1,8 @@
 {
   "id": "portable-pet-overlay",
   "displayName": "Portable Pet Overlay",
-  "version": "1.0.0",
-  "description": "Independent Android sprite overlay backed by EasyFloat",
+  "version": "2.0.0",
+  "description": "Independent Android video and sprite overlay backed by EasyFloat",
   "engines": { "HBuilderX": "^4.81" },
   "dcloudext": { "type": "uts" },
   "uni_modules": {

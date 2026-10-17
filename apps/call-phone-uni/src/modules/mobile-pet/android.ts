@@ -1,6 +1,14 @@
 import * as native from '@/uni_modules/portable-pet-overlay';
 import { createNativePetAdapter } from './transport';
-import { elfSheets, elfFrames, elfActions } from './appearance';
+import { petActions } from './appearance';
+
+function localSource(path: string) {
+  const relative = path.replace(/^\//, '');
+  return {
+    videoPath: plus.io.convertLocalFileSystemURL('_www/' + relative),
+    assetPath: 'apps/' + plus.runtime.appid + '/www/' + relative,
+  };
+}
 
 export const petAdapter = createNativePetAdapter(() => {
   if (typeof plus === 'undefined' || uni.getSystemInfoSync().platform !== 'android') {
@@ -8,15 +16,9 @@ export const petAdapter = createNativePetAdapter(() => {
   }
   return native;
 }, () => {
-  const sheets = elfSheets.map(sheet => {
-    const relative = sheet.image.replace(/^\//, '');
-    return {
-      imagePath: plus.io.convertLocalFileSystemURL('_www/' + relative),
-      assetPath: 'apps/' + plus.runtime.appid + '/www/' + relative,
-      columns: sheet.columns, rows: sheet.rows,
-    };
-  });
+  const player = localSource('/static/mobile-pet/player.html');
   return {
-    ...sheets[0], frames: elfFrames, sheets, actions: elfActions, sizeDp: 104,
+    renderer: 'rgb-alpha-sbs-v1', playerPath: player.videoPath, playerAssetPath: player.assetPath,
+    actions: petActions.map(({ video, ...action }) => ({ ...action, ...localSource(video) })), sizeDp: 160,
   };
 });

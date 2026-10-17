@@ -14,7 +14,7 @@ export function createNativePetAdapter(getBridge: () => NativeBridge, appearance
   function bridge() {
     const value = getBridge();
     try {
-      if (!value || typeof value.getApiVersion !== 'function' || value.getApiVersion() !== 1) throw unavailable();
+      if (!value || typeof value.getApiVersion !== 'function' || value.getApiVersion() !== 2) throw unavailable();
     } catch { throw unavailable(); }
     return value;
   }

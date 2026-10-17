@@ -75,7 +75,7 @@ test('creation and cleanup failures are visible; storage failure preserves curre
 });
 function transport(run, extra = {}) {
   const timers = new Set(); let event;
-  const bridge = { getApiVersion: () => 1, getPermission: () => 1, execute: run, onOverlayEvent: fn => { event = fn; }, offOverlayEvent: () => {}, ...extra };
+  const bridge = { getApiVersion: () => 2, getPermission: () => 1, execute: run, onOverlayEvent: fn => { event = fn; }, offOverlayEvent: () => {}, ...extra };
   const { createNativePetAdapter } = load('transport', { setTimeout: fn => { timers.add(fn); return fn; }, clearTimeout: fn => timers.delete(fn) });
   return { adapter: createNativePetAdapter(() => bridge, () => ({ imagePath: '/test.png' })), timers, event: value => event?.(value) };
 }
@@ -115,33 +115,26 @@ test('bridge cannot report successful cleanup while a window remains visible', a
   const h = transport((_cmd, _payload, done) => done(result(true)));
   await assert.rejects(h.adapter.hide(), /尚未关闭/); await assert.rejects(h.adapter.dispose(), /尚未释放/);
 });
-test('elf action catalog references complete transparent atlas cells and returns non-idle clips to idle', () => {
-  const appearance = load('appearance', { require: name => ({ default: name }) });
-  const { elfSheets, elfActions, elfFrames } = appearance;
-  assert.equal(elfActions.length, 12);
-  assert.equal(new Set(elfActions.map(action => action.id)).size, 12);
-  assert.equal(elfActions[0].id, 'idle');
-  assert.equal(elfActions[0].repeats, 0);
-  assert.equal(elfFrames, elfActions[0].frames);
-  for (const sheet of elfSheets) {
-    const png = fs.readFileSync(path.join(__dirname, '../src/modules/mobile-pet', sheet.image));
-    assert.equal(png.subarray(1, 4).toString(), 'PNG');
-    assert.equal(png[25], 6, 'atlas must retain PNG RGBA transparency');
-    assert.equal(png.readUInt32BE(16) % sheet.columns, 0);
-    assert.equal(png.readUInt32BE(20) % sheet.rows, 0);
-    assert.equal(png.readUInt32BE(16) / sheet.columns, png.readUInt32BE(20) / sheet.rows);
+test('complete upstream DS video catalog preserves every animation and category', () => {
+  const { petActions } = load('appearance');
+  const source = path.join(__dirname, '../../../resources/mobile-pet/dsh-source');
+  const tree = JSON.parse(fs.readFileSync(path.join(source, 'upstream-tree.json'), 'utf8'));
+  const upstream = tree.tree.filter(item => item.path.startsWith('dsh-pet/assets/webm/') && item.path.endsWith('.webm'));
+  assert.equal(petActions.length, upstream.length);
+  assert.equal(new Set(petActions.map(action => action.id)).size, upstream.length);
+  assert.equal(petActions[0].id, 'idle');
+  assert.equal(petActions[0].repeats, 0);
+  assert.ok(Math.abs(petActions.reduce((sum, action) => sum + action.randomWeight, 0) - 100) < 0.0001);
+  assert.equal(petActions.find(action => action.group === '工作状态').randomWeight, 0);
+  const actual = new Set(petActions.map(action => action.label));
+  for (const item of upstream) assert.ok(actual.has(path.basename(item.path, '.webm')));
+  for (const action of petActions) {
+    assert.match(action.id, /^[a-z][a-z0-9_-]{0,23}$/);
+    assert.ok(action.group.length > 0);
+    if (action.id !== 'idle') assert.equal(action.repeats, 1);
+    const mp4 = fs.readFileSync(path.join(__dirname, '../src', action.video));
+    assert.equal(mp4.subarray(4, 8).toString(), 'ftyp');
+    assert.ok(mp4.indexOf(Buffer.from('moov')) < mp4.indexOf(Buffer.from('mdat')), 'metadata precedes video data for fast startup');
   }
-  const covered = new Set();
-  for (const action of elfActions) {
-    const sheet = elfSheets[action.sheet];
-    assert.ok(sheet);
-    assert.equal(action.frames.length, 6);
-    if (action.id !== 'idle') assert.equal(action.repeats, 3);
-    for (const frame of action.frames) {
-      assert.ok(frame.cell >= 0 && frame.cell < sheet.columns * sheet.rows);
-      assert.ok(frame.duration >= 50 && frame.duration <= 60000);
-      covered.add(action.sheet + ':' + frame.cell);
-    }
-  }
-  assert.equal(covered.size, 72, 'every generated frame is assigned to exactly one action');
+  assert.ok(petActions.some(action => action.group === '时节' && action.label === '舞狮头'));
 });

@@ -1,7 +1,7 @@
 import { UTSAndroid } from 'io.dcloud.uts'
 import { PetOverlayNative } from 'dev.portablepet.overlay'
 
-export function getApiVersion(): number { return 1 }
+export function getApiVersion(): number { return 2 }
 export function getPermission(): number {
   return PetOverlayNative.permission(UTSAndroid.getAppContext()).toDouble()
 }
