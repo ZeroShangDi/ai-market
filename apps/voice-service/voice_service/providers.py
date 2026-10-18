@@ -77,11 +77,11 @@ class StreamingPCMService(TTSService):
     Qwen model hosting is independent; voice cloning is configured on that server.
     Sentence aggregation and interruption cancellation belong to Pipecat.
     """
-    def __init__(self):
+    def __init__(self, voice: str | None = None):
         self.url = required("VOICE_TTS_URL").rstrip("/") + "/audio/speech"
         self.key = required("VOICE_TTS_API_KEY")
         self.model = required("VOICE_TTS_MODEL")
-        self.voice = os.environ.get("VOICE_TTS_VOICE", "default")
+        self.voice = voice or os.environ.get("VOICE_TTS_VOICE", "default")
         super().__init__(sample_rate=int(os.environ.get("VOICE_TTS_SAMPLE_RATE", "24000")),
                          settings=TTSSettings(model=self.model, voice=self.voice, language=Language.ZH))
 

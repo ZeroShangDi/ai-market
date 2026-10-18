@@ -49,7 +49,7 @@ public class MobileAiChatController {
             response.setHeader("Cache-Control", "no-store");
             response.setContentType("application/json;charset=UTF-8");
             new com.fasterxml.jackson.databind.ObjectMapper().writeValue(response.getOutputStream(),
-                java.util.Map.of("data", voice.issue(tenant.toString(), user.getId().toString(), deviceId)));
+                java.util.Map.of("data", voice.issue(tenant.toString(), user.getId().toString(), deviceId, body == null || body.isBlank() ? "" : new com.fasterxml.jackson.databind.ObjectMapper().readTree(body).path("character").asText(""))));
             return;
         }
         relay.forward(request.getMethod(),path,request.getParameter("cursor"),request.getParameter("limit"),body,

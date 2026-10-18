@@ -6,6 +6,11 @@
         <view role="button" aria-label="会话历史" @tap="openHistory"><TIcon name="history" size="21px" /></view>
       </view></template>
     </MobileHeader>
+    <view v-if="taskChat.notices.length" class="task-notices">
+      <view v-for="notice in taskChat.notices" :key="notice.id" class="task-notice" @tap="openTaskNotice(notice)">
+        <text>{{ notice.text }}</text><text class="task-notice-link">查看工作</text>
+      </view>
+    </view>
     <view class="chat-shell">
       <WorkConversation v-if="mode === 'work'" :conversation-id="state.activeId" :visible="pageVisible" @started="workStarted = true" @title="workTitle = $event">
         <template #mode><view v-if="!modeLocked" class="composer-mode"><ConversationModeToggle mode="work" :locked="false" @change="setMode" /></view></template>
@@ -93,6 +98,7 @@
 </template>
 
 <script setup lang="ts">
+import { taskChat, type TaskNotice } from '@/services/voice-work';
 import { incomingWorkFiles } from '@/services/incoming-work-files';
 import ConversationModeToggle from '@/components/ConversationModeToggle.vue';
 import { workInbox, refreshWorkInbox, workStatus } from '@/services/work';
@@ -211,6 +217,11 @@ async function retry(id: string) {
 }
 function copy(content: string) { uni.setClipboardData({ data: content, fail: () => toast('复制失败，请重试') }); }
 async function newChat() { await aiChat.newConversation(true); mode.value = 'chat'; workStarted.value = false; workTitle.value = ''; historyVisible.value = false; followLatest.value = true; scrollTop.value = 0; lastScrollTop = 0; uni.hideKeyboard(); }
+async function openTaskNotice(notice:TaskNotice) {
+  if (!notice.conversation || state.generating || state.recovering || hasUnfinishedCall()) { toast('请先结束当前回复或通话，再查看工作');return; }
+  await refreshWorkInbox(); await selectChat(notice.conversation);
+  taskChat.notices = taskChat.notices.filter(n=>n.id!==notice.id);
+}
 function openHistory() { uni.hideKeyboard(); historyVisible.value = true; if (!mockEnabled) void refreshWorkInbox(); }
 function includeWorkConversation(id: string) { const work = workInbox.items.find(w => w.conversation_id === id); if (work && !state.conversations.some(c => c.id === id)) state.conversations.push({ id, title: work.title, updated_at: work.updated_at, messages: [], draft: '' }); }
 async function selectChat(id: string) { includeWorkConversation(id); await aiChat.select(id); mode.value = summary.value?.started ? 'work' : 'chat'; historyVisible.value = false; void jumpToLatest(); }
@@ -234,7 +245,7 @@ resizeWebViewport();
 watch(automaticCall, call => { if (call) { historyVisible.value = false; stop(); uni.hideKeyboard(); } });
 onShow(() => {
   if (!ensureSession()) return;
-  pageVisible.value = true;
+  pageVisible.value = true; taskChat.visible = true;
   void Promise.all([aiChat.resume(), mockEnabled ? Promise.resolve() : refreshWorkInbox()]).then(async () => {
     if (!state.initialized || !state.visible) return;
     if (requestedConversation.value) {
@@ -248,14 +259,14 @@ onShow(() => {
     if (active.value?.messages.length) void jumpToLatest();
   });
 });
-onHide(() => { pageVisible.value = false; aiChat.suspend(); historyVisible.value = false; keyboardHeight.value = 0; clearTimeout(scrollTimer); });
+onHide(() => { pageVisible.value = false; taskChat.visible = false; aiChat.suspend(); historyVisible.value = false; keyboardHeight.value = 0; clearTimeout(scrollTimer); });
 onBackPress(() => {
   if (hasUnfinishedCall()) { toast('请先完成当前通话并保存结果'); return true; }
   if (historyVisible.value) { historyVisible.value = false; return true; }
   return false;
 });
 onUnload(() => {
-  pageVisible.value = false; clearTimeout(searchTimer);
+  pageVisible.value = false; taskChat.visible = false; clearTimeout(searchTimer);
   aiChat.suspend(); clearTimeout(scrollTimer);
   // #ifdef H5
   window.visualViewport?.removeEventListener('resize', resizeWebViewport);
@@ -265,6 +276,7 @@ onUnload(() => {
 </script>
 
 <style scoped lang="scss">
+.task-notices{max-height:180rpx;overflow:auto;padding:12rpx 24rpx;background:#eef4ff}.task-notice{font-size:24rpx;margin:8rpx 0}.task-notice-link{color:#294fdb;margin-left:12rpx}
 .chat-page {
   display: flex; flex-direction: column; overflow: hidden; background: #f7f8fc;
   --td-brand-color: #294fdb; --td-primary-color-7: #294fdb;

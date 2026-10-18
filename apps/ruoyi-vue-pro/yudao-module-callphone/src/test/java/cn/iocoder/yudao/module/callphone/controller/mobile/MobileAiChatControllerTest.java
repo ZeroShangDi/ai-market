@@ -39,7 +39,7 @@ class MobileAiChatControllerTest {
         ReflectionTestUtils.setField(controller,"devices",devices);
         ReflectionTestUtils.setField(controller,"relay",relay);
         ReflectionTestUtils.setField(controller,"voice",voice);
-        when(voice.issue("1","7","10")).thenReturn(java.util.Map.of("url","https://voice.test/","ticket","synthetic"));
+        when(voice.issue("1","7","10", "")).thenReturn(java.util.Map.of("url","https://voice.test/","ticket","synthetic"));
         var user=new LoginUser();user.setId(7L);user.setTenantId(1L);user.setUserType(2);user.setScopes(List.of("callphone-device:10"));
         var request=new MockHttpServletRequest("POST","/api/v1/mobile/ai/voice/session");
         request.addHeader("X-Callphone-Device-Id","10");request.addHeader("X-Callphone-Device-Key","device-key");
@@ -49,7 +49,7 @@ class MobileAiChatControllerTest {
             security.when(SecurityFrameworkUtils::getLoginUser).thenReturn(user);
             controller.forward(request,response,"{}");
             verify(devices).requireDevice(10L,"device-key");
-            verify(voice).issue("1","7","10");verifyNoInteractions(relay);
+            verify(voice).issue("1","7","10", "");verifyNoInteractions(relay);
             assertEquals("no-store",response.getHeader("Cache-Control"));
             assertTrue(response.getContentAsString().contains("synthetic"));
             user.setScopes(List.of("callphone-device:11"));

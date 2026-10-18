@@ -2,6 +2,7 @@ import { mkdir, readdir, readFile, writeFile, rename, realpath } from 'node:fs/p
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { ApiError, decimalId, uuid, text, digest, invalid } from './validation.js';
+import { characterContext } from './character.js';
 import { uploadFile, publishFile, snapshot } from './work-files.js';
 
 const conflict = message => new ApiError(409, 'WORK_CONFLICT', message);
@@ -168,7 +169,13 @@ export class WorkStore {
     const s = this.get(actor, id), key = uuid(input?.request_id), prompt = text(input?.prompt, 12000, '工作指令');
     const resourceIds = input.resource_ids || [];
     if (!Array.isArray(resourceIds) || resourceIds.length > 20 || resourceIds.some(id => !s.resources.some(r => r.id === id))) invalid('关联资源无效');
-    const hash = digest({ prompt, resourceIds });
+    const character = input.character || s.character || '';
+    const hash = digest({ prompt, resourceIds, ...(character ? {character} : {}) });
+    if (s.receipts[key]) { if (s.receipts[key] !== hash) throw conflict('相同请求标识不能用于不同指令'); return this.view(s); }
+    if (s.character && character !== s.character) throw conflict('已有任务不能切换角色，请新建任务');
+    const persona = s.persona || (character ? await characterContext(character) : '');
+    // Loading a role yields; recheck role binding and the receipt before admission.
+    if (s.character && character !== s.character) throw conflict('已有任务不能切换角色，请新建任务');
     if (s.receipts[key]) { if (s.receipts[key] !== hash) throw conflict('相同请求标识不能用于不同指令'); return this.view(s); }
     if (!this.accepting || s._pluginBusy || s.status === 'closed') throw conflict('工作会话忙碌或已关闭，请刷新');
     if (active(s) || this.runs.has(s.id)) {
@@ -181,6 +188,7 @@ export class WorkStore {
       return this.view(s);
     }
     if (this.runs.size >= this.concurrency) throw new ApiError(429, 'RATE_LIMITED', '工作执行较多，请稍后再试');
+    s.character = character; s.persona = persona;
     s.run_id = key; s.status = 'running'; s.receipts[key] = hash;
     s.messages.push({ id: key, role: 'user', content: prompt, resource_ids: resourceIds, delivery: 'running', created_at: new Date().toISOString() });
     const controller = new AbortController();
@@ -219,7 +227,7 @@ export class WorkStore {
         return { prompt: next.content, currentResourceIds: next.resource_ids || [],
           resources: s.resources.filter(r => s.messages.some(m => m.role === 'user' && !['queued', 'cancelled'].includes(m.delivery) && m.resource_ids?.includes(r.id))) };
       };
-      const result = await this.executor.run({ onTurnResult: finishTurn, validatePlugins: (tool, input) => this.requireCapabilities(actor, pluginIds, tool, input), ...this.paths(s), sessionId: s.sdk_session_id, pluginIds: (s.plugins || []).filter(p => p.added).map(p => p.id), prompt, identity: { tenant: s.tenant, user: s.user },
+      const result = await this.executor.run({ persona: s.persona || '', onTurnResult: finishTurn, validatePlugins: (tool, input) => this.requireCapabilities(actor, pluginIds, tool, input), ...this.paths(s), sessionId: s.sdk_session_id, pluginIds: (s.plugins || []).filter(p => p.added).map(p => p.id), prompt, identity: { tenant: s.tenant, user: s.user },
         currentResourceIds: ids, resources: s.resources.filter(r => s.messages.some(message => message.role === 'user' && !['queued', 'cancelled'].includes(message.delivery) && message.resource_ids?.includes(r.id))), signal: run.controller.signal,
         onSession: async id => { ensureCurrent(); if (s.sdk_session_id && s.sdk_session_id !== id) throw conflict('原生会话映射不一致，请核对后继续'); s.sdk_session_id = id; await this.save(s); },
         onEvent: (type, data) => { ensureCurrent(); return this.emit(s, type, data); },

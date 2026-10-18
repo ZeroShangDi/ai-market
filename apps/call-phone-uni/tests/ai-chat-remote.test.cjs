@@ -41,7 +41,7 @@ function remoteHarness() {
     chunk(text) { this.status = 200;this.readyState = 3;this.responseText += text;this.onprogress();this.onreadystatechange(); }
     finish(status, body) { this.status = status;this.readyState = 4; if (body !== undefined) this.responseText = body;this.onreadystatechange(); }
   }
-  const remote = load('ai-chat-remote', { '@/api/http': {
+  const remote = load('ai-chat-remote', { '@/modules/pet-packages': {activePackage:()=>undefined}, '@/api/http': {
     request: async (...args) => { writes.push(args);return { status: 'cancelled' }; },
     streamContext: () => ({ url: 'https://customer.test',headers: () => ({ Authorization: 'Bearer mobile-token', 'tenant-id': '7', 'X-Callphone-Device-Id': '10', 'X-Callphone-Device-Key': 'device-key' }),
       current() { if (!identity) throw Object.assign(new Error('会话已变更'), { code: 'AUTH_REQUIRED' }); },refresh: async () => { refreshes++; } }),

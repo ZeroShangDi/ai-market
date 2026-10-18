@@ -19,11 +19,13 @@ from pipecat.turns.user_turn_strategies import UserTurnStrategies
 from pipecat.turns.user_stop import SpeechTimeoutUserTurnStopStrategy
 
 from .agent import ask_agent
+from .work_bridge import WorkAnnouncements, proposal
+from .character import character_context
 from .providers import create_stt, StreamingPCMService, required
 
 SYSTEM = """你是统子哥的语音对话助手。用自然简短的中文交流，通常一到三句，不使用 Markdown。
 日常对话直接回答。需要搜索最新信息、核实事实或深入分析时调用 ask_agent，收到结果后再简明回答。
-ask_agent 当前只支持查询、搜索和分析，不支持创建文件或执行业务操作；这些任务请引导用户进入 Work。
+ask_agent 当前只支持查询、搜索和分析，不支持创建文件或执行业务操作；用户明确要求交办、后台处理或创建文件时调用 propose_task 提出任务，等待用户点击确认；未确认或只有提案时不能声称任务已创建。未提供 propose_task 时引导用户进入 Work。
 不要声称执行了未执行的操作。没有结果时不要编造。用户插话后以最新问题为准。
 """
 
@@ -41,12 +43,14 @@ class VoiceTranscripts(FrameProcessor):
 
 
 class VoiceStates(FrameProcessor):
-    def __init__(self, connection):
+    def __init__(self, connection, announcements=None):
         super().__init__()
         self.connection = connection
+        self.announcements = announcements
 
     async def process_frame(self, frame, direction):
         await super().process_frame(frame, direction)
+        if self.announcements: self.announcements.observe(frame)
         if isinstance(frame, ErrorFrame):
             self.connection.send_app_message({"type": "voice", "state": "error", "message": "语音服务暂时不可用，请结束后重试"})
         elif direction == FrameDirection.DOWNSTREAM:
@@ -64,24 +68,31 @@ class VoiceStates(FrameProcessor):
 
 def build_pipeline(connection, identity):
     transport = SmallWebRTCTransport(connection, TransportParams(audio_in_enabled=True, audio_out_enabled=True))
-    stt, tts = create_stt(), StreamingPCMService()
+    stt, tts = create_stt(), StreamingPCMService(voice=identity.get("character") or None)
     llm = OpenAILLMService(api_key=required("VOICE_LLM_API_KEY"), base_url=required("VOICE_LLM_URL"),
                            settings=OpenAILLMService.Settings(model=required("VOICE_LLM_MODEL"), max_tokens=600))
     tool = FunctionSchema(name="ask_agent", description="搜索最新信息、核实事实或深入分析；只读，不执行业务操作。",
                           properties={"question": {"type": "string", "description": "包含必要上下文的完整问题"}}, required=["question"])
     agent_enabled = bool(os.environ.get("AGENT_INTERNAL_TOKEN"))
-    context = LLMContext(messages=[{"role": "system", "content": SYSTEM}],
-                         tools=[tool] if agent_enabled else [])
+    task_tool = FunctionSchema(name="propose_task", description="提出独立后台任务，由用户在确认窗口点击创建后才执行。不要把普通查询自动创建任务。",
+        properties={"prompt":{"type":"string","description":"完整任务目标、必要上下文和期望交付物；不得编造权限"}}, required=["prompt"])
+    task_enabled = identity.get('host_task_bridge') is True
+    persona = character_context(identity)
+    context = LLMContext(messages=[{"role": "system", "content": SYSTEM + persona}],
+                         tools=([tool] if agent_enabled else []) + ([task_tool] if task_enabled else []))
+    announcements = WorkAnnouncements(connection, context)
 
     async def delegate(params: FunctionCallParams):
         question = params.arguments.get("question", "")
         if not isinstance(question, str) or not question.strip() or len(question) > 6000:
             await params.result_callback({"error": "问题格式不正确"})
             return
-        connection.send_app_message({"type": "voice", "state": "thinking"})
+        connection.send_app_message({"type": "voice", "state": "working"})
         # Supply only text turns. No audio, provider keys or credentials cross this boundary.
         turns = [{"role": m["role"], "content": m["content"]} for m in context.get_messages()
                  if m.get("role") in {"user", "assistant"} and isinstance(m.get("content"), str)][-12:]
+        if persona:
+            turns.insert(0, {"role": "system", "content": persona})
         turns.append({"role": "user", "content": question})
         try:
             answer = await ask_agent(turns, identity, url=os.environ.get("AGENT_SERVICE_URL", "http://127.0.0.1:48082"),
@@ -89,14 +100,31 @@ def build_pipeline(connection, identity):
             await params.result_callback({"answer": answer})
         except (RuntimeError, ValueError, httpx.HTTPError):
             await params.result_callback({"error": "复杂问题暂时未处理完成，请稍后重试"})
+        finally:
+            connection.send_app_message({"type": "voice", "state": "listening"})
+
+    async def propose(params: FunctionCallParams):
+        try:
+            value = proposal(params.arguments.get('prompt'))
+            connection.send_app_message(value)
+            await params.result_callback({'status':'awaiting_confirmation','message':'请用户在确认窗口点击创建任务；尚未创建。'})
+        except ValueError:
+            await params.result_callback({'error':'请提供完整任务目标'})
+
+    if task_enabled:
+        llm.register_function('propose_task', propose, cancel_on_interruption=True)
+
+    @transport.event_handler('on_app_message')
+    async def app_message(_transport, message, _sender):
+        if task_enabled: announcements.receive(message)
 
     if agent_enabled:
         llm.register_function("ask_agent", delegate, cancel_on_interruption=True, timeout_secs=175)
     aggregators = LLMContextAggregatorPair(context, user_params=LLMUserAggregatorParams(
         vad_analyzer=SileroVADAnalyzer(params=VADParams(start_secs=0.15, stop_secs=0.3)),
         user_turn_strategies=UserTurnStrategies(stop=[SpeechTimeoutUserTurnStopStrategy(user_speech_timeout=0.6)])))
-    worker = PipelineWorker(Pipeline([transport.input(), stt, VoiceTranscripts(connection), aggregators.user(), llm, tts,
-                                      transport.output(), VoiceStates(connection), aggregators.assistant()]),
+    worker = PipelineWorker(Pipeline([transport.input(), stt, VoiceTranscripts(connection), aggregators.user(), llm, announcements, tts,
+                                      transport.output(), VoiceStates(connection, announcements), aggregators.assistant()]),
                             enable_rtvi=False, params=PipelineParams(audio_in_sample_rate=16000, audio_out_sample_rate=24000))
 
     @transport.event_handler("on_client_disconnected")

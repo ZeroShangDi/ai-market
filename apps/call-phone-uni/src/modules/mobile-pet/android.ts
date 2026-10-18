@@ -1,6 +1,6 @@
 import * as native from '@/uni_modules/portable-pet-overlay';
 import { createNativePetAdapter } from './transport';
-import { petActions } from './appearance';
+import { activePackage } from '../pet-packages';
 
 function localSource(path: string) {
   const relative = path.replace(/^\//, '');
@@ -16,9 +16,11 @@ export const petAdapter = createNativePetAdapter(() => {
   }
   return native;
 }, () => {
+  const pack = activePackage();
+  if (!pack) throw new Error('请先在我的 → 语音中加载角色资源');
   const player = localSource('/static/mobile-pet/player.html');
   return {
     renderer: 'rgb-alpha-sbs-v1', playerPath: player.videoPath, playerAssetPath: player.assetPath,
-    actions: petActions.map(({ video, ...action }) => ({ ...action, ...localSource(video) })), sizeDp: 104,
+    actions: pack.actions.map(({ file, ...action }) => ({ ...action, videoPath: pack.directory + '/' + file, assetPath: 'pet-package/' + file })), sizeDp: 104,
   };
 });

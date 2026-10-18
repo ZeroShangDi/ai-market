@@ -66,3 +66,12 @@ VOICE_TEST_NETWORK=1 PYTHONPATH=. uv run python -m unittest discover -s tests -v
 最终用户转写经独立事件返回；回复在 TTS 开始播报该句时返回句子事件，Android 语音窗口通过受限桥接交给宿主，再由宿主调用现有宠物文字接口。气泡区分「你：」「她：」，超过 80 字符显示最近内容；关闭会话即清空，不写日志或历史。语音模块仍不直接依赖宠物实现。
 
 `smoke-mobile-session.py` 用合成设备检查已部署网关票据、HTTPS 证书、实际 WebRTC 和重放拒绝，结束撤销合成设备；`stability-tts.py` 连续合成并用 ASR 回测合成文本，只是生成漂移检查，不能替代用户听感验收。
+
+
+## 语音交办后台任务
+
+Android 宿主支持任务确认桥时，快速模型可调用 `propose_task` 提案；宿主显示原生确认窗口，用户点击创建后调用现有手机鉴权的 AI/Work API。独立只读 Agent 实例仍只处理查询，真正后台工作由已有 Work 服务执行，不在 Mac 语音进程内启动执行器。
+
+任务与音频会话生命周期独立。完成通知经宿主从 Work 拉取，语音数据通道只传递展示/播报内容，不承载任务执行或工具批准。语音等对话空档播报；结果持久化和未读仍由 Work 管理。Android 新桥接需要新 APK；普通浏览器没有此桥时不开放创建任务工具。已有语音空闲/总会话超时不变。
+
+部署还需启用现有 Work 服务，并使其 `AGENT_CHARACTER_ROOT` 与语音/AI 的角色目录版本一致。详见 [验证记录](../../docs/reviews/2026-10-18-voice-background-work.md)。

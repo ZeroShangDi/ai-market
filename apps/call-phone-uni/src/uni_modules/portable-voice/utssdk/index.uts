@@ -2,3 +2,8 @@ export function openVoice(url: string, callback: (event: string) => void) {
   callback('error')
 }
 export function closeVoice() {}
+
+export function openDesktopVoice(url: string, callback: (event: string) => void) { callback('error') }
+
+export function confirmTask(prompt: string, callback: (confirmed: boolean) => void) { callback(false) }
+export function deliverTask(payload: string) {}

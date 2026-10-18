@@ -13,6 +13,7 @@ for line in configuration.read_text().splitlines():
     if line and not line.lstrip().startswith('#') and '=' in line:
         key, value = line.split('=', 1)
         environment[key.strip()] = value.strip().strip('\"').strip("'")
+environment.setdefault('AI_CHARACTER_ROOT', str(root.parents[1] / '.local/app-update/release/public/pet-resources'))
 java = Path('/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home')
 if 'JAVA_HOME' not in environment and java.exists():
     environment['JAVA_HOME'] = str(java)

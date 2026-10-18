@@ -22,7 +22,7 @@ def main():
     clips=json.loads((SOURCE/'clips.json').read_text())
     with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool: bounds=dict(pool.map(measure,clips))
     (SOURCE/'bounds.json').write_text(json.dumps(bounds,indent=2)+'\n')
-    catalog=ROOT/'apps/call-phone-uni/src/static/mobile-pet/video/catalog.json'
+    catalog=ROOT/'resources/mobile-pet/packages/whale/catalog.json'
     data=json.loads(catalog.read_text())
     for action in data['actions']:action['bounds']=bounds[action['id']]
     catalog.write_text(json.dumps(data,ensure_ascii=False,indent=2)+'\n')

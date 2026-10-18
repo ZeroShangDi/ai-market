@@ -135,7 +135,7 @@ test('complete upstream DS video catalog preserves every animation and category'
     const [left, top, width, height] = action.bounds;
     assert.ok(left >= 0 && top >= 0 && width > 0 && height > 0 && left + width <= 640 && top + height <= 640);
     if (action.id !== 'idle') assert.equal(action.repeats, 1);
-    const mp4 = fs.readFileSync(path.join(__dirname, '../src', action.video));
+    const mp4 = fs.readFileSync(path.join(__dirname, '../../../resources/mobile-pet/packages/whale/video', path.basename(action.video)));
     assert.equal(mp4.subarray(4, 8).toString(), 'ftyp');
     assert.ok(mp4.indexOf(Buffer.from('moov')) < mp4.indexOf(Buffer.from('mdat')), 'metadata precedes video data for fast startup');
   }

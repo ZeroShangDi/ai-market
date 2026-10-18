@@ -5,14 +5,14 @@ const assert = require('node:assert/strict');
 const { chromium } = require('playwright');
 const root = path.resolve(__dirname, '../apps/call-phone-uni/src/static/mobile-pet');
 async function main() {
-  const catalog = JSON.parse(fs.readFileSync(path.join(root, 'video/catalog.json')));
+  const catalog = JSON.parse(fs.readFileSync(path.resolve(__dirname, '../resources/mobile-pet/packages/whale/catalog.json')));
   const browser = await chromium.launch({ headless: true, ...(process.env.PET_TEST_BROWSER ? { executablePath: process.env.PET_TEST_BROWSER } : {}) });
   try {
     const page = await browser.newPage({ viewport: { width: 320, height: 320 } });
     await page.route('https://pet.invalid/**', route => {
       const url = new URL(route.request().url());
       const action = catalog.actions.find(action => url.pathname === '/clip/' + action.id);
-      const file = url.pathname === '/player' ? path.join(root, 'player.html') : action ? path.join(root, 'video', action.id + '.mp4') : null;
+      const file = url.pathname === '/player' ? path.join(root, 'player.html') : action ? path.resolve(__dirname, '../resources/mobile-pet/packages/whale/video', action.id + '.mp4') : null;
       return route.fulfill(file ? { status: 200, contentType: action ? 'video/mp4' : 'text/html', body: fs.readFileSync(file) } : { status: 404, body: '' });
     });
     await page.addInitScript(() => {

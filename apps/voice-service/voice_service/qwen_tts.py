@@ -11,6 +11,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
 from .providers import required
+from .character import character_voice
 
 
 def create_tts_app(load_model=None):
@@ -76,6 +77,16 @@ def create_tts_app(load_model=None):
             raise HTTPException(503, "Model not ready")
         if not busy.acquire(blocking=False):
             raise HTTPException(429, "TTS busy")
+        options = {"voice": speaker} if mode == "preset" else {"ref_audio": str(reference), "ref_text": transcript}
+        profile = data.get("voice", "default")
+        if profile not in ("default", "current", os.environ.get("VOICE_TTS_VOICE", "default")):
+            try:
+                if mode != "clone":
+                    raise ValueError('Package cloning requires a Base model')
+                options = character_voice(profile)
+            except (ValueError, TypeError, KeyError, OSError):
+                busy.release()
+                raise HTTPException(400, "Voice profile unavailable") from None
         cancelled = threading.Event()
         chunks = queue.Queue(maxsize=8)
         done = threading.Event()
@@ -83,7 +94,6 @@ def create_tts_app(load_model=None):
 
         def generate():
             try:
-                options = {"voice": speaker} if mode == "preset" else {"ref_audio": str(reference), "ref_text": transcript}
                 results = model.generate(text=text, **options, lang_code="chinese", stream=True, verbose=False,
                                          temperature=0.7, top_p=0.9, repetition_penalty=1.1, max_tokens=768,
                                          streaming_interval=float(os.environ.get("QWEN_TTS_INTERVAL", "0.3")))

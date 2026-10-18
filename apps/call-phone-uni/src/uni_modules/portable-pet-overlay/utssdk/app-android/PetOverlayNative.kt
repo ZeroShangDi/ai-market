@@ -66,6 +66,8 @@ object PetOverlayNative {
     private var resumeAfterMenu = false
     private var holdReady: Runnable? = null
     private var returnToIdle: Runnable? = null
+    private var sceneAction: String? = null
+    private var voiceActive = false
     private var menu: LinearLayout? = null
     private var collapsedPosition: IntArray? = null
     private var petSize = 0
@@ -96,6 +98,7 @@ object PetOverlayNative {
     }
 
     @JvmStatic fun execute(context: Context?, activity: Activity?, command: String, payload: String, callback: (String) -> Unit) {
+        if (command.startsWith("package") && context != null) { PetPackages.execute(context, command, payload, callback); return }
         main.post {
             var completed = false
             val reply: (String) -> Unit = { value ->
@@ -116,6 +119,17 @@ object PetOverlayNative {
                             val code = if (permission(context) == 0) "PERMISSION_DENIED" else "WINDOW_LOST"
                             remove(code); event("lost", code, "悬浮窗已不可用，请返回应用重新检查")
                         }
+                        safe(reply, result(true))
+                    }
+                    "scene" -> {
+                        val id = JSONObject(payload).optString("id", "")
+                        sceneAction = id.takeIf { value -> actions.any { it.id == value } }
+                        val action = actions.firstOrNull { it.id == sceneAction } ?: actions.firstOrNull()
+                        if (menu == null && visible()) action?.let { playAction(it, sceneAction == null) }
+                        safe(reply, result(true))
+                    }
+                    "voiceState" -> {
+                        voiceActive = JSONObject(payload).optBoolean("active", false)
                         safe(reply, result(true))
                     }
                     "text" -> {
@@ -166,6 +180,7 @@ object PetOverlayNative {
         petSize = width; petHeight = height; statusText = text
         videoMode = options.optString("renderer") == "rgb-alpha-sbs-v1"
         configureActions(options)
+        sceneAction = null
         currentBounds = videoBounds["idle"]
         if (videoMode) currentBounds?.let {
             videoScale = dp(size).toFloat() / it[3]
@@ -206,7 +221,7 @@ object PetOverlayNative {
                     "ended" -> {
                         if (menu != null) resumeAfterMenu = true
                         else {
-                            val next = if (automaticVideo) randomVideoAction() else actions.firstOrNull()
+                            val next = actions.firstOrNull { it.id == sceneAction } ?: if (automaticVideo) randomVideoAction() else actions.firstOrNull()
                             next?.let { playAction(it, true) }
                         }
                     }
@@ -591,10 +606,10 @@ object PetOverlayNative {
         val scroll = ScrollView(layout.context).apply { addView(content) }
         panel.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
         val footer = LinearLayout(layout.context)
-        footer.addView(text("语音聊天").apply {
+        footer.addView(text(if (voiceActive) "关闭语音" else "语音聊天").apply {
             isFocusable = true; setOnClickListener {
                 closeActionMenu()
-                try { bringToFront(layout.context); event("voice") }
+                try { event("voice") }
                 catch (_: Exception) { event("error", "OPEN_APP_FAILED", "请返回 App 开启语音") }
             }
         }, LinearLayout.LayoutParams(0, dp(44), 1f))

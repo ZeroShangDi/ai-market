@@ -134,7 +134,7 @@ export function createWorkExecutor({ provider = process.env.AGENT_PROVIDER || 'a
     }
     const controller = new AbortController();
     const options = { cwd, env, model: selected.model, abortController: controller, maxTurns,
-      systemPrompt: { type: 'preset', preset: 'claude_code', append: '你是工作助理。先完成授权的工作，再简短汇报结果、产物和需要确认的事项。不要把过程说明当成功。仅访问当前工作区；文件原样处理，产物调用 work.present_files。业务操作只能使用受管理的 MCP，绝不寻找业务凭据。缺资料使用 AskUserQuestion。服务恢复后的未核实操作先检查结果，不得盲目重放。' },
+      systemPrompt: { type: 'preset', preset: 'claude_code', append: '你是工作助理。先完成授权的工作，再简短汇报结果、产物和需要确认的事项。不要把过程说明当成功。仅访问当前工作区；文件原样处理，产物调用 work.present_files。业务操作只能使用受管理的 MCP，绝不寻找业务凭据。缺资料使用 AskUserQuestion。服务恢复后的未核实操作先检查结果，不得盲目重放。' + (ctx.persona || '') },
       tools: { type: 'preset', preset: 'claude_code' }, settingSources: ['user'],
       // These features need a separate product lifecycle/identity model. Communication must use MCP.
       disallowedTools: ['CronCreate', 'CronDelete', 'CronList', 'ScheduleWakeup', 'Workflow', 'EnterWorktree', 'ExitWorktree', 'SendMessage', 'ReportFindings'],

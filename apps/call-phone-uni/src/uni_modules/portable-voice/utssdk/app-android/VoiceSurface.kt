@@ -1,45 +1,44 @@
 package dev.portablevoice
 
-import android.Manifest
 import android.app.Activity
 import android.app.Application
 import android.app.Dialog
-import android.content.pm.PackageManager
-import android.net.Uri
+import android.content.Intent
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
-import android.view.ViewGroup
-import android.webkit.JavascriptInterface
-import org.json.JSONObject
-import android.webkit.PermissionRequest
-import android.webkit.WebChromeClient
-import android.webkit.WebResourceRequest
-import android.webkit.WebView
-import android.webkit.WebViewClient
 import android.widget.LinearLayout
 import android.widget.Button
 
-/** Foreground only. The WebRTC page owns capture/playback; dismissal destroys its runtime. */
 object VoiceSurface {
     private val main = Handler(Looper.getMainLooper())
     private var dialog: Dialog? = null
-    @JvmStatic fun close() { main.post { dialog?.dismiss() } }
+    private var appBrowser: VoiceBrowser? = null
+    @JvmStatic fun deliver(payload: String) { main.post { (VoiceDesktopService.instance?.let { it.deliver(payload); true } ?: false).let { if (!it) appBrowser?.deliver(payload) } } }
+    private var desktopContext: android.content.Context? = null
+    private var desktopCallback: ((String) -> Unit)? = null
+    internal var pendingAddress: String? = null
+    internal fun send(value: String) { try { desktopCallback?.invoke(value) } catch (_: Exception) {} }
+    @JvmStatic fun close() { main.post {
+        pendingAddress = null
+        VoiceTasks.dismiss()
+        dialog?.dismiss()
+        desktopContext?.stopService(Intent(desktopContext, VoiceDesktopService::class.java))
+    } }
+    @JvmStatic fun openDesktop(activity: Activity?, address: String, callback: (String) -> Unit) {
+        main.post {
+            if (activity == null || pendingAddress != null || VoiceDesktopService.running || dialog != null) { callback("error"); return@post }
+            desktopContext = activity.applicationContext; desktopCallback = callback; pendingAddress = address
+            try {
+                activity.applicationContext.startActivity(Intent(activity, VoiceStartActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            } catch (_: Exception) { pendingAddress = null; send("error") }
+        }
+    }
     @JvmStatic fun open(activity: Activity?, address: String, callback: (String) -> Unit) {
         main.post {
-            if (activity == null || activity.isFinishing || dialog != null) { callback("error"); return@post }
-            val uri = Uri.parse(address)
-            if (uri.scheme != "https" || uri.host.isNullOrBlank() || uri.userInfo != null ||
-                activity.checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
-                callback("error"); return@post
-            }
-            fun sameOrigin(other: Uri): Boolean = other.scheme == uri.scheme && other.host == uri.host && other.port == uri.port
+            if (activity == null || activity.isFinishing || dialog != null || VoiceDesktopService.running) { callback("error"); return@post }
             val surface = Dialog(activity, android.R.style.Theme_Material_Light_NoActionBar)
-            val browser = WebView(activity)
-            val layout = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL }
-            val dismiss = Button(activity).apply { text = "关闭语音"; setOnClickListener { surface.dismiss() } }
-            layout.addView(dismiss, LinearLayout.LayoutParams(-1, -2))
-            layout.addView(browser, LinearLayout.LayoutParams(-1, 0, 1f))
+            var browser: VoiceBrowser? = null
             var released = false
             fun send(event: String) { try { callback(event) } catch (_: Exception) {} }
             val lifecycle = object : Application.ActivityLifecycleCallbacks {
@@ -53,52 +52,24 @@ object VoiceSurface {
             }
             surface.setOnDismissListener {
                 if (!released) {
-                    released = true
-                    if (dialog === surface) dialog = null
+                    released = true; if (dialog === surface) dialog = null
                     activity.application.unregisterActivityLifecycleCallbacks(lifecycle)
-                    browser.removeJavascriptInterface("PortableVoice")
-                    browser.stopLoading(); browser.loadUrl("about:blank")
-                    browser.onPause(); browser.removeAllViews(); browser.destroy()
-                    send("closed")
+                    VoiceTasks.dismiss(); appBrowser = null; browser?.close(); send("closed")
                 }
             }
             try {
-                browser.settings.apply {
-                    javaScriptEnabled = true; domStorageEnabled = false
-                    allowFileAccess = false; allowContentAccess = false
-                    mediaPlaybackRequiresUserGesture = false
-                    mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_NEVER_ALLOW
-                    setSupportMultipleWindows(false)
+                browser = VoiceBrowser(activity, address, false) { event ->
+                    if (event == "error") { send(event); surface.dismiss() }
+                    else if (event == "closed") surface.dismiss()
+                    else send(if (event == "connected") "opened" else event)
                 }
-                browser.addJavascriptInterface(object {
-                    @JavascriptInterface fun transcript(role: String, text: String) {
-                        if (role != "user" && role != "assistant" || text.length > 6000) return
-                        main.post { if (!released) send(JSONObject().put("type", "transcript").put("role", role).put("text", text).toString()) }
-                    }
-                }, "PortableVoice")
-                browser.webViewClient = object : WebViewClient() {
-                    override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean = !sameOrigin(request.url)
-                    override fun onReceivedError(view: WebView, request: WebResourceRequest, error: android.webkit.WebResourceError) {
-                        if (request.isForMainFrame && !released) { send("error"); surface.dismiss() }
-                    }
-                    override fun onReceivedHttpError(view: WebView, request: WebResourceRequest, response: android.webkit.WebResourceResponse) {
-                        if (request.isForMainFrame && response.statusCode >= 400 && !released) { send("error"); surface.dismiss() }
-                    }
-                    override fun onReceivedSslError(view: WebView, handler: android.webkit.SslErrorHandler, error: android.net.http.SslError) { handler.cancel(); send("error"); surface.dismiss() }
-                }
-                browser.webChromeClient = object : WebChromeClient() {
-                    override fun onPermissionRequest(request: PermissionRequest) {
-                        main.post {
-                            if (!released && sameOrigin(request.origin) && request.resources.contains(PermissionRequest.RESOURCE_AUDIO_CAPTURE))
-                                request.grant(arrayOf(PermissionRequest.RESOURCE_AUDIO_CAPTURE))
-                            else request.deny()
-                        }
-                    }
-                }
+                appBrowser = browser
+                val layout = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL }
+                layout.addView(Button(activity).apply { text = "关闭语音"; setOnClickListener { surface.dismiss() } }, LinearLayout.LayoutParams(-1, -2))
+                layout.addView(browser!!.view, LinearLayout.LayoutParams(-1, 0, 1f))
                 activity.application.registerActivityLifecycleCallbacks(lifecycle)
-                surface.setContentView(layout); dialog = surface; surface.show()
-                surface.window?.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
-                browser.loadUrl(address); send("opened")
+                surface.setContentView(layout); dialog = surface; surface.show(); surface.window?.setLayout(-1,-1)
+                send("opened")
             } catch (_: Exception) { send("error"); surface.dismiss() }
         }
     }

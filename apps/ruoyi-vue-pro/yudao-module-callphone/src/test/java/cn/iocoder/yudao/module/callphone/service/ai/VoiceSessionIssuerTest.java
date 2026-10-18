@@ -16,11 +16,12 @@ class VoiceSessionIssuerTest {
         String secret = "synthetic-voice-test-secret-00000000";
         ReflectionTestUtils.setField(issuer, "publicUrl", "https://voice.example.test");
         ReflectionTestUtils.setField(issuer, "secret", secret);
-        var result = issuer.issue("0", "7", "10");
+        var result = issuer.issue("0", "7", "10", "elf-1");
         assertEquals("https://voice.example.test/", result.get("url"));
         var parts = result.get("ticket").split("\\.");
         var claims = new ObjectMapper().readTree(Base64.getUrlDecoder().decode(parts[0]));
         assertEquals("voice", claims.get("aud").asText());
+        assertEquals("elf-1", claims.get("character").asText());
         assertEquals("7", claims.get("user").asText());
         assertEquals("10", claims.get("device").asText());
         assertTrue(claims.get("exp").asLong() > Instant.now().getEpochSecond());

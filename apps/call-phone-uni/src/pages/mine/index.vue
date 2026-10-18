@@ -34,6 +34,7 @@
           ><text>辅助功能</text><text>后台运行、悬浮窗与手机宠</text></view
         ><image class="arrow" src="/static/figma/2-112-imgFrame2.svg"
       /></view>
+      <view class="setting" @tap="open('voice')"><view class="setting-text"><text>语音</text><text>语音聊天与角色资源</text></view><text>›</text></view>
       <AppUpdateRow />
       <DiagnosticLogs />
       <view v-if="panel" class="panel-scrim" @tap="panel = ''"
@@ -71,13 +72,17 @@
             <view class="group-actions"><button class="secondary" :disabled="readiness.requesting" @tap="requestEssentialPermissions">申请基础权限</button><button class="secondary" @tap="checkNative">重新检查</button><button class="secondary" :disabled="testCallBusy" @tap="testCall">测试拨号 10086</button></view>
             <text class="group-note">拨号测试：{{ testCallStatus }}</text>
           </template>
+          <template v-if="panel === 'voice'">
+            <view class="group-actions"><button class="secondary" :disabled="voice.opening" @tap="openVoice()">{{ voice.opening ? '正在连接…' : '语音聊天' }}</button></view>
+            <PackageSettings />
+          </template>
           <template v-if="panel === 'device'">
             <view class="card-list">
               <ReadinessCard title="悬浮窗权限" :state="stateOf(mobilePet.permission)" :status="checkLabel(stateOf(mobilePet.permission), '已允许')" action="去开启" @action="overlaySettings" />
               <ReadinessCard title="电池优化" :state="readiness.battery" :status="checkLabel(readiness.battery, '已豁免')" action="去设置" description="此项仅检查电池优化；自启动、后台弹出界面需在手机系统中另行允许。" @action="systemSettings('battery')" />
               <ReadinessCard title="手机宠" :state="mobilePet.visible ? 'ready' : mobilePet.enabled ? 'action' : 'unknown'" :status="mobilePet.visible ? '已开启' : mobilePet.enabled ? mobilePet.permission === true ? '显示失败' : mobilePet.permission === null ? '权限无法确认' : '需开启权限' : '未开启'" :action="mobilePet.enabled ? '重试显示' : '开启'" :description="mobilePet.message || '可拖动，点击返回 App，长按可语音聊天或选择动作。'" @action="retryPet" />
             </view>
-            <view class="group-actions"><button class="secondary" :disabled="voice.opening" @tap="openVoice">{{ voice.opening ? '正在连接…' : '语音聊天' }}</button></view>
+            <view class="group-actions"><button class="secondary" :disabled="voice.opening" @tap="openVoice()">{{ voice.opening ? '正在连接…' : '语音聊天' }}</button></view>
             <text v-if="readiness.diagnostic" class="group-note">{{ readiness.diagnostic }}</text>
             <text class="group-note">{{ mobilePet.message || '这些功能可按需开启。后台运行效果取决于手机系统设置，清理进程后可能中断。' }}</text>
             <view class="group-actions"><button class="secondary" @tap="checkNative">重新检查</button><button v-if="mobilePet.enabled" class="secondary" @tap="togglePet">关闭手机宠</button></view>
@@ -89,6 +94,7 @@
 </template>
 <script setup lang="ts">
 import { voice, openVoice } from "@/modules/voice";
+import PackageSettings from "@/modules/pet-packages/PackageSettings.vue";
 import AppUpdateRow from "@/components/AppUpdateRow.vue";
 import DiagnosticLogs from "@/components/DiagnosticLogs.vue";
 import { computed, ref } from "vue";
@@ -133,7 +139,7 @@ const bootstrap = ref<Bootstrap>(),
   diagnostics = ref<Diagnostics>(),
   loading = ref(false),
   errorMessage = ref(""),
-  panel = ref<"account" | "device" | "diagnostics" | "">(""),
+  panel = ref<"account" | "device" | "diagnostics" | "voice" | "">(""),
   pairingDeviceName = ref("我的手机"),
   testCallStatus = ref("未测试"),
   testCallBusy = ref(false);
@@ -174,6 +180,7 @@ const panelTitle = computed(
     ({
       account: "账户与连接",
       device: "辅助功能",
+      voice: "语音",
       diagnostics: "拨号与录音",
       "": "",
     })[panel.value],
@@ -216,7 +223,7 @@ async function load() {
     if (session === getSessionVersion()) loading.value = false;
   }
 }
-async function open(value: "account" | "device" | "diagnostics") {
+async function open(value: "account" | "device" | "diagnostics" | "voice") {
   panel.value = value;
   serviceAddress.value = connectionSettings().serviceUrl;
   if (value === "account") void testConnectivity(false);

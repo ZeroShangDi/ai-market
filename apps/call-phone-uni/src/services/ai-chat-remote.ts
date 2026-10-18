@@ -1,3 +1,4 @@
+import { activePackage } from '@/modules/pet-packages';
 import { request, streamContext, unwrapResponse, error } from '@/api/http';
 import type { ChatRepository, ChatStreamEvent, ChatTransport } from '@/types/ai-chat';
 import { previewRequestId } from './ai-chat-preview';
@@ -33,6 +34,8 @@ export function xhr(): ProgressiveRequest {
 
 export const remoteChatTransport: ChatTransport = {
   stream(input, onEvent) {
+    const pack = activePackage();
+    const payload = { ...input, ...(pack ? { character: `${pack.id}-${pack.version}` } : {}) };
     const context = streamContext(input.request_id);
     let connection: ProgressiveRequest | undefined, stopped = false, terminal = false, refreshed = false;
     let sequence = 0, assistantId = input.retry_of || '', received = false;
@@ -102,7 +105,7 @@ export const remoteChatTransport: ChatTransport = {
         for (const [key, value] of Object.entries(context.headers())) current.setRequestHeader(key, value);
         current.setRequestHeader('Content-Type', 'application/json');
         current.setRequestHeader('Accept', 'text/event-stream');
-        activity(); current.send(JSON.stringify(input));
+        activity(); current.send(JSON.stringify(payload));
       } catch (reason) { fail(reason); }
     }
     open();

@@ -89,6 +89,7 @@ def create_app():
             connection = SmallWebRTCConnection()
             try:
                 await asyncio.wait_for(connection.initialize(sdp=data["sdp"], type="offer"), 15)
+                identity["host_task_bridge"] = data.get("host_task_bridge") is True
                 worker = build_pipeline(connection, identity)
             except Exception:
                 await connection.disconnect()

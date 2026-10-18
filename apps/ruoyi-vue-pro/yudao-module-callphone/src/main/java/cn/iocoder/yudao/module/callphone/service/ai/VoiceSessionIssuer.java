@@ -21,14 +21,19 @@ public class VoiceSessionIssuer {
     private final ObjectMapper json = new ObjectMapper();
 
     public Map<String, String> issue(String tenant, String user, String device) {
+        return issue(tenant, user, device, "");
+    }
+
+    public Map<String, String> issue(String tenant, String user, String device, String character) {
         try {
+            if (!character.isEmpty() && !character.matches("[a-z][a-z0-9-]{0,39}-[1-9][0-9]{0,8}")) throw new IllegalArgumentException();
             if (secret == null || secret.length() < 32) throw new IllegalStateException();
             URI uri = URI.create(publicUrl);
             if (!"https".equals(uri.getScheme()) || uri.getHost() == null || uri.getUserInfo() != null
                 || uri.getQuery() != null || uri.getFragment() != null
                 || !(uri.getPath().isEmpty() || "/".equals(uri.getPath()))) throw new IllegalStateException();
             var claims = Map.of("aud", "voice", "tenant", tenant, "user", user, "device", device,
-                "exp", Instant.now().getEpochSecond() + 60, "nonce", UUID.randomUUID().toString());
+                "exp", Instant.now().getEpochSecond() + 60, "nonce", UUID.randomUUID().toString(), "character", character);
             var base64 = Base64.getUrlEncoder().withoutPadding();
             String payload = base64.encodeToString(json.writeValueAsBytes(claims));
             Mac mac = Mac.getInstance("HmacSHA256");

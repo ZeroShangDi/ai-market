@@ -5,9 +5,9 @@ import { receiveIncomingWorkFiles } from '@/services/incoming-work-files';
 import { testConnectivity } from "@/services/connectivity";
 import { resumeDeviceSession } from "@/services/session";
 import { onApplicationShow } from "@/modules/device-readiness";
-import { configureMobilePet, refreshMobilePet, onPetAction, setMobilePetText } from "@/modules/mobile-pet";
+import { configureMobilePet, refreshMobilePet, onPetAction, setMobilePetText, setMobilePetEnabled, mobilePet, isPetActive } from "@/modules/mobile-pet";
 import { voiceBubble } from "@/modules/voice/transcript";
-import { openVoice, closeVoice, onVoiceTranscript } from "@/modules/voice";
+import { toggleDesktopVoice, closeVoice, closeAppVoice, onVoiceTranscript, voice, notifyVoiceTask } from "@/modules/voice";
 import { checkUpdates } from "@/services/updates";
 import { configureAssets } from "@/modules/assets";
 import assetManifest from "@/modules/assets/manifest.json";
@@ -16,19 +16,35 @@ import {
   stopForeground,
   networkRestored,
 } from "@/services/foreground";
+import { createWorkNotifier, taskChat, showTaskInChat } from '@/services/voice-work';
+const workNotifier = createWorkNotifier({
+  available: () => voice.active || taskChat.visible || isPetActive(),
+  deliver: async (notice, current) => {
+    if (voice.active && await notifyVoiceTask(notice)) return true;
+    if (!current()) return false;
+    if (showTaskInChat(notice)) return true;
+    if (!isPetActive()) return false;
+    await setMobilePetText(Array.from(notice.text).slice(0,76).join('')+'…');
+    return true;
+  },
+});
 configureMobilePet({ preferenceKey: "callphone.mobile-pet.enabled" });
 configureAssets({ baseUrl: import.meta.env.VITE_ASSET_BASE_URL || "", manifest: assetManifest });
-let appVisible = false;
-let pendingPetVoice = false;
-onVoiceTranscript(value => { void setMobilePetText(value ? voiceBubble(value) : ''); });
-onPetAction(() => {
-  if (appVisible) void openVoice();
-  else pendingPetVoice = true;
+import { restorePackages, onPackageChange, activePackage } from '@/modules/pet-packages';
+onPackageChange(async () => {
+  closeVoice();
+  const enabled = mobilePet.enabled;
+  if (enabled) await setMobilePetEnabled(false);
+  if (activePackage()) await setMobilePetEnabled(true);
 });
+let appVisible = false;
+onVoiceTranscript(value => { void setMobilePetText(value ? voiceBubble(value) : ''); });
+onPetAction(toggleDesktopVoice);
 onError(reason => logger.error('runtime', 'uncaught', runtimeFailure(reason)));
 onUnhandledRejection(event => logger.error('runtime', 'unhandled-rejection', runtimeFailure(event.reason)));
 onLaunch(() => {
   installRequestLogging();
+  workNotifier.start();
   void testConnectivity(false);
   logger.info('app', 'launched', diagnosticEnvironment());
   uni.onNetworkStatusChange((status) => {
@@ -41,9 +57,8 @@ onLaunch(() => {
 onShow(() => {
   resumeLogging(); logger.info('app', 'shown');
   appVisible = true;
-  if (pendingPetVoice) { pendingPetVoice = false; void openVoice(); }
   void onApplicationShow();
-  void refreshMobilePet();
+  void restorePackages().then(refreshMobilePet).catch(() => {});
   void resumeDeviceSession().then(() => { if (appVisible) { startForeground(); receiveIncomingWorkFiles(); } }).catch(() => {
     // Leave the workbench open; retry on the next foreground/network event.
     uni.showToast({ title: "暂未连接电脑，可扫码连接或稍后重试", icon: "none" });
@@ -51,7 +66,7 @@ onShow(() => {
   startForeground();
   void checkUpdates();
 });
-onHide(() => { closeVoice(); logger.info('app', 'hidden'); pauseLogging(); appVisible = false; stopForeground(); });
+onHide(() => { closeAppVoice(); logger.info('app', 'hidden'); pauseLogging(); appVisible = false; stopForeground(); });
 </script>
 <style lang="scss">
 page {

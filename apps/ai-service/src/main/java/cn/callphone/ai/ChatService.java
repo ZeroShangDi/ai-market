@@ -178,7 +178,7 @@ public final class ChatService {
         String content=input.content().strip();
         if(content.isEmpty() || content.codePointCount(0,content.length())>2000) throw invalid("单条问题需为 1–2000 字");
         owned(actor,input.conversation_id());
-        String fingerprint=cipher.fingerprint((Boolean.TRUE.equals(input.web_search())?"web-search\n":"")+input.conversation_id()+"\n"+Objects.toString(input.retry_of(),"")+"\n"+content);
+        String fingerprint=cipher.fingerprint((input.character()==null?"":"character="+input.character()+"\n")+(Boolean.TRUE.equals(input.web_search())?"web-search\n":"")+input.conversation_id()+"\n"+Objects.toString(input.retry_of(),"")+"\n"+content);
         RequestRow previous=requestRow(actor,key);
         if(previous!=null) {
             if(!previous.fingerprint().equals(fingerprint)) throw new Problem("IDEMPOTENCY_CONFLICT","同一请求标识不能用于不同内容",409);
@@ -197,7 +197,7 @@ public final class ChatService {
                 || !content.equals(latest.getLast().get("content"))) throw invalid("只能重新生成最后一轮回复");
             userId=id((String)latest.getLast().get("id")); assistantId=id(input.retry_of());
         } else { userId=nextId(); assistantId=nextId(); }
-        List<ModelGateway.Turn> turns=history(input.conversation_id(),input.retry_of(),content);
+        List<ModelGateway.Turn> turns=history(input.conversation_id(),input.retry_of(),content,CharacterContext.load(input.character()));
         rateLimit(actor);
         String time=now();
         RequestRow row=new RequestRow(actor,key,input.conversation_id(),Long.toString(userId),Long.toString(assistantId),fingerprint,"running",1,null);
@@ -223,9 +223,9 @@ public final class ChatService {
             .subscribeOn(Schedulers.boundedElastic()).publishOn(Schedulers.boundedElastic(),1).subscribe(chunk -> delta(run,chunk),failure -> fail(run,failure),() -> complete(run));
         return stream(run.events.asFlux());
     }
-    private List<ModelGateway.Turn> history(String conversation,String retry,String content) {
+    private List<ModelGateway.Turn> history(String conversation,String retry,String content,String character) {
         List<Map<String,Object>> rows=messageRows(conversation,retry==null?Long.MAX_VALUE:id(retry)-1,settings.maxContextMessages());
-        List<ModelGateway.Turn> result=new ArrayList<>(); int chars=content.length()+SYSTEM.length();
+        List<ModelGateway.Turn> result=new ArrayList<>(); int chars=content.length()+SYSTEM.length()+character.length();
         for(var message:rows) {
             String text=(String)message.get("content");
             if(text.isEmpty()) continue;
@@ -234,7 +234,7 @@ public final class ChatService {
         }
         Collections.reverse(result);
         while(!result.isEmpty() && !result.getFirst().role().equals("user")) result.removeFirst();
-        result.addFirst(new ModelGateway.Turn("system",SYSTEM)); result.add(new ModelGateway.Turn("user",content));
+        result.addFirst(new ModelGateway.Turn("system",SYSTEM+character)); result.add(new ModelGateway.Turn("user",content));
         return result;
     }
     private static Map<String,Object> event(RequestRow row,int sequence,String type) {

@@ -6,3 +6,15 @@ export function openVoice(url: string, callback: (event: string) => void) {
   VoiceSurface.open(UTSAndroid.getUniActivity(), url, (event: string) => { callback(event) })
 }
 export function closeVoice() { VoiceSurface.close() }
+
+@UTSJS.keepAlive
+export function openDesktopVoice(url: string, callback: (event: string) => void) {
+  VoiceSurface.openDesktop(UTSAndroid.getUniActivity(), url, (event: string) => { callback(event) })
+}
+
+import { VoiceTasks } from 'dev.portablevoice'
+@UTSJS.keepAlive
+export function confirmTask(prompt: string, callback: (confirmed: boolean) => void) {
+  VoiceTasks.confirm(UTSAndroid.getUniActivity(), prompt, (confirmed: boolean) => { callback(confirmed) })
+}
+export function deliverTask(payload: string) { VoiceSurface.deliver(payload) }
