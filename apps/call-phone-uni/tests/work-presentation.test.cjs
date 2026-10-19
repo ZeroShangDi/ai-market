@@ -98,3 +98,19 @@ test('plugin tool and authorization labels come from metadata without client bus
   assert.equal(fields[0].value, '执行示例'); assert.equal(fields[1].value, '2 项');
   assert.equal(workSteps([{ run_id: 'r', type: 'tool_call', data: { id: 'x', name: 'mcp__example__execute', label: '执行示例' } }], 'r')[0].label, '执行示例');
 });
+
+test('late tool arguments replace generic start labels without duplicating steps or exposing commands', () => {
+  const events = [
+    {run_id:'r',type:'tool_start',data:{id:'a',name:'Bash'}},
+    {run_id:'r',type:'audit',data:{tool_use_id:'a',tool:'Bash',input:{description:'汇总各月份销售额并生成对比表',command:'secret-command'}}},
+    {run_id:'r',type:'tool_result',data:{id:'a'}},
+    {run_id:'r',type:'tool_call',data:{id:'a',name:'Bash',input:{description:'汇总各月份销售额并生成对比表'}}},
+  ];
+  const steps = workSteps(events, 'r');
+  assert.equal(steps.length, 1);
+  assert.equal(steps[0].label, '汇总各月份销售额并生成对比表');
+  assert.equal(steps[0].status, '完成');
+  assert.equal(exportsObject.workAction({name:'Read',input:{file_path:'/private/data/销售.csv'}}), '读取文件：销售.csv');
+  assert.equal(exportsObject.workAction({name:'Bash',input:{command:'secret-command'}}).includes('secret-command'), false);
+  assert.equal(workSteps([...events.slice(0, 2), {run_id:'r',type:'error',data:{}}], 'r')[0].status, '已中断');
+});

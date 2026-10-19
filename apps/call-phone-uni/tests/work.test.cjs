@@ -37,7 +37,7 @@ test('Work detaches observation on leave, preserves execution and replays with d
   first.chunk({ sequence:1,type:'text_delta',data:{delta:'重复'},run_id:'r' });assert.equal(h.state.liveText,'你好');
   await h.attach('1',false);assert.equal(first.aborted,true);assert.equal(h.timers.size,0);assert.equal(h.calls.some(c => /interrupt|close/.test(c[1])),false);
   h.snapshot(session({status:'idle',messages:[{id:'r',role:'assistant',content:'完成'}],sequence:3}));
-  await h.attach('1',true);assert.equal(h.state.session.messages[0].content,'完成');assert.match(h.connections[1].url,/after=0$/);h.dispose();
+  await h.attach('1',true);assert.equal(h.state.session.messages[0].content,'完成');assert.match(h.connections[1].url,/after=1$/);h.dispose();
 });
 test('Work mutation uses the same key after an uncertain failure and identity reset discards late responses', async () => {
   let attempts=0;const requests=[];const late=deferred();
@@ -166,4 +166,26 @@ test('A previous turn result refresh never clears text streaming for the next qu
   late.resolve(session({ status: 'running', run_id: 'next', sequence: 2 }));
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(h.state.liveText, '正在继续'); h.dispose();
+});
+
+
+test('terminal refresh and reattachment retain all partial text events and resume without replay duplicates', async () => {
+  const h = harness(); await h.attach('1', true); const x = h.connections[0];
+  const events = [
+    {sequence:1,type:'text_delta',run_id:'r',data:{message_id:'a',delta:'已经写到这里'}},
+    {sequence:2,type:'artifact',run_id:'r',data:{id:'f',name:'report.pdf',size:12}},
+    {sequence:3,type:'error',run_id:'r',data:{message:'已中断'}},
+  ];
+  for (const event of events) x.chunk(event);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(h.state.events[0].data.delta, '已经写到这里');
+  const retained = JSON.stringify(h.state.events);
+  await h.attach('1', false); await h.attach('1', true);
+  assert.equal(JSON.stringify(h.state.events), retained);
+  assert.match(h.connections[1].url, /after=3$/);
+  h.connections[1].chunk(events[0]); assert.equal(JSON.stringify(h.state.events), retained);
+  h.dispose();
+  const fresh = harness(); await fresh.attach('1', true);
+  for (const event of events) fresh.connections[0].chunk(event);
+  assert.equal(JSON.stringify(fresh.state.events), retained); fresh.dispose();
 });

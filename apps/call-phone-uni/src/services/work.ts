@@ -14,9 +14,9 @@ export interface WorkPlugin {
 export interface WorkSession {
   plugins?: { id: string; name?: string; added: boolean }[];
   id: string; conversation_id: string; status: string; sequence: number; run_id?: string | null;
-  messages: { id: string; role: string; content: string; resource_ids?: string[]; delivery?: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled' | 'interrupted' }[];
+  messages: { id: string; role: string; content: string; run_id?: string; resource_ids?: string[]; delivery?: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled' | 'interrupted' }[];
   interactions: WorkInteraction[]; resources: { id: string; name: string }[];
-  artifacts: { id: string; name: string; size: number }[];
+  artifacts: { id: string; name: string; size: number; run_id?: string }[];
 }
 export interface WorkEvent { created_at?: string; sequence: number; type: string; data: any; run_id: string }
 
@@ -68,7 +68,7 @@ export function createWorkController() {
   function apply(event: WorkEvent, token: ReturnType<typeof fence>) {
     if (!current(token) || event.sequence <= cursor) return;
     if (event.sequence !== cursor + 1) throw new Error('工作事件缺失，正在重新读取');
-    cursor = event.sequence; if (!['text_delta', 'tool_delta'].includes(event.type)) state.events.push(event);
+    cursor = event.sequence; if (event.type !== 'tool_delta') state.events.push(event);
     if (event.type === 'status' && state.session && event.sequence >= state.session.sequence) {
       state.session.status = event.data.status; state.session.run_id = event.run_id;
       if (event.data.status === 'running' && event.sequence >= state.session.sequence) state.liveText = '';
@@ -137,10 +137,11 @@ export function createWorkController() {
     try {
       const result = await request<WorkSession>('POST', base, { conversation_id: conversation });
       if (!current(token)) return;
-      state.session = retainResources(result);
+      if (!state.session || result.sequence >= state.session.sequence) state.session = retainResources(result);
       if (pending && result.messages.some(m => m.id === pending!.key)) { state.draft = ''; state.selected = []; pending = undefined; }
-      // Replay the durable log for in-progress text/tool traces, even after leaving the page.
-      cursor = 0; state.liveText = ''; state.events = []; observe(token);
+      // Resume the existing durable timeline without blanking already visible content.
+      // A fresh controller starts at cursor zero and reconstructs all partial output.
+      observe(token);
     } catch (e: any) { if (current(token)) state.error = e.message; }
     finally { if (current(token)) state.loading = false; }
   }

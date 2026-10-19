@@ -86,7 +86,7 @@
           <view v-if="!history.length" class="history-empty">{{ historyQuery ? '没有匹配的会话' : '还没有会话' }}</view>
           <view v-for="item in history" :key="item.id" class="history-item" :class="{ selected: item.id === state.activeId }">
             <view class="history-item-copy" role="button" :aria-label="item.title" @tap="selectChat(item.id)">
-              <text class="history-item-title">{{ item.title }}</text><text class="history-item-date">{{ item.work ? workStatus(item.work) + ' · ' : '' }}{{ when(item.updated_at) }}</text>
+              <view class="conversation-heading"><text class="history-item-title">{{ item.title }}</text><text class="conversation-kind">{{ item.work ? '工作' : '聊天' }}</text></view><text class="history-item-date">{{ item.work ? workStatus(item.work) + ' · ' : '' }}{{ when(item.updated_at) }}</text>
             </view>
             <view class="history-delete" role="button" aria-label="删除会话" @tap="deleteChat(item.id)"><TIcon name="delete" size="18px" /></view>
           </view>
@@ -347,4 +347,10 @@ onUnload(() => {
 .suggestion-icon.blue { color: #5885ce; }.suggestion-icon.purple { color: #9876c9; }.suggestion-icon.green { color: #3c9a79; }
 .header-tools > view:first-child { color: #5885ce; }.header-tools > view:last-child { color: #8e75c9; }
 :deep(.t-chat-sender__textarea--control) { box-sizing: border-box; padding-bottom: 0; max-height: 160px; overflow-y: auto !important; }:deep(.t-chat-sender__textarea) { max-height: 160px; overflow: hidden; }:deep(.uni-textarea-wrapper) { max-height: 160px !important; overflow: hidden; }:deep(.uni-textarea-textarea) { max-height: 160px !important; overflow-y: auto !important; }
+</style>
+
+<style scoped>
+.conversation-heading { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.conversation-heading > text:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.conversation-kind { flex-shrink: 0; font-size: 10px; line-height: 16px; font-weight: 400; color: #9298a3; padding: 0 4px; border: 1px solid #e5e7eb; border-radius: 4px; }
 </style>

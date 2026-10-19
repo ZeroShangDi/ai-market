@@ -5,16 +5,43 @@ export function toolLabel(name: string): string {
   const labels: Record<string, string> = { Read: '读取文件', Glob: '查找文件', Grep: '检索内容', Write: '生成文件', Edit: '修改文件', NotebookEdit: '编辑笔记', Bash: '处理文件与数据', WebSearch: '搜索资料', WebFetch: '阅读网页', Agent: '执行子任务', Task: '执行子任务', Skill: '使用技能', ToolSearch: '查找工具', TodoWrite: '更新工作计划', AskUserQuestion: '等待补充信息', mcp__work__present_files: '整理交付文件', mcp__work__workspace_info: '查看工作资料' };
   return labels[name] || (name.startsWith('mcp__') ? '使用应用工具' : '处理任务');
 }
+/** Prefer the purpose supplied with the call; never expose shell commands or file contents. */
+export function workAction(data: Record<string, any>): string {
+  const name = data.name || data.tool || '', input = data.input || {};
+  const clean = (value: unknown) => typeof value === 'string' ? value.replace(/[\r\n\t]+/g, ' ').trim().slice(0, 500) : '';
+  const file = (value: unknown) => clean(value).split(/[\\/]/).pop() || '';
+  const purpose = clean(input.description);
+  if (purpose) return purpose;
+  if (['Read', 'Write', 'Edit', 'NotebookEdit'].includes(name)) {
+    const target = file(input.file_path || input.notebook_path);
+    if (target) return `${toolLabel(name)}：${target}`;
+  }
+  if (name === 'WebSearch' && clean(input.query)) return `搜索：${clean(input.query)}`;
+  if (name === 'WebFetch' && clean(input.url)) return `阅读：${clean(input.url).split(/[?#]/)[0]}`;
+  if (['Glob', 'Grep'].includes(name) && clean(input.pattern)) return `${toolLabel(name)}：${clean(input.pattern)}`;
+  if (name === 'Skill' && clean(input.skill)) return `使用技能：${clean(input.skill)}`;
+  if (name === 'mcp__work__present_files' && Array.isArray(input.paths)) return `交付文件：${input.paths.map(file).filter(Boolean).join('、')}`;
+  if (name === 'TodoWrite' && Array.isArray(input.todos)) {
+    const active = input.todos.find((todo: any) => todo.status === 'in_progress');
+    if (active) return clean(active.activeForm || active.content) || '更新工作计划';
+  }
+  return clean(data.label) || toolLabel(name);
+}
+
 export function workSteps(events: WorkEvent[], run: string) {
   const steps = new Map<string, { id: string; label: string; status: string }>();
   for (const event of events.filter(e => e.run_id === run)) {
     const data = event.data;
     if (['tool_start', 'tool_call', 'audit'].includes(event.type)) {
       const id = data.id || data.tool_use_id;
-      if (id && !steps.has(id)) steps.set(id, { id, label: typeof data.label === 'string' ? data.label : toolLabel(data.name || data.tool || ''), status: '进行中' });
+      if (id) {
+        const previous = steps.get(id);
+        if (!previous) steps.set(id, { id, label: workAction(data), status: '进行中' });
+        else if (data.input) previous.label = workAction(data);
+      }
     }
-    if (event.type === 'tool_result' && steps.has(data.id)) steps.get(data.id)!.status = data.is_error ? '未完成' : '完成';
-    if (['result', 'error'].includes(event.type)) for (const step of steps.values()) if (step.status === '进行中') step.status = '已结束';
+    if (event.type === 'tool_result' && steps.has(data.id || data.tool_use_id)) steps.get(data.id || data.tool_use_id)!.status = data.is_error ? '未完成' : '完成';
+    if (['result', 'error'].includes(event.type)) for (const step of steps.values()) if (step.status === '进行中') step.status = event.type === 'error' ? '已中断' : '已结束';
   }
   return [...steps.values()];
 }

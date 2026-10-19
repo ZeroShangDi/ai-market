@@ -5,48 +5,43 @@
 
         <view v-if="state.loading">正在读取工作会话…</view>
         <view v-if="!state.session?.messages.length" class="work-welcome">这次想完成什么？</view>
-        <view v-for="message in state.session?.messages" :key="message.id" class="work-message" :class="message.role">
-          <text v-if="message.delivery === 'queued' || message.delivery === 'cancelled' || message.delivery === 'interrupted'" class="work-note">{{ message.delivery === 'queued' ? '排队中' : message.delivery === 'interrupted' ? '执行已中断' : '已取消执行' }}</text>
-          <text v-if="message.role === 'user'" class="work-text">{{ message.content }}</text>
-          <TChatMarkdown v-else :content="message.content" @click="handleMarkdownClick" />
-          <view v-if="message.role === 'assistant' && message.content" class="reply-actions"><view role="button" aria-label="复制回复" @tap="copyReply(message.content)"><TIcon name="copy" size="16px" /></view></view>
-          <scroll-view v-if="message.role === 'user' && message.resource_ids?.length" scroll-x class="sent-files"><view class="sent-files-track"><view v-for="file in messageResources(message.resource_ids)" :key="file.id" class="sent-file"><TIcon :name="fileAppearance(file.name).icon" :color="fileAppearance(file.name).color" size="16px" /><text>{{ file.name }}</text></view></view></scroll-view>
-          <view v-if="message.role === 'user' && (workSteps(state.events, message.id).length || progressNotes(message.id).length)" class="process">
-            <view class="process-heading" role="button" @tap="expanded[message.id] = !processOpen(message.id)"><TIcon :name="processOpen(message.id) ? 'chevron-down' : 'chevron-right'" size="14px" /><text>{{ processLabel(message.id) }}</text></view>
-            <view v-if="processOpen(message.id)" class="process-list">
-              <view v-for="note in progressNotes(message.id)" :key="note.sequence" class="process-note"><TChatMarkdown :content="note.data.content" @click="handleMarkdownClick" /></view>
-              <view v-for="step in workSteps(state.events, message.id)" :key="step.id" class="process-step"><TIcon :name="step.status === '完成' ? 'check' : 'time'" size="13px" /><text>{{ step.label }}</text><text class="step-status">{{ step.status }}</text></view>
-            </view>
+        <view v-for="turn in turns" :key="turn.id" class="work-turn">
+          <view class="work-message user">
+            <text v-if="turn.user.delivery === 'queued' || turn.user.delivery === 'cancelled' || turn.user.delivery === 'interrupted'" class="work-note">{{ turn.user.delivery === 'queued' ? '排队中' : turn.user.delivery === 'interrupted' ? '执行已中断' : '已取消执行' }}</text>
+            <text class="work-text">{{ turn.user.content }}</text>
+            <scroll-view v-if="turn.user.resource_ids?.length" scroll-x class="sent-files"><view class="sent-files-track"><view v-for="file in messageResources(turn.user.resource_ids)" :key="file.id" class="sent-file"><TIcon :name="fileAppearance(file.name).icon" :color="fileAppearance(file.name).color" size="16px" /><text>{{ file.name }}</text></view></view></scroll-view>
           </view>
-          <view v-if="message.role === 'user'" class="plugin-results">
-            <view v-for="receipt in workReceipts(state.events, message.id)" :key="receipt.sequence" class="plugin-receipt">
-              <text class="receipt-title">{{ receipt.title }}</text>
-              <text>{{ receipt.summary }}</text>
-              <view role="button" class="details-toggle" @tap="receiptOpen[receipt.sequence] = !receiptOpen[receipt.sequence]">{{ receiptOpen[receipt.sequence] ? '收起详情' : '查看详情' }}</view>
-              <scroll-view v-if="receiptOpen[receipt.sequence]" scroll-y class="receipt-rows">
-                <view v-for="(row, rowIndex) in receipt.rows" :key="rowIndex" class="receipt-row">
-                  <text>{{ row.label }} · {{ row.status }}</text>
-                  <text selectable>{{ row.detail }}</text>
-                </view>
-              </scroll-view>
+          <view v-if="turn.items.length || turn.sources.length" class="work-message assistant">
+            <view class="process-heading"><text>{{ processLabel(turn.id) }}</text></view>
+            <view v-for="item in turn.items" :key="item.id" class="timeline-item">
+              <template v-if="item.kind === 'text'">
+                <TChatMarkdown :content="item.content" @click="handleMarkdownClick" />
+                <view v-if="item.content" class="reply-actions"><view role="button" aria-label="复制回复" @tap="copyReply(item.content)"><TIcon name="copy" size="16px" /></view></view>
+              </template>
+              <view v-else-if="item.kind === 'step'" class="process-step"><TIcon :name="item.status === '完成' ? 'check' : 'time'" size="13px" /><text class="step-label">{{ item.label }}</text><text class="step-status">{{ item.status }}</text></view>
+              <view v-else-if="item.kind === 'file'" class="artifact">
+                <view class="file-icon" :class="fileKind(item.file.name)"><TIcon :name="fileAppearance(item.file.name).icon" :color="fileAppearance(item.file.name).color" size="23px" /></view>
+                <view class="file-copy"><text class="file-name">{{ item.file.name }}</text><text class="file-size">{{ item.file.name.split('.').pop()?.toUpperCase() }} · {{ Math.max(1, Math.ceil(item.file.size / 1024)) }} KB</text></view>
+                <view class="file-download" role="button" :aria-label="(downloaded[item.file.id] ? '查看 ' : '下载 ') + item.file.name" @tap="download(item.file)"><text>{{ downloading === item.file.id ? '处理中' : downloaded[item.file.id] ? '查看' : '下载' }}</text></view>
+                <view class="file-download" role="button" :aria-label="'分享 ' + item.file.name" @tap="download(item.file, true)"><text>分享</text></view>
+              </view>
+              <view v-else-if="item.kind === 'receipt'" class="plugin-receipt">
+                <text class="receipt-title">{{ item.receipt.title }}</text><text>{{ item.receipt.summary }}</text>
+                <view role="button" class="details-toggle" @tap="toggleDetail('receipt', item.receipt.sequence)">{{ detailOpen('receipt', item.receipt.sequence) ? '收起详情' : '查看详情' }}</view>
+                <scroll-view v-if="detailOpen('receipt', item.receipt.sequence)" scroll-y class="receipt-rows">
+                  <view v-for="(row, rowIndex) in item.receipt.rows" :key="rowIndex" class="receipt-row"><text>{{ row.label }} · {{ row.status }}</text><text selectable>{{ row.detail }}</text></view>
+                </scroll-view>
+              </view>
+            </view>
+            <view v-if="turn.sources.length" class="sources">
+              <view class="source-summary" role="button" @tap="toggleDetail('sources', turn.id)"><view class="source-marks"><text v-for="source in turn.sources.slice(0, 3)" :key="source.url">{{ source.domain.replace('www.', '').slice(0, 1).toUpperCase() }}</text></view><text>{{ turn.sources.length }} 个来源</text><TIcon :name="detailOpen('sources', turn.id) ? 'chevron-down' : 'chevron-right'" size="14px" /></view>
+              <view v-if="detailOpen('sources', turn.id)" class="source-list"><view v-for="(source, index) in turn.sources" :key="source.url" class="source" @tap="handleMarkdownClick({ node: { type: 'link', href: source.url } })"><view class="source-site"><text class="source-number">{{ index + 1 }}</text><text>{{ source.domain }}</text><TIcon name="link" size="13px" /></view><text class="source-title">{{ source.title }}</text></view></view>
             </view>
           </view>
         </view>
-        <view v-if="state.liveText && busy" class="work-message"><TChatMarkdown :content="state.liveText" :streaming="{ hasNextChunk: true, tail: true }" @click="handleMarkdownClick" /></view>
         <view v-if="busy" class="work-note"><text class="pulse">●</text> {{ statusLabel }}</view>
         <view v-if="['failed', 'interrupted', 'closed'].includes(state.session?.status || '')" class="work-note">{{ statusLabel }}</view>
-        <view v-if="state.session?.artifacts.length" class="artifacts">
-          <view v-for="file in state.session.artifacts" :key="file.id" class="artifact">
-            <view class="file-icon" :class="fileKind(file.name)"><TIcon :name="fileAppearance(file.name).icon" :color="fileAppearance(file.name).color" size="23px" /></view>
-            <view class="file-copy"><text class="file-name">{{ file.name }}</text><text class="file-size">{{ file.name.split('.').pop()?.toUpperCase() }} · {{ Math.max(1, Math.ceil(file.size / 1024)) }} KB</text></view>
-            <view class="file-download" role="button" :aria-label="'下载 ' + file.name" @tap="download(file)"><TIcon :name="downloading === file.id ? 'time' : 'download'" size="19px" /></view>
-          </view>
-        </view>
         <view v-if="state.error" class="work-error">{{ state.error }}<text @tap="reload">重新读取状态</text></view>
-        <view v-if="sources.length" class="sources">
-          <view class="source-summary" role="button" @tap="sourcesOpen = !sourcesOpen"><view class="source-marks"><text v-for="source in sources.slice(0, 3)" :key="source.url">{{ source.domain.replace('www.', '').slice(0, 1).toUpperCase() }}</text></view><text>{{ sources.length }} 个来源</text><TIcon :name="sourcesOpen ? 'chevron-down' : 'chevron-right'" size="14px" /></view>
-          <view v-if="sourcesOpen" class="source-list"><view v-for="(source, index) in sources" :key="source.url" class="source" @tap="handleMarkdownClick({ node: { type: 'link', href: source.url } })"><view class="source-site"><text class="source-number">{{ index + 1 }}</text><text>{{ source.domain }}</text><TIcon name="link" size="13px" /></view><text class="source-title">{{ source.title }}</text></view></view>
-        </view>
       </view>
     </scroll-view>
     <view v-if="!followLatest && busy" class="back-latest" @tap="followLatest = true; scrollTop += 100000">↓ 查看最新进展</view>
@@ -106,19 +101,21 @@
 
 <script setup lang="ts">
 import { incomingWorkFiles, readIncomingWorkFile, discardIncomingWorkFile } from '@/services/incoming-work-files';
-import { workReceipts, workSteps, workElapsed, approvalFields, workFileCategories, fileAppearance, acceptsWorkFile, supportedWorkFileExtensions } from '@/ui/work-presentation';
+import { workElapsed, approvalFields, workFileCategories, fileAppearance, acceptsWorkFile, supportedWorkFileExtensions } from '@/ui/work-presentation';
+import { workTurns } from '@/ui/work-timeline';
 import ComposerAttachments from './ComposerAttachments.vue';
 import WorkFilePicker, { type PickerFile } from './WorkFilePicker.vue';
 import { recentWorkFiles, rememberWorkFile, readRecentWorkFile } from '@/services/recent-work-files';
 import TIcon from '@tdesign/uniapp/icon/icon.vue';
+import { onShow } from '@dcloudio/uni-app';
 import { computed, onUnmounted, reactive, ref, watch } from 'vue';
 import TChatMarkdown from '@tdesign/uniapp-chat/chat-markdown/chat-markdown.vue';
 import TChatSender from '@tdesign/uniapp-chat/chat-sender/chat-sender.vue';
 import { createWorkController, type WorkInteraction, type WorkPlugin } from '@/services/work';
-import { chooseWorkFile, chooseWorkMedia, openWorkArtifact } from '@/services/work-files';
+import { chooseWorkFile, chooseWorkMedia, openWorkArtifact, localWorkArtifact } from '@/services/work-files';
 import { mockEnabled } from '@/config';
 import { hasUnfinishedCall } from '@/services/calls';
-import { handleMarkdownClick, markdownHttpUrl } from '@/ui/chat-markdown';
+import { handleMarkdownClick } from '@/ui/chat-markdown';
 import { toast } from '@/ui/format';
 
 const props = defineProps<{ conversationId: string; visible: boolean }>();
@@ -152,8 +149,8 @@ function messageResources(ids: string[] = []) { return ids.map(id => state.sessi
 const availablePlugins = computed(() => state.plugins.filter(p => p.installed && p.enabled && p.connected));
 const availableSkills = computed(() => availablePlugins.value.flatMap(plugin => plugin.skills.filter(s => s.enabled && s.standalone === true).map(skill => ({ plugin, skill }))));
 const answers = reactive<Record<string, Record<string, string>>>({});
-const scrollTop = ref(0), followLatest = ref(true), adding = ref(false), details = ref(false), sourcesOpen = ref(false), downloading = ref('');
-const expanded = reactive<Record<string, boolean>>({});
+const scrollTop = ref(0), followLatest = ref(true), adding = ref(false), details = ref(false), downloading = ref('');
+const turns = computed(() => workTurns(state.session, state.events));
 const fileTypes = workFileCategories;
 const selectedCapabilities = computed(() => (state.session?.plugins || []).filter(plugin => plugin.added).map(plugin => ({ id: plugin.id, name: plugin.name || plugin.id, icon: 'app', color: '#9c77c9' })));
 const pendingIncoming = computed(() => incomingWorkFiles.conversation === props.conversationId ? incomingWorkFiles.items : []);
@@ -183,15 +180,25 @@ watch(() => [state.session?.id, props.visible, pendingIncoming.value.length, sta
 function retryIncoming() { incomingWorkFiles.error = ''; void importIncoming(); }
 
 const availableResources = computed(() => state.session?.resources.filter(file => !state.selected.includes(file.id)) || []);
-const receiptOpen = reactive<Record<number, boolean>>({});
-const sources = computed(() => { const links = new Map<string, { title: string; url: string; domain: string }>(); for (const event of state.events.filter(e => e.type === 'sources')) for (const source of event.data.items || []) { if (markdownHttpUrl(source.url)) links.set(source.url, { ...source, domain: source.url.split('/')[2] }); } return [...links.values()]; });
+// Store only disclosure preferences, never response content, in device UI storage.
+const disclosures = reactive<Record<string, boolean>>({});
+function detailKey(kind: string, id: string | number) { return `work-view:${state.session?.id}:${kind}:${id}`; }
+function detailOpen(kind: string, id: string | number) {
+  const key = detailKey(kind, id);
+  if (key in disclosures) return disclosures[key];
+  try { return uni.getStorageSync(key) === true; } catch { return false; }
+}
+function toggleDetail(kind: string, id: string | number) {
+  const key = detailKey(kind, id), value = !detailOpen(kind, id);
+  disclosures[key] = value;
+  try { uni.setStorageSync(key, value); } catch { /* Storage must not prevent viewing results. */ }
+}
 let seen = 0;
 const now = ref(Date.now());
 const clock = setInterval(() => { if (props.visible && busy.value) now.value = Date.now(); }, 1000);
 function runFinished(run: string) { return state.events.some(e => e.run_id === run && ['result', 'error'].includes(e.type)) || (!!state.session && (state.session.run_id !== run || !busy.value)); }
-function processOpen(run: string) { return expanded[run] ?? !runFinished(run); }
-function processLabel(run: string) { const elapsed = workElapsed(state.events, run, now.value); const failed = state.events.some(e => e.run_id === run && (e.type === 'error' || (e.type === 'result' && e.data.success === false))); return `${runFinished(run) ? (failed ? '工作已结束' : '已完成') : '正在处理'}${elapsed ? ' · 用时 ' + elapsed : ''}`; }
-watch(() => state.events.filter(e => ['result', 'error'].includes(e.type)).map(e => e.run_id).join('|'), () => { for (const e of state.events) if (['result', 'error'].includes(e.type)) expanded[e.run_id] = false; });
+function processLabel(run: string) { const elapsed = workElapsed(state.events, run, now.value); const failed = state.events.some(e => e.run_id === run && (e.type === 'error' || (e.type === 'result' && e.data.success === false))); return `${runFinished(run) ? (state.session?.messages.find(m => m.id === run)?.delivery === 'interrupted' ? '已中断' : failed ? '工作未完成' : '已完成') : '正在处理'}${elapsed ? ' · 用时 ' + elapsed : ''}`; }
+
 function fileKind(name: string) { return /\.(xlsx?|csv|tsv)$/i.test(name) ? 'sheet' : /\.pdf$/i.test(name) ? 'pdf' : 'document'; }
 watch(() => state.session, session => {
   if (!session) return;
@@ -206,7 +213,6 @@ const statusLabel = computed(() => ({ idle: '可以继续交办', running: '正�
 watch(() => [props.conversationId, props.visible] as const, ([id, visible]) => { seen = 0; pluginError.value = ''; adding.value = false; details.value = false; if (!mockEnabled) void controller.attach(id, visible); else state.error = 'Work 需要连接真实服务'; }, { immediate: true });
 watch(() => state.liveText.length + state.events.length, () => { if (followLatest.value) scrollTop.value += 100000; });
 onUnmounted(() => { clearInterval(clock); controller.dispose(); });
-function progressNotes(run: string) { return state.events.filter(e => e.run_id === run && e.type === 'assistant' && !e.data.parent_tool_use_id && e.data.content && e.data.content !== state.liveText && !state.session?.messages.some(m => m.role === 'assistant' && m.content === e.data.content)); }
 function reload() { void controller.attach(props.conversationId, props.visible); }
 function setAnswer(id: string, question: string, value: string) { (answers[id] ||= {})[question] = value; }
 function answerInput(id: string, question: string, event: any) { setAnswer(id, question, String(event.detail.value)); }
@@ -259,7 +265,25 @@ async function addFile(accept: string, mime = '*/*', supported = true) {
 function send() { if (hasUnfinishedCall()) return toast('请先完成当前通话并保存结果'); if (state.session?.status === 'closed') return toast('工作会话已关闭，请新建对话'); if (!state.uploading && !picking.value && !pendingIncoming.value.length && state.draft.trim()) { emit('started'); adding.value = false; followLatest.value = true; void controller.send(); } }
 function approve(item: WorkInteraction) { if (hasUnfinishedCall()) return toast('请先完成当前通话并保存结果'); void controller.answer(item, { approved: true }); }
 
-async function download(file: { id: string; name: string }) { if (downloading.value) return; downloading.value = file.id; try { if (state.session) await openWorkArtifact(state.session.id, file); } catch (e: any) { toast(e.message); } finally { downloading.value = ''; } }
+const downloaded = reactive<Record<string, boolean>>({});
+onShow(() => { void refreshDownloads(); });
+async function refreshDownloads() {
+  const session = state.session;
+  if (!session || !props.visible) return;
+  for (const file of session.artifacts) {
+    const local = await localWorkArtifact(session.id, file.id);
+    if (state.session?.id === session.id) downloaded[file.id] = !!local;
+  }
+}
+watch(() => [props.visible, state.session?.id, state.session?.artifacts.map(file => file.id).join('|')], () => { void refreshDownloads(); });
+async function download(file: { id: string; name: string }, share = false) {
+  if (downloading.value || !state.session) return;
+  const session = state.session.id;
+  downloading.value = file.id;
+  try { await openWorkArtifact(session, file, share ? 'share' : 'open'); }
+  catch (e: any) { toast(e.message || '文件操作失败，请重试'); }
+  finally { if (state.session?.id === session) downloaded[file.id] = !!await localWorkArtifact(session, file.id); downloading.value = ''; }
+}
 </script>
 
 <style scoped>
@@ -273,7 +297,7 @@ async function download(file: { id: string; name: string }) { if (downloading.va
 .work-welcome { text-align: center; font-size: 25px; font-weight: 600; margin-top: 17vh; }
 .work-message { margin: 20px 0; }.work-message.user > .work-text { display: block; background: #eceef2; padding: 12px 16px; border-radius: 18px 5px 18px 18px; margin-left: 32px; white-space: pre-wrap; font-size: 14px; line-height: 1.6; }
 .work-note { color: #96999e; font-size: 12px; padding: 10px 0; }.pulse { animation: pulse 1.6s infinite; }@keyframes pulse { 50% { opacity: .35; } }
-.process { margin: 20px 0 0; color: #92959c; font-size: 12px; }.process-heading { display: flex; align-items: center; gap: 6px; min-height: 32px; }.process-list { margin: 4px 0 10px 6px; padding-left: 14px; border-left: 1px solid #e3e5e8; }.process-step { display: flex; align-items: center; gap: 9px; padding: 7px 0; }.step-status { margin-left: auto; font-size: 11px; color: #a1a4aa; }.process-note { padding: 6px 0; }.process-note :deep(.t-chat-markdown) { color: #8b8f96; font-size: 12px; }
+.process { margin: 20px 0 0; color: #92959c; font-size: 12px; }.process-heading { display: flex; align-items: center; gap: 6px; min-height: 32px; }.process-list { margin: 4px 0 10px 6px; padding-left: 14px; border-left: 1px solid #e3e5e8; }.process-step { display: flex; align-items: center; gap: 9px; padding: 7px 0; }.step-label { flex: 1; min-width: 0; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }.step-status { flex-shrink: 0; margin-left: auto; font-size: 11px; color: #a1a4aa; }.timeline-item { margin: 8px 0; }
 .work-composer { flex-shrink: 0; position: relative; z-index: 4; padding: 8px 14px calc(8px + env(safe-area-inset-bottom)); background: #f7f8fc; }
 .interaction-dock { background: #fff; border: 1px solid #dedfe2; border-radius: 20px; overflow: hidden; box-shadow: 0 3px 18px #20212408; margin-bottom: 3px; }.interaction-scroll { max-height: 49vh; }.interaction { padding: 18px 16px 14px; }
 .interaction-eyebrow { display: flex; align-items: center; gap: 6px; color: #888b91; font-size: 11px; margin-bottom: 13px; }.risk-label { margin-left: auto; color: #a77249; }
@@ -286,7 +310,7 @@ async function download(file: { id: string; name: string }) { if (downloading.va
 .add-heading { display: flex; align-items: center; justify-content: space-between; padding: 8px 10px 10px; font-size: 11px; color: #93969d; }.add-menu-row { display: flex; align-items: center; gap: 12px; height: 42px; padding: 0 11px; border-radius: 9px; font-size: 13px; color: #464950; }.add-menu-row:active { background: #f3f4f5; }.add-menu-row > text { flex: 1; }.add-divider { height: 1px; margin: 6px 8px; background: #eceef0; }
 .resources { display: flex; flex-wrap: wrap; gap: 6px; max-height: 90px; overflow: auto; margin-bottom: 6px; }.resources > view { font-size: 11px; color: #858991; border: 1px solid #e4e5e7; padding: 6px 9px; border-radius: 8px; overflow-wrap: anywhere; }.resources .selected { color: #484d56; background: #edeff2; }
 .composer-actions { display: flex; align-items: center; gap: 12px; font-size: 12px; color: #848890; }.composer-actions > .add-trigger { font-size: 24px; color: #636870; padding: 0 5px; }.composer-actions > .add-trigger[aria-disabled=true] { opacity: .35; }
-.artifacts { margin-top: 22px; }.artifact { display: flex; align-items: center; gap: 12px; border: 1px solid #e5e7eb; border-radius: 14px; padding: 14px; margin: 8px 0; background: #fff; }.file-icon { display: flex; align-items: center; justify-content: center; width: 38px; height: 44px; border-radius: 8px; color: #5e81ba; background: #f0f4fb; flex-shrink: 0; }.file-icon.sheet { color: #4a9573; background: #eef6f1; }.file-icon.pdf { color: #bf7272; background: #faf0f0; }.file-copy { flex: 1; min-width: 0; }.file-name { font-size: 13px; font-weight: 500; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.file-size { display: block; font-size: 11px; color: #9a9da4; margin-top: 5px; }.file-download { display: flex; align-items: center; justify-content: center; width: 32px; height: 32px; color: #777d87; border-radius: 50%; background: #f7f8fa; }
+.artifacts { margin-top: 22px; }.artifact { display: flex; align-items: center; gap: 12px; border: 1px solid #e5e7eb; border-radius: 14px; padding: 14px; margin: 8px 0; background: #fff; }.file-icon { display: flex; align-items: center; justify-content: center; width: 38px; height: 44px; border-radius: 8px; color: #5e81ba; background: #f0f4fb; flex-shrink: 0; }.file-icon.sheet { color: #4a9573; background: #eef6f1; }.file-icon.pdf { color: #bf7272; background: #faf0f0; }.file-copy { flex: 1; min-width: 0; }.file-name { font-size: 13px; font-weight: 500; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.file-size { display: block; font-size: 11px; color: #9a9da4; margin-top: 5px; }.file-download { display: flex; align-items: center; justify-content: center; min-width: 36px; height: 36px; font-size: 12px; color: #777d87; border-radius: 50%; background: #f7f8fa; }
 .sources { margin-top: 15px; }.source-summary { display: inline-flex; align-items: center; gap: 8px; color: #8c9098; font-size: 11px; padding: 5px 0; }.source-marks { display: flex; padding-left: 4px; }.source-marks > text { display: block; width: 20px; height: 20px; line-height: 20px; text-align: center; font-size: 10px; border: 2px solid #f7f8fc; border-radius: 50%; margin-left: -4px; color: #6f7888; background: #e7ebf2; }.source-list { margin-top: 8px; border: 1px solid #e6e8ed; border-radius: 14px; background: #fff; padding: 4px 12px; }.source { padding: 12px 0; }.source + .source { border-top: 1px solid #f0f1f3; }.source-site { display: flex; align-items: center; gap: 7px; font-size: 11px; color: #999da5; }.source-site > text:nth-child(2) { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.source-number { color: #8d96a5; }.source-title { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; font-size: 13px; line-height: 1.6; color: #535861; margin-top: 6px; }
 .work-error { font-size: 12px; color: #ad6666; }.work-error text { display: block; padding: 8px 0; }.back-latest { align-self: center; background: #fff; border: 1px solid #e5e6e8; color: #868a93; border-radius: 20px; font-size: 11px; padding: 7px 12px; }
 :deep(.t-chat-sender) { margin: 0; border: 1px solid #dedfe3; border-radius: 22px; }:deep(.t-chat-markdown) { font-size: 14px; line-height: 1.8; }

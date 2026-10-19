@@ -120,3 +120,61 @@ class WorkFileReceiverActivity : Activity() {
         }.start()
     }
 }
+
+
+/** Read-only, temporary grants expose only explicit outbound copies, never arbitrary app files. */
+class WorkFileShareProvider : android.content.ContentProvider() {
+    override fun onCreate() = true
+    private fun file(uri: Uri): File {
+        val root = File(requireNotNull(context).cacheDir, "work-file-share").canonicalFile
+        val parts = uri.pathSegments
+        require(parts.size == 2 && Regex("[a-f0-9-]{36}").matches(parts[0]))
+        val target = File(File(root, parts[0]), parts[1]).canonicalFile
+        require(target.path.startsWith(root.path + File.separator) && target.isFile)
+        return target
+    }
+    override fun getType(uri: Uri): String = android.webkit.MimeTypeMap.getSingleton()
+        .getMimeTypeFromExtension(file(uri).extension.lowercase()) ?: "application/octet-stream"
+    override fun query(uri: Uri, projection: Array<out String>?, selection: String?, selectionArgs: Array<out String>?, sortOrder: String?): android.database.Cursor {
+        val target = file(uri)
+        val columns = (projection ?: arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE))
+            .filter { it == OpenableColumns.DISPLAY_NAME || it == OpenableColumns.SIZE }.toTypedArray()
+        return android.database.MatrixCursor(columns).apply {
+            addRow(columns.map { if (it == OpenableColumns.DISPLAY_NAME) target.name else target.length() }.toTypedArray())
+        }
+    }
+    override fun openFile(uri: Uri, mode: String): android.os.ParcelFileDescriptor {
+        require(mode == "r")
+        return android.os.ParcelFileDescriptor.open(file(uri), android.os.ParcelFileDescriptor.MODE_READ_ONLY)
+    }
+    override fun insert(uri: Uri, values: android.content.ContentValues?): Uri? = throw UnsupportedOperationException()
+    override fun update(uri: Uri, values: android.content.ContentValues?, selection: String?, selectionArgs: Array<out String>?): Int = throw UnsupportedOperationException()
+    override fun delete(uri: Uri, selection: String?, selectionArgs: Array<out String>?): Int = throw UnsupportedOperationException()
+}
+
+object WorkFileShare {
+    @JvmStatic fun share(activity: Activity, path: String, name: String) {
+        val source = File(path).canonicalFile
+        val roots = listOf(File(activity.applicationInfo.dataDir)) + activity.getExternalFilesDirs(null).filterNotNull()
+        require(source.isFile && roots.any { source.path.startsWith(it.canonicalPath + File.separator) }) { "本地文件不可用，请重新下载" }
+        val root = File(activity.cacheDir, "work-file-share").apply { mkdirs() }
+        root.listFiles()?.filter { System.currentTimeMillis() - it.lastModified() > 86400000L }?.forEach { it.deleteRecursively() }
+        val folder = File(root, UUID.randomUUID().toString()).apply { mkdirs() }
+        val safeName = name.replace(Regex("[\\\\/\\x00-\\x1f]"), "_").takeLast(120).ifBlank { "文件" }
+        require(safeName != "." && safeName != "..") { "文件名无效" }
+        val target = File(folder, safeName)
+        try {
+            source.copyTo(target)
+            val uri = Uri.Builder().scheme("content").authority(activity.packageName + ".workfiles.share")
+                .appendPath(folder.name).appendPath(target.name).build()
+            val mime = android.webkit.MimeTypeMap.getSingleton().getMimeTypeFromExtension(target.extension.lowercase()) ?: "application/octet-stream"
+            val intent = Intent(Intent.ACTION_SEND).apply {
+                type = mime
+                putExtra(Intent.EXTRA_STREAM, uri)
+                clipData = android.content.ClipData.newRawUri(target.name, uri)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            activity.startActivity(Intent.createChooser(intent, "分享文件"))
+        } catch (e: Exception) { folder.deleteRecursively(); throw e }
+    }
+}

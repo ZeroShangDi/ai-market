@@ -16,6 +16,9 @@ services:
       WORK_CAPABILITY_PLUGINS: '["/app/plugins/callphone"]'
       WORK_BUSINESS_URL: http://server:48080/admin-api/callphone/plugin/leads/import
     expose: ["48082"]
+    # Local voice plugins reuse the same durable Work service as mobile.
+    ports:
+      - "127.0.0.1:48082:48082"
     volumes:
       - yudao-local-agent:/data
       - ../../.local/app-update/release/public/pet-resources:/pet-resources:ro

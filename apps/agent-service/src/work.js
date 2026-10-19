@@ -233,7 +233,7 @@ export class WorkStore {
         onEvent: (type, data) => { ensureCurrent(); return this.emit(s, type, data); },
         ask: (kind, tool, input, toolUseId) => this.ask(s, run, kind, tool, input, toolUseId),
         backup: async () => { ensureCurrent(); const item = await snapshot(this.paths(s).cwd, join(this.paths(s).base, 'snapshots')); ensureCurrent(); s.snapshots.push(item); await this.emit(s, 'snapshot', item); },
-        publish: async path => { ensureCurrent(); const item = await publishFile(this.paths(s).cwd, join(this.paths(s).base, 'artifacts'), path); ensureCurrent(); s.artifacts.push(item); await this.emit(s, 'artifact', item); return item; },
+        publish: async path => { ensureCurrent(); const item = await publishFile(this.paths(s).cwd, join(this.paths(s).base, 'artifacts'), path); ensureCurrent(); item.run_id = s.run_id; s.artifacts.push(item); await this.emit(s, 'artifact', item); return item; },
       });
       if (run.controller.signal.aborted) throw new Error('interrupted');
       if (!handled) await finishTurn(result);

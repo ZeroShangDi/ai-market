@@ -36,7 +36,7 @@
             <view v-for="item in visibleItems" :key="item.id" class="recent-row" role="button" :aria-label="'打开：' + item.title" @tap="openConversation(item.id)">
               <view class="recent-icon"><AppIcon name="pending" :size="22" color="#5264a5" /></view>
               <view class="recent-copy">
-                <text class="recent-title">{{ item.title }}</text>
+                <view class="conversation-heading"><text class="recent-title">{{ item.title }}</text><text class="conversation-kind">{{ item.work ? '工作' : '聊天' }}</text></view>
                 <text class="work-badge" :class="{ attention: item.work && (item.work.pending.length || item.work.unread) }">{{ item.work ? workStatus(item.work) : '最近对话' }}</text>
                 <text class="recent-time">{{ when(item.updated_at) }}</text>
               </view>
@@ -186,4 +186,10 @@ onUnload(() => { visible = false; clearTimeout(workPoll); ++recentGeneration; st
 .recent-error { padding: 0 0 14px; color: #a96812; font-size: 11px; }
 @media (max-width: 350px) { .content { padding-left: 16px; padding-right: 16px; } .ai-entry { padding-left: 16px; padding-right: 16px; } .recent-card { padding: 0 12px; } }
 .work-badge { display: inline-block; font-size: 11px; color: #7b879b; margin-top: 7px; }.work-badge.attention { color: #294fdb; background: #edf2ff; border-radius: 8px; padding: 3px 7px; }
+</style>
+
+<style scoped>
+.conversation-heading { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.conversation-heading > text:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.conversation-kind { flex-shrink: 0; font-size: 10px; line-height: 16px; font-weight: 400; color: #9298a3; padding: 0 4px; border: 1px solid #e5e7eb; border-radius: 4px; }
 </style>

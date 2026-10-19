@@ -79,6 +79,7 @@ test('Binary resources remain exact, artifacts immutable; links and traversal ca
   await assert.rejects(store.upload(actor, s.id, { name: '../bad', content_base64: '' }), e => e.status === 400);
   await store.send(actor, s.id, { request_id: randomUUID(), prompt: '处理', resource_ids: [file.id] });
   const result = await settle(store, s.id); assert.equal(result.status, 'idle'); assert.equal(result.snapshots.length, 1);
+  assert.equal(result.artifacts[0].run_id, result.messages.find(message => message.role === 'user').id);
   assert.equal(Buffer.from((await store.artifact(actor, s.id, result.artifacts[0].id)).content_base64, 'base64').toString(), '姓名,数量\n甲,1\n');
 });
 
@@ -265,4 +266,26 @@ test('All-zero corrupted uploads are rejected before entering the workspace', as
   await assert.rejects(store.upload(actor, s.id, { name: 'leads.csv', content_base64: Buffer.alloc(128).toString('base64') }), /全部为空字节/);
   assert.equal(store.get(actor, s.id).resources.length, 0);
   assert.equal(store.get(actor, s.id).status, 'idle');
+});
+
+test('interrupted partial text and published files survive service restart without additional generation', async t => {
+  let calls = 0;
+  const {store,s,dataDir} = await fixture(t, async ctx => {
+    calls++;
+    await ctx.onEvent('text_delta', {message_id:'partial',delta:'写到这里'});
+    await writeFile(join(ctx.cwd,'partial.txt'),'已有文件'); await ctx.publish('partial.txt');
+    await ctx.ask('question','AskUserQuestion',{questions:[]},'q');
+    if (ctx.signal.aborted) throw new Error('interrupted');
+    return {success:true,text:'不应出现'};
+  });
+  await store.send(actor,s.id,{request_id:randomUUID(),prompt:'处理'});
+  await waitFor(() => store.get(actor,s.id).status === 'waiting');
+  await store.stop(actor,s.id); await settle(store,s.id);
+  const before = store.events(actor,s.id).items;
+  const restarted = new WorkStore({dataDir,executor:{run:async () => { throw new Error('must not generate'); }}});
+  await restarted.init(); t.after(() => restarted.close());
+  assert.deepEqual(restarted.events(actor,s.id).items,before);
+  assert.equal(restarted.view(restarted.get(actor,s.id)).artifacts.length,1);
+  assert.equal(before.find(e => e.type === 'text_delta').data.delta,'写到这里');
+  assert.equal(calls,1);
 });

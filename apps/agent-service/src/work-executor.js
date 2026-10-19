@@ -134,7 +134,7 @@ export function createWorkExecutor({ provider = process.env.AGENT_PROVIDER || 'a
     }
     const controller = new AbortController();
     const options = { cwd, env, model: selected.model, abortController: controller, maxTurns,
-      systemPrompt: { type: 'preset', preset: 'claude_code', append: '你是工作助理。先完成授权的工作，再简短汇报结果、产物和需要确认的事项。不要把过程说明当成功。仅访问当前工作区；文件原样处理，产物调用 work.present_files。业务操作只能使用受管理的 MCP，绝不寻找业务凭据。缺资料使用 AskUserQuestion。服务恢复后的未核实操作先检查结果，不得盲目重放。' + (ctx.persona || '') },
+      systemPrompt: { type: 'preset', preset: 'claude_code', append: '你是工作助理。工具支持 description 参数时，用简短中文说明本次具体要完成什么（动作和对象），不要仅写工具类别，不含凭据或正文。先完成授权的工作，再简短汇报结果、产物和需要确认的事项。不要把过程说明当成功。仅访问当前工作区；文件原样处理，产物调用 work.present_files。业务操作只能使用受管理的 MCP，绝不寻找业务凭据。缺资料使用 AskUserQuestion。服务恢复后的未核实操作先检查结果，不得盲目重放。' + (ctx.persona || '') },
       tools: { type: 'preset', preset: 'claude_code' }, settingSources: ['user'],
       // These features need a separate product lifecycle/identity model. Communication must use MCP.
       disallowedTools: ['CronCreate', 'CronDelete', 'CronList', 'ScheduleWakeup', 'Workflow', 'EnterWorktree', 'ExitWorktree', 'SendMessage', 'ReportFindings'],
@@ -203,7 +203,7 @@ export function createWorkExecutor({ provider = process.env.AGENT_PROVIDER || 'a
             }
             if (block.type === 'tool_result') await ctx.onEvent('tool_result', { id: block.tool_use_id, content: block.content, is_error: !!block.is_error, parent_tool_use_id: message.parent_tool_use_id });
           }
-          if (message.type === 'assistant') { lastText = blocks.filter(b => b.type === 'text').map(b => b.text).join('\n'); await ctx.onEvent('assistant', { id: message.uuid, content: lastText, parent_tool_use_id: message.parent_tool_use_id }); }
+          if (message.type === 'assistant') { lastText = blocks.filter(b => b.type === 'text').map(b => b.text).join('\n'); await ctx.onEvent('assistant', { id: message.uuid, message_id: message.message?.id, content: lastText, parent_tool_use_id: message.parent_tool_use_id }); }
         } else if (message.type === 'result') {
           final = { success: message.subtype === 'success' && !message.is_error, text: message.result || lastText, subtype: message.subtype, usage: message.usage };
           const next = await ctx.onTurnResult?.(final);

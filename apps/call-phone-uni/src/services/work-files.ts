@@ -1,4 +1,4 @@
-import { readDocument } from '@/uni_modules/work-file-receiver';
+import { readDocument, shareDocument } from '@/uni_modules/work-file-receiver';
 import { chooseAndroidDocument } from './android-document-picker';
 import { request, downloadWorkArtifact } from '@/api/http';
 
@@ -31,10 +31,26 @@ export async function chooseWorkFile(accept = '', mime = '*/*', readContent = tr
   // #endif
   throw new Error('当前平台暂不支持原始文件选择');
 }
-export async function openWorkArtifact(session: string, artifact: { id: string; name: string }) {
+const artifactCacheKey = (session: string, id: string) => `work-artifact:${session}:${id}`;
+export async function localWorkArtifact(session: string, id: string): Promise<string> {
+  // #ifdef APP-PLUS
+  if (typeof plus !== 'undefined') {
+    const key = artifactCacheKey(session, id);
+    const local = uni.getStorageSync(key);
+    if (typeof local !== 'string' || !local) return '';
+    return new Promise(resolve => plus.io.resolveLocalFileSystemURL(local, entry => {
+      if (entry.isFile) resolve(local);
+      else { uni.removeStorageSync(key); resolve(''); }
+    }, () => { uni.removeStorageSync(key); resolve(''); }));
+  }
+  // #endif
+  return '';
+}
+export async function openWorkArtifact(session: string, artifact: { id: string; name: string }, action: 'open' | 'share' = 'open') {
   const path = `/api/v1/mobile/work/sessions/${session}/artifacts/${artifact.id}`;
   // #ifdef H5
   if (typeof document !== 'undefined') {
+    if (action === 'share') throw new Error('请在手机 App 中分享文件');
     // The JSON route keeps authentication in the existing refresh/session coordinator.
     const data = await request<{ name: string; content_base64: string }>('GET', path + '/content');
     const binary = atob(data.content_base64), bytes = Uint8Array.from(binary, char => char.charCodeAt(0));
@@ -45,15 +61,24 @@ export async function openWorkArtifact(session: string, artifact: { id: string; 
   // #endif
   // #ifdef APP-PLUS
   if (typeof plus !== 'undefined') {
-    const temporary = await downloadWorkArtifact(path);
-    const name = artifact.name.replace(/[\x00-\x1f/\\]/g, '_').slice(-120) || '产物';
-    const local = await new Promise<string>((resolve, reject) => plus.io.resolveLocalFileSystemURL(temporary, entry => {
-      plus.io.requestFileSystem(plus.io.PRIVATE_DOC, fs => {
-        if (!fs.root) return reject(new Error('文件保存失败'));
-        fs.root.getDirectory('work-results', { create: true }, directory => entry.copyTo(directory, `${Date.now()}-${name}`,
-          result => resolve(result.toLocalURL()), () => reject(new Error('文件保存失败'))), () => reject(new Error('文件保存失败')));
-      }, () => reject(new Error('文件保存失败')));
-    }, () => reject(new Error('下载文件不可用'))));
+    let local = await localWorkArtifact(session, artifact.id);
+    if (!local) {
+      const temporary = await downloadWorkArtifact(path);
+      const name = artifact.name.replace(/[\x00-\x1f/\\]/g, '_').slice(-120) || '产物';
+      local = await new Promise<string>((resolve, reject) => plus.io.resolveLocalFileSystemURL(temporary, entry => {
+        plus.io.requestFileSystem(plus.io.PRIVATE_DOC, fs => {
+          if (!fs.root) return reject(new Error('文件保存失败'));
+          fs.root.getDirectory('work-results', { create: true }, directory => entry.copyTo(directory, `${Date.now()}-${name}`,
+            result => resolve(result.toLocalURL()), () => reject(new Error('文件保存失败'))), () => reject(new Error('文件保存失败')));
+        }, () => reject(new Error('文件保存失败')));
+      }, () => reject(new Error('下载文件不可用'))));
+      uni.setStorageSync(artifactCacheKey(session, artifact.id), local);
+    }
+    if (action === 'share') {
+      if (plus.os.name !== 'Android') throw new Error('当前平台暂不支持文件分享');
+      shareDocument(plus.io.convertLocalFileSystemURL(local), artifact.name);
+      return;
+    }
     const extension = artifact.name.split('.').pop()?.toLowerCase();
     await new Promise<void>((resolve, reject) => uni.openDocument({ filePath: local, fileType: extension as any, showMenu: true, success: () => resolve(), fail: () => {
       plus.runtime.openFile(local, {}, () => uni.showToast({ title: '文件已保存，设备暂不支持打开此格式', icon: 'none' })); resolve();
