@@ -289,3 +289,18 @@ test('interrupted partial text and published files survive service restart witho
   assert.equal(before.find(e => e.type === 'text_delta').data.delta,'写到这里');
   assert.equal(calls,1);
 });
+
+test('SDK cancellation expires only its bound approval and leaves other pending approvals usable', async t => {
+ const cancelled=new AbortController();
+ const {store,s}=await fixture(t,async ctx=>{
+  const values=await Promise.all([ctx.ask('approval','Agent',{description:'一'},'a',cancelled.signal),ctx.ask('approval','Agent',{description:'二'},'b')]);
+  assert.equal(values[0],null); assert.equal(values[1].approved,true); return {success:true,text:'完成'};
+ });
+ await store.send(actor,s.id,{request_id:randomUUID(),prompt:'任务'});
+ await waitFor(()=>store.get(actor,s.id).interactions.length===2);
+ cancelled.abort(); await waitFor(()=>store.get(actor,s.id).interactions[0].status==='expired');
+ const live=store.get(actor,s.id).interactions[1];
+ assert.equal(store.get(actor,s.id).status,'waiting');
+ await store.answer(actor,s.id,live.id,{binding:live.binding,approved:true}); await settle(store,s.id);
+ assert.equal(store.get(actor,s.id).status,'idle');
+});

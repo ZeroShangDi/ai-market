@@ -76,7 +76,7 @@ export async function openWorkArtifact(session: string, artifact: { id: string; 
     }
     if (action === 'share') {
       if (plus.os.name !== 'Android') throw new Error('当前平台暂不支持文件分享');
-      shareDocument(plus.io.convertLocalFileSystemURL(local), artifact.name);
+      await new Promise<void>((resolve, reject) => shareDocument(plus.io.convertLocalFileSystemURL(local), artifact.name, error => error ? reject(new Error(error)) : resolve()));
       return;
     }
     const extension = artifact.name.split('.').pop()?.toLowerCase();

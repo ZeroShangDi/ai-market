@@ -29,7 +29,7 @@ function harness(handle) {
       onSessionChange: fn => { observers.push(fn);return () => {}; }, onDeviceChange: fn => { observers.push(fn);return () => {}; },
     },
   }, { setTimeout: fn => { timers.set(++serial, fn);return serial; }, clearTimeout: id => timers.delete(id) });
-  return { ...module.createWorkController(), calls, connections, observers, timers, snapshot: value => { snapshot=value; } };
+  return { create: module.createWorkController, ...module.createWorkController(), calls, connections, observers, timers, snapshot: value => { snapshot=value; } };
 }
 test('Work detaches observation on leave, preserves execution and replays with deduplicated cursors on return', async () => {
   const h=harness();await h.attach('1',true);const first=h.connections[0];
@@ -189,3 +189,25 @@ test('terminal refresh and reattachment retain all partial text events and resum
   for (const event of events) fresh.connections[0].chunk(event);
   assert.equal(JSON.stringify(fresh.state.events), retained); fresh.dispose();
 });
+
+ test('reopening restores memory before a delayed server response and account reset clears it', async () => {
+  let delayed; const h=harness(() => delayed ? delayed.promise : session({messages:[{id:'r',role:'user',content:'任务'}]}));
+  await h.attach('1',true);
+  h.connections[0].chunk({sequence:1,type:'text_delta',data:{delta:'执行过程'},run_id:'r'});
+  h.dispose(); delayed=deferred(); const next=h.create(); const opening=next.attach('1',true);
+  assert.equal(next.state.events.length,1); assert.equal(next.state.session.messages[0].content,'任务');
+  h.observers.forEach(fn=>fn()); delayed.resolve(session()); await opening;
+  assert.equal(next.state.session,null); next.dispose();
+ });
+ test('buffered SSE is supplemented by cursor batches and later duplicate SSE is ignored', async () => {
+  const event={sequence:1,type:'tool_start',data:{id:'tool',name:'Read'},run_id:'r'};
+  const h=harness((method,url)=>url.includes('/events/batch')?{items:[event],sequence:1,status:'running'}:session({status:'running',sequence:1}));
+  await h.attach('1',true); await Promise.resolve();
+  assert.equal(h.state.events.length,1); h.connections[0].chunk(event); assert.equal(h.state.events.length,1); h.dispose();
+ });
+ test('failed approval reconciles expired interaction without resubmitting consent', async () => {
+  const item={id:'i',binding:'b',status:'pending',kind:'approval',tool:'Agent',input:{}};
+  const h=harness((method,url)=>url.includes('/interactions/')?Promise.reject(Error('工作状态已变化')):session({sequence:2,interactions:[{...item,status:'expired'}]}));
+  await h.attach('1',true); await h.answer(item,{approved:true});
+  assert.equal(h.state.session.interactions[0].status,'expired'); assert.equal(h.calls.filter(c=>c[1].includes('/interactions/')).length,1); h.dispose();
+ });

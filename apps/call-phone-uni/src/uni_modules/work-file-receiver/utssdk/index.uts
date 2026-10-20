@@ -2,4 +2,6 @@ export function pendingFiles(): string { return '[]' }
 export function readPendingFile(id: string): string { return '' }
 export function discardPendingFile(id: string): boolean { return false }
 export function readDocument(uri: string): string { throw new Error('当前平台不支持原生文档读取') }
-export function shareDocument(path: string, name: string): void { throw new Error('请在 Android App 中分享文件') }
+export function shareDocument(path: string, name: string, callback: (error: string) => void): void { throw new Error('请在 Android App 中分享文件') }
+
+export function shareTextDocument(name: string, content: string, callback: (error: string) => void): void { throw new Error('请在 Android App 中分享日志') }

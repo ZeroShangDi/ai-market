@@ -195,7 +195,7 @@ class WorkPlugin(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(second['next_after'], 8)
         self.assertFalse(second['has_more'])
 
-    async def test_summary_is_generated_from_records_and_approval_preview_waits_for_playback(self):
+    async def test_short_summary_does_not_authorize_unreviewed_approval(self):
         plugin, context, _ = self.make()
         item = dict(id=IID, status='pending', kind='approval', tool='import', binding='b', input={'_display': {'label': '导入十条线索'}})
         state = session(status='waiting', interactions=[item])
@@ -212,7 +212,7 @@ class WorkPlugin(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn('tools', completion.call_args.kwargs)
         self.assertIn('导入十条线索', completion.call_args.kwargs['messages'][1]['content'])
         plugin.notice_delivered(notice['id'])
-        self.assertEqual(plugin.reviewed[(SID, IID)]['binding'], 'b')
+        self.assertEqual(plugin.reviewed, {})
 
     async def test_real_pipeline_loads_host_tools(self):
         from voice_service.pipeline import build_pipeline

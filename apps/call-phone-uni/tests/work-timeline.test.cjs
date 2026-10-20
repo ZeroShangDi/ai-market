@@ -59,9 +59,9 @@ test('queued runs retain their own text, files and source lists, including repea
   assert.equal(turns[1].items.filter(i => i.kind === 'file').length,0);
 });
 
-test('fresh replay waits for the durable result position before rendering snapshot-only output', () => {
+test('fresh replay immediately shows confirmed snapshot output and reconciles without duplicates', () => {
   const s = session({sequence:3,messages:[{id:'r',role:'user'},{id:'reply',role:'assistant',run_id:'r',content:'结果'}],artifacts:[{id:'f',name:'a.pdf',size:1,run_id:'r'}]});
-  assert.equal(workTurns(s,[])[0].items.length,0);
+  assert.deepEqual(Array.from(workTurns(s,[])[0].items,i => i.kind),['text','file']);
   const events = [event(1,'text_delta',{message_id:'a',delta:'过程'}),event(2,'artifact',{id:'f',name:'a.pdf',size:1}),event(3,'result',{text:'结果'})];
   assert.deepEqual(Array.from(workTurns(s,events)[0].items,i => i.kind),['text','file','text']);
 });

@@ -153,14 +153,32 @@ class WorkFileShareProvider : android.content.ContentProvider() {
 }
 
 object WorkFileShare {
+    @JvmStatic fun launch(activity: Activity, path: String, name: String, callback: (String) -> Unit) {
+        activity.runOnUiThread {
+            val error = try { share(activity, path, name); "" } catch (_: Exception) { "无法打开文件分享，请检查文件和接收应用后重试" }
+            callback(error)
+        }
+    }
+    @JvmStatic fun launchText(activity: Activity, name: String, content: String, callback: (String) -> Unit) {
+        activity.runOnUiThread {
+            val error = try { shareText(activity, name, content); "" } catch (_: Exception) { "日志分享失败，请重试" }
+            callback(error)
+        }
+    }
+    @JvmStatic fun shareText(activity: Activity, name: String, content: String) {
+        require(content.length <= 8 * 1024 * 1024) { "日志文件过大" }
+        val temporary = File.createTempFile("diagnostic-", ".txt", activity.cacheDir)
+        try { temporary.writeText(content, Charsets.UTF_8); share(activity, temporary.path, name) }
+        finally { temporary.delete() }
+    }
     @JvmStatic fun share(activity: Activity, path: String, name: String) {
-        val source = File(path).canonicalFile
+        val source = (if (path.startsWith("file://")) File(requireNotNull(Uri.parse(path).path)) else File(path)).canonicalFile
         val roots = listOf(File(activity.applicationInfo.dataDir)) + activity.getExternalFilesDirs(null).filterNotNull()
         require(source.isFile && roots.any { source.path.startsWith(it.canonicalPath + File.separator) }) { "本地文件不可用，请重新下载" }
         val root = File(activity.cacheDir, "work-file-share").apply { mkdirs() }
         root.listFiles()?.filter { System.currentTimeMillis() - it.lastModified() > 86400000L }?.forEach { it.deleteRecursively() }
         val folder = File(root, UUID.randomUUID().toString()).apply { mkdirs() }
-        val safeName = name.replace(Regex("[\\\\/\\x00-\\x1f]"), "_").takeLast(120).ifBlank { "文件" }
+        val safeName = name.map { if (it == '/' || it == '\\' || it.code < 32) '_' else it }.joinToString("").takeLast(120).ifBlank { "文件" }
         require(safeName != "." && safeName != "..") { "文件名无效" }
         val target = File(folder, safeName)
         try {

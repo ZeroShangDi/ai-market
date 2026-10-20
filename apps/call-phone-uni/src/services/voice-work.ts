@@ -1,5 +1,4 @@
 /** Confirmed Work submission owns its lifetime independently of the audio surface. */
-import { reactive } from 'vue';
 import { request, onSessionChange, onDeviceChange, getSessionVersion, hasAccessToken, hasCallphoneDeviceCredential } from '@/api/http';
 import { activePackage } from '@/modules/pet-packages';
 import type { WorkSession, WorkSummary } from './work';
@@ -8,7 +7,7 @@ export interface TaskProposal { id: string; prompt: string }
 const pending = new Map<string, { proposal: TaskProposal; character: string; confirmed: boolean; running: boolean; conversation?: string; session?: string; submitted?: boolean }>();
 const base = '/api/v1/mobile/work/sessions';
 let epoch = 0;
-export function resetVoiceWork() { epoch++; pending.clear(); taskChat.notices=[]; }
+export function resetVoiceWork() { epoch++; pending.clear(); }
 onSessionChange(resetVoiceWork); onDeviceChange(resetVoiceWork);
 export function rememberProposal(value: any): TaskProposal | undefined {
   if (!value || typeof value.id !== 'string' || !/^[a-f0-9-]{36}$/.test(value.id) || typeof value.prompt !== 'string' || !value.prompt.trim() || value.prompt.length > 6000) return;
@@ -45,13 +44,6 @@ export async function submitConfirmedTask(id: string): Promise<string> {
 }
 
 export interface TaskNotice { id: string; text: string; conversation?: string }
-export const taskChat = reactive({ visible:false, notices:[] as TaskNotice[] });
-export function showTaskInChat(notice:TaskNotice) {
-  if (!taskChat.visible) return false;
-  if (!taskChat.notices.some(n=>n.id===notice.id)) taskChat.notices.push(notice);
-  if (taskChat.notices.length>10) taskChat.notices.shift();
-  return true;
-}
 export function createWorkNotifier(host: { available:()=>boolean; deliver:(notice:TaskNotice,current:()=>boolean)=>Promise<boolean> }) {
   let timer: ReturnType<typeof setInterval> | undefined, busy=false, generation=0;
   const delivered = new Set<string>();
@@ -63,15 +55,15 @@ export function createWorkNotifier(host: { available:()=>boolean; deliver:(notic
       const list=await request<{items:WorkSummary[]}>('GET',base);
       if (!current()) return;
       for (const item of list.items) {
-        if (!item.started || item.status==='running' || (!item.unread && !item.pending.length && !['failed','interrupted'].includes(item.status))) continue;
+        if (!item.started || ['running','closed'].includes(item.status) || (!item.unread && !item.pending.length && !['failed','interrupted'].includes(item.status))) continue;
         const key=`${item.id}:${item.sequence}`;
         if (delivered.has(key)) continue;
         const detail=await request<WorkSession>('GET',`${base}/${item.id}`);
         if (!current()) return;
         if (detail.sequence!==item.sequence) continue;
-        const result=[...detail.messages].reverse().find(m=>m.role==='assistant')?.content || '';
+        const result=[...detail.messages].reverse().find(m=>m.role==='assistant' && m.run_id===detail.run_id)?.content || '';
         const status=item.pending.length ? '需要你处理，请到工作台查看' : ['failed','interrupted'].includes(item.status) ? '未完成，请到工作台核对' : '已完成';
-        const notice={id:key,conversation:item.conversation_id,text:`任务“${item.title.slice(0,60)}”${status}。${status==='已完成' ? result.slice(0,500) : ''}`};
+        const notice={id:key,conversation:item.conversation_id,text:`任务“${item.title.slice(0,24)}”${status}。${status==='已完成' ? result.replace(/\s+/g,' ').split(/[。！？\n]/)[0].slice(0,80) : ''}`};
         if (await host.deliver(notice,current) && current()) delivered.add(key);
         // One notice per poll so completed tasks do not flood an active conversation.
         break;

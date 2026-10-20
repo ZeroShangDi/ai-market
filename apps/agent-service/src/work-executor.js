@@ -80,17 +80,17 @@ export function createWorkExecutor({ provider = process.env.AGENT_PROVIDER || 'a
       }, { annotations: { readOnlyHint: false, destructiveHint: false } }),
     ] });
     const decisions = new Map();
-    async function question(tool, input, id) {
-      const answer = await ctx.ask('question', tool, input, id);
+    async function question(tool, input, id, approvalSignal) {
+      const answer = await ctx.ask('question', tool, input, id, approvalSignal);
       return answer ? { behavior: 'allow', updatedInput: { ...input, answers: answer.answers } } : { behavior: 'deny', message: '用户已取消提问' };
     }
-    async function authorize(tool, input, id) {
+    async function authorize(tool, input, id, approvalSignal) {
       if (signal.aborted) return { behavior: 'deny', message: '工作已打断' };
       try { await ctx.validatePlugins?.(tool, input); } catch (e) { return { behavior: 'deny', message: e.message }; }
       const key = digest({ tool, input, id });
       if (decisions.has(key)) return decisions.get(key);
       const promise = (async () => {
-        if (tool === 'AskUserQuestion') return question(tool, input, id);
+        if (tool === 'AskUserQuestion') return question(tool, input, id, approvalSignal);
         let risk = 3;
         try {
           if (readTools.has(tool) || ['Write', 'Edit', 'NotebookEdit'].includes(tool)) {
@@ -124,8 +124,8 @@ export function createWorkExecutor({ provider = process.env.AGENT_PROVIDER || 'a
             try { fields = await definition.approval(input); }
             catch { return { behavior: 'deny', message: '操作预览已变化或无法核验，请重新检查' }; }
           }
-          const answer = await ctx.ask('approval', tool, { ...input, _display: definition ? { label: definition.label, fields } : undefined, _risk: risk }, id);
-          if (!answer?.approved || signal.aborted) return { behavior: 'deny', message: '用户拒绝、取消或批准失效' };
+          const answer = await ctx.ask('approval', tool, { ...input, _display: definition ? { label: definition.label, fields } : undefined, _risk: risk }, id, approvalSignal);
+          if (!answer?.approved || signal.aborted || approvalSignal?.aborted) return { behavior: 'deny', message: '用户拒绝、取消或批准失效' };
         }
         try { await ctx.validatePlugins?.(tool, input); } catch (e) { return { behavior: 'deny', message: e.message }; }
         return { behavior: 'allow', updatedInput: input };
@@ -146,10 +146,10 @@ export function createWorkExecutor({ provider = process.env.AGENT_PROVIDER || 'a
       strictMcpConfig: true, mcpServers: { ...Object.fromEntries(Object.entries(managed.mcpServers).map(([name, server]) => [name,
         ['http', 'sse'].includes(server.type) ? { ...server, headers: { ...server.headers, 'X-AI-Tenant': ctx.identity?.tenant || '', 'X-AI-User': ctx.identity?.user || '' } }
           : { ...server, env: { ...server.env, WORK_TENANT_ID: ctx.identity?.tenant || '', WORK_USER_ID: ctx.identity?.user || '' } }])), work: registered, ...capabilities.servers },
-      canUseTool: (tool, input, meta) => authorize(tool, input, meta.toolUseID),
-      hooks: { PreToolUse: [{ hooks: [async event => {
+      canUseTool: (tool, input, meta) => authorize(tool, input, meta.toolUseID, meta.signal),
+      hooks: { PreToolUse: [{ timeout: 1800, hooks: [async (event, _id, hook) => {
         if (event.tool_name === 'AskUserQuestion') return hookDecision('ask', '需要用户答复');
-        const decision = await authorize(event.tool_name, event.tool_input, event.tool_use_id);
+        const decision = await authorize(event.tool_name, event.tool_input, event.tool_use_id, hook?.signal);
         return hookDecision(decision.behavior, decision.message || '服务端执行边界已核验', decision.updatedInput);
       }] }] },
     };

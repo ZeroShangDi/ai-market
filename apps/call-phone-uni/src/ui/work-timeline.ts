@@ -3,7 +3,7 @@ import { workSteps, workReceipts } from './work-presentation';
 import { markdownHttpUrl } from './chat-markdown';
 
 type File = WorkSession['artifacts'][number];
-type TextItem = { kind: 'text'; id: string; content: string; complete: boolean };
+type TextItem = { kind: 'text'; id: string; content: string; complete: boolean; final?: boolean };
 export type WorkTimelineItem = TextItem
   | { kind: 'step'; id: string; label: string; status: string }
   | { kind: 'file'; id: string; file: File }
@@ -12,7 +12,6 @@ export type WorkTimelineItem = TextItem
 /** One response container per run, shared by live rendering and durable replay. */
 export function workTurns(session: WorkSession | null, events: WorkEvent[]) {
   if (!session) return [];
-  const caughtUp = !session.sequence || (events[events.length - 1]?.sequence || 0) >= session.sequence;
   return session.messages.filter(message => message.role === 'user').map(user => {
     const timeline = events.filter(event => event.run_id === user.id);
     const items: WorkTimelineItem[] = [];
@@ -32,7 +31,10 @@ export function workTurns(session: WorkSession | null, events: WorkEvent[]) {
     }
     function finalText(content: unknown, id: string) {
       // A result repeats the last assistant message; it must not move or duplicate it.
-      if (typeof content === 'string' && content && lastText?.content !== content) addText(id, content, true);
+      if (typeof content !== 'string' || !content) return;
+      const existing = [...texts.values()].find(item => item.content === content);
+      const item = existing || addText(id, content, true);
+      item.final = true;
     }
     for (const event of timeline) {
       const data = event.data;
@@ -60,12 +62,9 @@ export function workTurns(session: WorkSession | null, events: WorkEvent[]) {
       }
       if (event.type === 'result') finalText(data.text, `result:${event.sequence}`);
     }
-    // Snapshot-only compatibility is deferred until replay catches up, so output never
-    // appears at a guessed location and then jumps when its earlier event arrives.
-    if (caughtUp) {
-      for (const message of session.messages.filter(message => message.role === 'assistant' && message.run_id === user.id)) finalText(message.content, `reply:${message.id}`);
-      for (const file of session.artifacts.filter(file => file.run_id === user.id)) addFile(file);
-    }
+    // A confirmed result/file is useful immediately, even if event replay is delayed.
+    for (const message of session.messages.filter(message => message.role === 'assistant' && message.run_id === user.id)) finalText(message.content, `reply:${message.id}`);
+    for (const file of session.artifacts.filter(file => file.run_id === user.id)) addFile(file);
     return { id: user.id, user, items, sources: [...sources.values()] };
   });
 }

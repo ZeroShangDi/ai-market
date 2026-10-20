@@ -75,4 +75,14 @@ class MobileWorkControllerTest {
         doThrow(new MobileAiRelay.ConversationFailure(503)).when(chat).requireConversation("123", "1", "7", "10");
         assertThrows(MobileAiRelay.ConversationFailure.class, () -> controller.list(new MockHttpServletRequest()));
     }
+    @Test void eventBatchRequiresOwnershipAndPreservesCursor() {
+        var controller = controller(); owned(); var request = new MockHttpServletRequest();
+        var data = envelope(json.createObjectNode().put("sequence", 12).set("items", json.createArrayNode()));
+        when(relay.request("GET", "/" + SID + "/events?after=7", null, null, actor)).thenReturn(data);
+        assertEquals(data, controller.eventBatch(request, SID, 7).getBody());
+        assertThrows(AgentRelay.Failure.class, () -> controller.eventBatch(request, SID, -1));
+        doThrow(new MobileAiRelay.ConversationFailure(403)).when(chat).requireConversation("123", "1", "7", "10");
+        assertThrows(MobileAiRelay.ConversationFailure.class, () -> controller.eventBatch(request, SID, 8));
+        verify(relay, never()).request("GET", "/" + SID + "/events?after=8", null, null, actor);
+    }
 }

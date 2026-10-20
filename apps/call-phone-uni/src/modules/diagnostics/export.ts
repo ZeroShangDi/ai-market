@@ -61,3 +61,16 @@ export async function downloadLog(name: string, content: string): Promise<boolea
   // #endif
   throw new Error('当前平台暂不支持日志下载');
 }
+
+/** Opening the chooser confirms handoff only, not delivery by the selected app. */
+export async function shareLog(name: string, content: string): Promise<'shared' | 'downloaded'> {
+  // #ifdef APP-PLUS
+  if (typeof plus !== 'undefined' && plus.os.name === 'Android') {
+    const { shareTextDocument } = await import('@/uni_modules/work-file-receiver');
+    await new Promise<void>((resolve, reject) => shareTextDocument(name.replace(/\.jsonl$/, '.txt'), content, error => error ? reject(new Error(error)) : resolve()));
+    return 'shared';
+  }
+  // #endif
+  await downloadLog(name, content);
+  return 'downloaded';
+}

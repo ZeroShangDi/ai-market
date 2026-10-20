@@ -231,7 +231,7 @@ export class WorkStore {
         currentResourceIds: ids, resources: s.resources.filter(r => s.messages.some(message => message.role === 'user' && !['queued', 'cancelled'].includes(message.delivery) && message.resource_ids?.includes(r.id))), signal: run.controller.signal,
         onSession: async id => { ensureCurrent(); if (s.sdk_session_id && s.sdk_session_id !== id) throw conflict('原生会话映射不一致，请核对后继续'); s.sdk_session_id = id; await this.save(s); },
         onEvent: (type, data) => { ensureCurrent(); return this.emit(s, type, data); },
-        ask: (kind, tool, input, toolUseId) => this.ask(s, run, kind, tool, input, toolUseId),
+        ask: (kind, tool, input, toolUseId, signal) => this.ask(s, run, kind, tool, input, toolUseId, signal),
         backup: async () => { ensureCurrent(); const item = await snapshot(this.paths(s).cwd, join(this.paths(s).base, 'snapshots')); ensureCurrent(); s.snapshots.push(item); await this.emit(s, 'snapshot', item); },
         publish: async path => { ensureCurrent(); const item = await publishFile(this.paths(s).cwd, join(this.paths(s).base, 'artifacts'), path); ensureCurrent(); item.run_id = s.run_id; s.artifacts.push(item); await this.emit(s, 'artifact', item); return item; },
       });
@@ -245,13 +245,16 @@ export class WorkStore {
     } finally {
       clearTimeout(timer); run.accepting = false;
       for (const message of s.messages) if (['queued', 'running'].includes(message.delivery)) message.delivery = message.delivery === 'running' ? 'interrupted' : 'cancelled';
-      for (const i of s.interactions) if (i.status === 'pending') i.status = 'expired';
+      for (const i of s.interactions) if (i.status === 'pending') {
+        i.status = 'expired';
+        await this.emit(s, 'interaction_expired', { id: i.id, status: i.status });
+      }
       for (const resolve of run.pending.values()) resolve(null);
       this.runs.delete(s.id); await this.save(s);
     }
   }
-  async ask(s, run, kind, tool, input, toolUseId) {
-    if (run.controller.signal.aborted) return null;
+  async ask(s, run, kind, tool, input, toolUseId, signal) {
+    if (run.controller.signal.aborted || signal?.aborted) return null;
     const binding = digest({ run: s.run_id, tool, input, toolUseId });
     if (run.authorization.has(binding)) return run.authorization.get(binding);
     const interaction = { id: randomUUID(), kind, tool, input: structuredClone(input), binding, status: 'pending', run_id: s.run_id, created_at: new Date().toISOString() };
@@ -259,10 +262,17 @@ export class WorkStore {
     let resolveAnswer;
     const answer = new Promise(resolve => { resolveAnswer = resolve; }); run.pending.set(interaction.id, resolveAnswer);
     const abort = () => resolveAnswer(null); run.controller.signal.addEventListener('abort', abort, { once: true });
+    signal?.addEventListener('abort', abort, { once: true });
     try {
       await this.emit(s, 'interaction', interaction);
-      const value = await answer; run.authorization.set(binding, value); return value;
-    } finally { run.controller.signal.removeEventListener('abort', abort); run.pending.delete(interaction.id); }
+      const value = await answer;
+      if (interaction.status === 'pending') {
+        interaction.status = 'expired';
+        if (s.status === 'waiting' && !s.interactions.some(i => i.status === 'pending')) s.status = 'running';
+        await this.emit(s, 'interaction_expired', { id: interaction.id, status: interaction.status });
+      }
+      run.authorization.set(binding, value); return value;
+    } finally { run.controller.signal.removeEventListener('abort', abort); signal?.removeEventListener('abort', abort); run.pending.delete(interaction.id); }
   }
   async answer(actor, id, interactionId, value) {
     const s = this.get(actor, id), i = s.interactions.find(i => i.id === uuid(interactionId));
@@ -278,7 +288,7 @@ export class WorkStore {
     i.status = 'answered'; i.answer = answer;
     s.status = s.interactions.some(i => i.status === 'pending') ? 'waiting' : 'running';
     await this.emit(s, 'interaction_answered', { id: i.id, status: i.status });
-    run.pending.get(i.id)(answer); return this.view(s);
+    run.pending.get(i.id)?.(answer); return this.view(s);
   }
   async stop(actor, id, close = false) {
     const s = this.get(actor, id), run = this.runs.get(s.id);

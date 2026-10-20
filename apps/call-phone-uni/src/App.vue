@@ -5,7 +5,7 @@ import { receiveIncomingWorkFiles } from '@/services/incoming-work-files';
 import { testConnectivity } from "@/services/connectivity";
 import { resumeDeviceSession } from "@/services/session";
 import { onApplicationShow } from "@/modules/device-readiness";
-import { configureMobilePet, refreshMobilePet, onPetAction, setMobilePetText, setMobilePetEnabled, mobilePet, isPetActive } from "@/modules/mobile-pet";
+import { configureMobilePet, refreshMobilePet, onPetAction, setMobilePetText, setMobilePetEnabled, mobilePet } from "@/modules/mobile-pet";
 import { voiceBubble } from "@/modules/voice/transcript";
 import { toggleDesktopVoice, closeVoice, closeAppVoice, onVoiceTranscript, voice, notifyVoiceTask } from "@/modules/voice";
 import { checkUpdates } from "@/services/updates";
@@ -16,16 +16,12 @@ import {
   stopForeground,
   networkRestored,
 } from "@/services/foreground";
-import { createWorkNotifier, taskChat, showTaskInChat } from '@/services/voice-work';
+import { createWorkNotifier } from '@/services/voice-work';
 const workNotifier = createWorkNotifier({
-  available: () => voice.active || taskChat.visible || isPetActive(),
-  deliver: async (notice, current) => {
+  available: () => voice.active,
+  deliver: async (notice) => {
     if (voice.active && await notifyVoiceTask(notice)) return true;
-    if (!current()) return false;
-    if (showTaskInChat(notice)) return true;
-    if (!isPetActive()) return false;
-    await setMobilePetText(Array.from(notice.text).slice(0,76).join('')+'…');
-    return true;
+    return false;
   },
 });
 configureMobilePet({ preferenceKey: "callphone.mobile-pet.enabled" });

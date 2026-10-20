@@ -3,17 +3,25 @@
     <scroll-view class="work-scroll" scroll-y :scroll-top="scrollTop" @touchmove="followLatest = false" @wheel="followLatest = false" @scrolltolower="followLatest = true">
       <view class="work-content">
 
-        <view v-if="state.loading">正在读取工作会话…</view>
-        <view v-if="!state.session?.messages.length" class="work-welcome">这次想完成什么？</view>
+        <view v-if="state.loading && !state.session">正在读取工作会话…</view>
+        <view v-if="!state.loading && !state.session?.messages.length" class="work-welcome">这次想完成什么？</view>
         <view v-for="turn in turns" :key="turn.id" class="work-turn">
           <view class="work-message user">
             <text v-if="turn.user.delivery === 'queued' || turn.user.delivery === 'cancelled' || turn.user.delivery === 'interrupted'" class="work-note">{{ turn.user.delivery === 'queued' ? '排队中' : turn.user.delivery === 'interrupted' ? '执行已中断' : '已取消执行' }}</text>
             <text class="work-text">{{ turn.user.content }}</text>
             <scroll-view v-if="turn.user.resource_ids?.length" scroll-x class="sent-files"><view class="sent-files-track"><view v-for="file in messageResources(turn.user.resource_ids)" :key="file.id" class="sent-file"><TIcon :name="fileAppearance(file.name).icon" :color="fileAppearance(file.name).color" size="16px" /><text>{{ file.name }}</text></view></view></scroll-view>
           </view>
-          <view v-if="turn.items.length || turn.sources.length" class="work-message assistant">
-            <view class="process-heading"><text>{{ processLabel(turn.id) }}</text></view>
-            <view v-for="item in turn.items" :key="item.id" class="timeline-item">
+          <view class="work-message assistant">
+            <view class="process">
+              <view class="process-heading" role="button" @tap="toggleDetail('process-collapsed', turn.id)"><TIcon :name="detailOpen('process-collapsed', turn.id) ? 'chevron-right' : 'chevron-down'" size="14px" /><text>{{ processLabel(turn.id) }}</text></view>
+              <view v-if="!detailOpen('process-collapsed', turn.id)" class="process-list">
+                <view v-for="item in turn.items.filter(item => item.kind === 'step' || (item.kind === 'text' && !item.final))" :key="item.id" class="timeline-item">
+                  <view v-if="item.kind === 'step'" class="process-step"><TIcon :name="item.status === '完成' ? 'check' : 'time'" size="13px" /><text class="step-label">{{ item.label }}</text><text class="step-status">{{ item.status }}</text></view>
+                  <view v-else-if="item.kind === 'text'" class="process-note"><TChatMarkdown :content="item.content" @click="handleMarkdownClick" /></view>
+                </view>
+              </view>
+            </view>
+            <view v-for="item in turn.items.filter(item => item.kind !== 'step' && (item.kind !== 'text' || item.final))" :key="item.id" class="timeline-item">
               <template v-if="item.kind === 'text'">
                 <TChatMarkdown :content="item.content" @click="handleMarkdownClick" />
                 <view v-if="item.content" class="reply-actions"><view role="button" aria-label="复制回复" @tap="copyReply(item.content)"><TIcon name="copy" size="16px" /></view></view>
@@ -58,7 +66,7 @@
               </view>
               <input class="answer-input" :value="answers[item.id]?.[question.question] || ''" placeholder="其他想法，直接输入…" @input="answerInput(item.id, question.question, $event)" />
             </view>
-            <view class="buttons"><button size="mini" @tap="controller.interrupt()">取消</button><button size="mini" :disabled="state.submitting || !allAnswered(item)" @tap="controller.answer(item, { answers: answers[item.id] || {} })">继续<TIcon name="arrow-right" size="14px" /></button></view>
+            <view class="buttons"><button size="mini" @tap="controller.interrupt()">取消</button><button size="mini" :disabled="state.loading || state.submitting || !allAnswered(item)" @tap="controller.answer(item, { answers: answers[item.id] || {} })">继续<TIcon name="arrow-right" size="14px" /></button></view>
           </template>
           <template v-else>
             <view class="interaction-eyebrow"><TIcon name="lock-on" size="14px" color="#c79243" /><text>需要你的授权</text><text v-if="item.input._risk === 3" class="risk-label">业务操作</text></view>
@@ -66,7 +74,7 @@
             <view class="approval-fields"><view v-for="field in approvalFields(item.tool, item.input)" :key="field.label" class="approval-field"><text>{{ field.label }}</text><text>{{ field.value }}</text></view></view>
             <view class="details-toggle" @tap="details = !details">{{ details ? '收起' : '查看' }}操作详情</view>
             <text v-if="details" class="operation-params">{{ approvalDetails(item) }}</text>
-            <view class="buttons"><button size="mini" :disabled="state.submitting" @tap="controller.answer(item, { approved: false })">拒绝</button><button size="mini" :disabled="state.submitting" @tap="approve(item)">允许这一次</button></view>
+            <view class="buttons"><button size="mini" :disabled="state.loading || state.submitting" @tap="controller.answer(item, { approved: false })">拒绝</button><button size="mini" :disabled="state.loading || state.submitting" @tap="approve(item)">允许这一次</button></view>
           </template>
         </view>
       </scroll-view></view>
@@ -197,7 +205,21 @@ let seen = 0;
 const now = ref(Date.now());
 const clock = setInterval(() => { if (props.visible && busy.value) now.value = Date.now(); }, 1000);
 function runFinished(run: string) { return state.events.some(e => e.run_id === run && ['result', 'error'].includes(e.type)) || (!!state.session && (state.session.run_id !== run || !busy.value)); }
-function processLabel(run: string) { const elapsed = workElapsed(state.events, run, now.value); const failed = state.events.some(e => e.run_id === run && (e.type === 'error' || (e.type === 'result' && e.data.success === false))); return `${runFinished(run) ? (state.session?.messages.find(m => m.id === run)?.delivery === 'interrupted' ? '已中断' : failed ? '工作未完成' : '已完成') : '正在处理'}${elapsed ? ' · 用时 ' + elapsed : ''}`; }
+function processLabel(run: string) {
+  const user = state.session?.messages.find(message => message.id === run);
+  const delivery = user?.delivery;
+  const finished = runFinished(run);
+  const failed = delivery === 'failed' || state.events.some(e => e.run_id === run && (e.type === 'error' || (e.type === 'result' && e.data.success === false)));
+  const label = delivery === 'queued' ? '排队中' : delivery === 'cancelled' ? '已取消' : delivery === 'interrupted' ? '已中断' : failed ? '工作未完成' : finished ? '已完成' : '正在处理';
+  let elapsed = workElapsed(state.events, run, now.value);
+  if (!elapsed && user?.created_at && delivery !== 'queued') {
+    const result = state.session?.messages.find(message => message.role === 'assistant' && message.run_id === run);
+    const end = finished ? Date.parse(result?.created_at || '') : now.value;
+    const seconds = Math.max(0, Math.floor((end - Date.parse(user.created_at)) / 1000));
+    if (Number.isFinite(seconds)) elapsed = seconds < 60 ? `${seconds} 秒` : `${Math.floor(seconds / 60)} 分 ${seconds % 60} 秒`;
+  }
+  return `${label}${elapsed ? ' · 用时 ' + elapsed : ''}`;
+}
 
 function fileKind(name: string) { return /\.(xlsx?|csv|tsv)$/i.test(name) ? 'sheet' : /\.pdf$/i.test(name) ? 'pdf' : 'document'; }
 watch(() => state.session, session => {

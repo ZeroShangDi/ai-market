@@ -46,7 +46,7 @@ function setup() {
     resolveLocalFileSystemURL: (value, success, fail) => files.has(value) ? success({isFile:true,copyTo: (dir, name, done) => { const local = '/saved/' + name; files.add(local); done({toLocalURL: () => local}); }}) : fail(),
     requestFileSystem: (kind, success) => success({root:{getDirectory: (name, options, done) => done(directory)}}),
   } };
-  const requireMock = name => name === '@/api/http' ? {downloadWorkArtifact: async () => { downloads++; files.add('/temp'); return '/temp'; }} : name === '@/uni_modules/work-file-receiver' ? {shareDocument: () => { shares++; }} : {};
+  const requireMock = name => name === '@/api/http' ? {downloadWorkArtifact: async () => { downloads++; files.add('/temp'); return '/temp'; }} : name === '@/uni_modules/work-file-receiver' ? {shareDocument: (_path, _name, callback) => { shares++; callback(''); }} : {};
   vm.runInNewContext(ts.transpileModule(fs.readFileSync(path.join(__dirname, '../src/services/work-files.ts'), 'utf8'), {compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2020}}).outputText, {exports:output, require:requireMock, uni, plus, Date});
   return {output, files, counts: () => ({downloads,opens,shares})};
 }

@@ -2,14 +2,14 @@
   <view class="logs-card">
     <view class="logs-row">
       <text class="logs-title">诊断日志</text>
-      <button class="logs-action" :disabled="exporting" @tap="download">{{ exporting ? '导出中…' : '导出日志' }}</button>
+      <button class="logs-action" :disabled="exporting" @tap="download">{{ exporting ? '准备中…' : '分享日志' }}</button>
     </view>
   </view>
 </template>
 <script setup lang="ts">
 import { ref } from 'vue';
 import { logger, diagnosticEnvironment } from '@/services/logger';
-import { downloadLog } from '@/modules/diagnostics/export';
+import { shareLog } from '@/modules/diagnostics/export';
 const exporting = ref(false);
 async function download() {
   if (exporting.value) return;
@@ -18,9 +18,9 @@ async function download() {
     logger.info('diagnostics', 'export.requested');
     const content = logger.export(diagnosticEnvironment());
     const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-    const saved = await downloadLog(`tongzige-diagnostics-${stamp}.jsonl`, content);
-    if (saved) uni.showToast({ title: '日志已导出', icon: 'success' });
-    logger.info('diagnostics', saved ? 'export.completed' : 'export.cancelled');
+    const saved = await shareLog(`tongzige-diagnostics-${stamp}.jsonl`, content);
+    if (saved === 'downloaded') uni.showToast({ title: '日志已导出', icon: 'success' });
+    logger.info('diagnostics', saved === 'shared' ? 'share.opened' : 'export.completed');
   } catch (error) {
     logger.error('diagnostics', 'export.failed', { error });
     uni.showToast({ title: error instanceof Error ? error.message : '日志导出失败，请重试', icon: 'none' });

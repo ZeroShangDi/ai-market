@@ -22,8 +22,14 @@ export function readDocument(uri: string): string {
   return WorkFileInbox.readDocument(context, uri)
 }
 
-export function shareDocument(path: string, name: string): void {
+export function shareDocument(path: string, name: string, callback: (error: string) => void): void {
   const activity = UTSAndroid.getUniActivity()
   if (activity == null) throw new Error('应用尚未就绪')
-  WorkFileShare.share(activity, path, name)
+  WorkFileShare.launch(activity, path, name, callback)
+}
+
+export function shareTextDocument(name: string, content: string, callback: (error: string) => void): void {
+  const activity = UTSAndroid.getUniActivity()
+  if (activity == null) throw new Error('应用尚未就绪')
+  WorkFileShare.launchText(activity, name, content, callback)
 }

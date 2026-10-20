@@ -122,6 +122,13 @@ public class MobileWorkController {
         AgentActor actor = actor(request); String sid = id(sessionId); owned(actor, sid);
         return ok(relay.request("GET", "/" + sid + "/artifacts/" + id(artifactId), null, null, actor));
     }
+    @GetMapping("/{sessionId}/events/batch")
+    @ApiAccessLog(requestEnable = false, responseEnable = false)
+    public ResponseEntity<JsonNode> eventBatch(HttpServletRequest request, @PathVariable String sessionId, @RequestParam(defaultValue = "0") long after) {
+        AgentActor actor = actor(request); String sid = id(sessionId); owned(actor, sid);
+        if (after < 0) throw new AgentRelay.Failure(400, "VALIDATION_ERROR", "事件游标无效");
+        return ok(relay.request("GET", "/" + sid + "/events?after=" + after, null, null, actor));
+    }
     @GetMapping(value = "/{sessionId}/events", produces = "text/event-stream")
     @ApiAccessLog(requestEnable = false, responseEnable = false)
     public SseEmitter events(HttpServletRequest request, @PathVariable String sessionId, @RequestParam(defaultValue = "0") long after) {

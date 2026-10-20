@@ -14,7 +14,7 @@ export interface WorkPlugin {
 export interface WorkSession {
   plugins?: { id: string; name?: string; added: boolean }[];
   id: string; conversation_id: string; status: string; sequence: number; run_id?: string | null;
-  messages: { id: string; role: string; content: string; run_id?: string; resource_ids?: string[]; delivery?: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled' | 'interrupted' }[];
+  messages: { id: string; role: string; content: string; created_at?: string; run_id?: string; resource_ids?: string[]; delivery?: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled' | 'interrupted' }[];
   interactions: WorkInteraction[]; resources: { id: string; name: string }[];
   artifacts: { id: string; name: string; size: number; run_id?: string }[];
 }
@@ -39,17 +39,41 @@ export function workStatus(item: WorkSummary) {
   return ({ failed: '执行失败', interrupted: '已中断', closed: '已关闭', idle: '已完成', waiting: '等你处理' } as Record<string, string>)[item.status] || '工作';
 }
 
+// In-memory only: leaving a page must not discard its replay cursor or visible work.
+// Account/device changes clear the entire cache before another identity can use it.
+const conversationCache = new Map<string, { json: string; bytes: number }>();
+function clearConversationCache() { conversationCache.clear(); }
+onSessionChange(clearConversationCache); onDeviceChange(clearConversationCache);
+
 export function createWorkController() {
   const state = reactive({ session: null as WorkSession | null, error: '', draft: '', loading: false, submitting: false, uploading: false,
     plugins: [] as WorkPlugin[], pluginLoading: false, liveText: '', activity: '', selected: [] as string[], events: [] as WorkEvent[], conversation: '', visible: false });
   let identityEpoch = 0;
   let epoch = 0, cursor = 0, stream: ReturnType<typeof xhr> | undefined;
   let timer: ReturnType<typeof setTimeout> | undefined;
+  let syncTimer: ReturnType<typeof setTimeout> | undefined;
+  let observation = 0;
   let liveMessage = '';
   let pending: { prompt: string; ids: string; key: string } | undefined;
   const fence = () => ({ epoch, conversation: state.conversation });
   const current = (f: ReturnType<typeof fence>) => epoch === f.epoch && state.visible && state.conversation === f.conversation;
-  function detach() { clearTimeout(timer); const previous = stream; stream = undefined; previous?.abort(); }
+  function cache() {
+    if (!state.session || !state.conversation) return;
+    const json = JSON.stringify({ session: state.session, events: state.events, cursor });
+    const bytes = json.length * 2;
+    conversationCache.delete(state.conversation);
+    if (bytes > 4 * 1024 * 1024) return;
+    conversationCache.set(state.conversation, { json, bytes });
+    while (conversationCache.size > 6 || [...conversationCache.values()].reduce((sum, item) => sum + item.bytes, 0) > 4 * 1024 * 1024)
+      conversationCache.delete(conversationCache.keys().next().value!);
+  }
+  function restore(conversation: string) {
+    const saved = conversationCache.get(conversation);
+    if (!saved) return;
+    const value = JSON.parse(saved.json);
+    state.session = value.session; state.events = value.events; cursor = value.cursor;
+  }
+  function detach() { observation++; clearTimeout(timer); clearTimeout(syncTimer); const previous = stream; stream = undefined; previous?.abort(); }
   function reset() { identityEpoch++; state.uploading = false; epoch++; detach(); state.session = null; state.plugins = []; state.pluginLoading = false; state.draft = ''; state.selected = []; state.events = []; state.liveText = ''; state.activity = ''; state.error = ''; state.submitting = false; state.loading = false; pending = undefined; cursor = 0; }
   const unsub = [onSessionChange(reset), onDeviceChange(reset)];
   function retainResources(session: WorkSession) {
@@ -78,13 +102,29 @@ export function createWorkController() {
     if (currentRun && event.type === 'assistant' && !event.data.parent_tool_use_id) state.liveText = event.data.content;
     if (currentRun && ['tool_start', 'tool_call', 'audit'].includes(event.type)) state.activity = `正在执行 ${event.data.name || event.data.tool || ''}`;
     if (currentRun && event.type === 'error') state.error = event.data.message;
-    if (['result', 'error', 'interaction', 'interaction_answered', 'artifact', 'resource', 'status', 'message_queued'].includes(event.type)) {
-      if (currentRun) void refresh(token).then(() => { if (current(token) && event.run_id === state.session?.run_id && ['result', 'error'].includes(event.type)) { state.liveText = ''; state.activity = ''; } }).catch(e => { if (current(token)) state.error = e.message; });
+    if (['result', 'error', 'interaction', 'interaction_answered', 'interaction_expired', 'artifact', 'resource', 'status', 'message_queued'].includes(event.type)) {
+      if (event.sequence > (state.session?.sequence || 0)) void refresh(token).then(() => { if (current(token) && event.run_id === state.session?.run_id && ['result', 'error'].includes(event.type)) { state.liveText = ''; state.activity = ''; } }).catch(e => { if (current(token)) state.error = e.message; });
     }
   }
   function observe(token: ReturnType<typeof fence>) {
     if (!current(token) || !state.session) return;
     detach();
+    const observer = observation;
+    // Some Android/proxy transports buffer SSE until close. A bounded JSON cursor
+    // feed fills those gaps without replaying writes or opening another long stream.
+    async function sync() {
+      if (!current(token) || observer !== observation || !state.session) return;
+      let delay = 2000;
+      try {
+        const batch = await request<{ items: WorkEvent[]; sequence: number; status: string }>('GET', `${base}/${state.session.id}/events/batch?after=${cursor}`);
+        if (!current(token) || observer !== observation) return;
+        for (const event of batch.items) apply(event, token);
+        if (cursor < batch.sequence) delay = 0;
+        else if (batch.sequence !== state.session.sequence || batch.status !== state.session.status) await refresh(token);
+      } catch { /* SSE remains available; the next bounded read retries only observation. */ }
+      if (current(token) && observer === observation) syncTimer = setTimeout(sync, delay);
+    }
+    void sync();
     let received = 0, settled = false, refreshed = false;
     let ownedStream: ReturnType<typeof xhr> | undefined;
     const context = streamContext(previewRequestId());
@@ -130,9 +170,9 @@ export function createWorkController() {
     open();
   }
   async function attach(conversation: string, visible: boolean) {
-    if (state.conversation !== conversation) { reset(); state.conversation = conversation; }
+    if (state.conversation !== conversation) { cache(); reset(); state.conversation = conversation; restore(conversation); }
     state.visible = visible;
-    if (!visible || !conversation) { epoch++; detach(); state.submitting = false; state.pluginLoading = false; state.loading = false; return; }
+    if (!visible || !conversation) { cache(); epoch++; detach(); state.submitting = false; state.pluginLoading = false; state.loading = false; return; }
     const token = fence(); state.loading = true;
     try {
       const result = await request<WorkSession>('POST', base, { conversation_id: conversation });
@@ -160,10 +200,19 @@ export function createWorkController() {
     finally { if (current(token)) state.submitting = false; }
   }
   async function answer(item: WorkInteraction, answer: object) {
-    if (!state.session || state.submitting) return;
+    if (!state.session || state.submitting || state.loading) return;
     const token = fence(); state.submitting = true; state.error = '';
-    try { await request('POST', `${base}/${state.session.id}/interactions/${item.id}`, { binding: item.binding, ...answer }); await refresh(token); }
-    catch (e: any) { if (current(token)) state.error = e.message; }
+    try {
+      const result = await request<WorkSession>('POST', `${base}/${state.session.id}/interactions/${item.id}`, { binding: item.binding, ...answer });
+      if (current(token) && result.sequence >= (state.session?.sequence || 0)) state.session = retainResources(result);
+      await refresh(token);
+    } catch (e: any) {
+      if (current(token)) {
+        state.error = e.message;
+        // Reconcile stale approvals even when delivery failed. Never silently retry consent.
+        await refresh(token).catch(() => {});
+      }
+    }
     finally { if (current(token)) state.submitting = false; }
   }
   async function interrupt(close = false) {
@@ -202,5 +251,5 @@ export function createWorkController() {
     } catch (e: any) { if (belongs()) state.error = e.message || '文件上传失败'; throw e; }
     finally { if (belongs()) state.uploading = false; }
   }
-  return { state, loadPlugins, configurePlugin, attach, send, answer, interrupt, upload, refresh, markSeen, dispose: () => { reset(); unsub.forEach(fn => fn()); } };
+  return { state, loadPlugins, configurePlugin, attach, send, answer, interrupt, upload, refresh, markSeen, dispose: () => { cache(); reset(); unsub.forEach(fn => fn()); } };
 }
