@@ -41,3 +41,27 @@ class WorkBridge(unittest.IsolatedAsyncioTestCase):
         p=proposal('整理报告');self.assertEqual(p['type'],'task_proposal');self.assertEqual(len(p['id']),36)
         for value in ('',None,'a'*6001):
             with self.assertRaises(ValueError): proposal(value)
+
+    async def test_summary_finishing_during_user_speech_waits_and_cancelled_notice_is_not_played(self):
+        started = asyncio.Event()
+        complete = asyncio.Event()
+        async def prepare(notice):
+            started.set()
+            await complete.wait()
+            return '自然组织的查询结论'
+        node=WorkAnnouncements(SimpleNamespace(send_app_message=lambda _:None),SimpleNamespace(add_message=lambda _:None),prepare_notice=prepare)
+        node.push_frame=AsyncMock()
+        node.quiet_since=time.monotonic()-3
+        node.receive({'type':'task_notice','id':'work:8','text':'旧通知'})
+        node.loop=asyncio.create_task(node.run_notices())
+        await asyncio.wait_for(started.wait(),1)
+        node.observe(UserStartedSpeakingFrame())
+        complete.set()
+        await asyncio.sleep(.35)
+        node.push_frame.assert_not_called()
+        node.receive({'type':'task_notice_cancel','id':'work:8'})
+        node.observe(UserStoppedSpeakingFrame());node.observe(BotStartedSpeakingFrame());node.observe(BotStoppedSpeakingFrame())
+        node.quiet_since=time.monotonic()-3
+        await asyncio.sleep(.35)
+        node.push_frame.assert_not_called()
+        await node.cleanup()

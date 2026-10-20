@@ -40,17 +40,19 @@ def build(version):
     actions.append(dict(id=aid,label=label,group='基础',file=aid+'.mp4',bounds=[0,0,640,640],repeats=0 if aid=='idle' else 1,randomWeight=1 if aid=='idle' else 0))
   for document in ('persona.md','skills.md'):
    shutil.copyfile(ROOT/'resources/mobile-pet/packages'/key/document,target/document)
-  # Two legacy skins share the user's current reference until original voices arrive.
+  # Use the server's selected reference; both existing skins share it for now.
   env=dotenv_values(ROOT/'apps/voice-service/.env.local')
   reference=Path(env['QWEN_TTS_REFERENCE_AUDIO'])
   shutil.copyfile(reference,target/'reference.wav')
   (target/'reference.txt').write_text(env['QWEN_TTS_REFERENCE_TEXT'])
-  write(target/'voice.json',dict(mode='clone',audio='reference.wav',text='reference.txt',status='沿用当前克隆音色，等待专属音色素材'))
+  write(target/'voice.json',dict(mode='clone',audio='reference.wav',text='reference.txt',status='使用当前选定的克隆参考音色'))
   (target/'LICENSE.txt').write_text((ROOT/'resources/mobile-pet/dsh-source/README.md').read_text() if key=='whale' else '项目内生成的精灵图集转换，保留现有形象；不是新生成视频。')
   names=[a['file'] for a in actions]+['persona.md','skills.md','voice.json','reference.wav','reference.txt','LICENSE.txt']
   files=[dict(name=n,bytes=(target/n).stat().st_size,sha256=digest(target/n)) for n in names]
   manifest=dict(id=key,version=version,name=name,format='rgb-alpha-sbs-v1',persona='persona.md',skills='skills.md',voiceProfile=f'{key}-{version}',voice='voice.json',actions=actions,files=files,scenes=json.loads((ROOT/'resources/mobile-pet/packages'/key/'scenes.json').read_text()))
   write(target/'manifest.json',manifest)
+  # Published data must be readable by the unprivileged AI/Agent containers.
+  target.chmod(0o755)
   target.rename(destination)
   target=destination
   catalog.append(dict(id=key,version=version,name=name,bytes=sum(f['bytes'] for f in files),sha256=digest(target/'manifest.json'),actionCount=len(actions)))

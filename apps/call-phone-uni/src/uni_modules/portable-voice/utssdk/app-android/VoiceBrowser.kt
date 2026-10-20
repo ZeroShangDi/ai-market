@@ -28,6 +28,7 @@ class VoiceBrowser(context: Context, address: String, desktop: Boolean, private 
                 if (role !in listOf("user", "assistant") || text.length > 6000) return
                 main.post { if (!released) emit(JSONObject().put("type", "transcript").put("role", role).put("text", text).toString()) }
             }
+            @JavascriptInterface fun capabilities(): String = "plugin-host-v1"
             @JavascriptInterface fun task(payload: String) {
                 if (payload.length > 10000) return
                 main.post { if (!released) emit(payload) }

@@ -112,6 +112,35 @@ class Providers(unittest.IsolatedAsyncioTestCase):
                         self.assertEqual(len(result.content),6)
                         self.assertEqual(result.headers['content-type'],'audio/pcm')
 
+    async def test_clone_migration_uses_new_reference_only_for_explicit_profiles(self):
+        from voice_service.qwen_tts import create_tts_app
+        import tempfile
+        from pathlib import Path
+        import numpy as np
+        from types import SimpleNamespace
+        calls=[]
+        class Model:
+            sample_rate=24000
+            def generate(self,**kwargs):
+                calls.append(kwargs)
+                yield SimpleNamespace(audio=np.array([0.0,0.5,-0.5]))
+        with tempfile.TemporaryDirectory() as directory:
+            reference=Path(directory)/'reference.wav'
+            reference.write_bytes(b'synthetic')
+            env={'QWEN_TTS_TOKEN':SECRET,'QWEN_TTS_MODEL_PATH':directory,'QWEN_TTS_MODE':'clone',
+                 'QWEN_TTS_REFERENCE_AUDIO':str(reference),'QWEN_TTS_REFERENCE_TEXT':'新参考',
+                 'QWEN_TTS_REFERENCE_PROFILES':'elf-1, whale-1'}
+            with patch.dict(os.environ,env), patch('voice_service.qwen_tts.character_voice',return_value={'ref_audio':'other.wav','ref_text':'独立角色'}) as resolve:
+                app=create_tts_app(load_model=lambda path:Model())
+                async with app.router.lifespan_context(app):
+                    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),base_url='http://localhost') as client:
+                        for profile in ('default','elf-1','whale-1','elf-2'):
+                            result=await client.post('/v1/audio/speech',json={'input':'你好','response_format':'pcm','voice':profile},headers={'Authorization':'Bearer '+SECRET})
+                            self.assertEqual(result.status_code,200)
+                self.assertEqual([call['ref_audio'] for call in calls],[str(reference)]*3+['other.wav'])
+                self.assertEqual([call['ref_text'] for call in calls],['新参考']*3+['独立角色'])
+                resolve.assert_called_once_with('elf-2')
+
     async def test_mac_asr_keeps_audio_in_memory_and_validates_format(self):
         from voice_service.qwen_asr import create_asr_app
         import io,tempfile

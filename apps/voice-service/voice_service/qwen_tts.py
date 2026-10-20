@@ -25,6 +25,8 @@ def create_tts_app(load_model=None):
     speaker = os.environ.get("QWEN_TTS_SPEAKER", "Vivian")
     reference = Path(required("QWEN_TTS_REFERENCE_AUDIO")).expanduser() if mode == "clone" else None
     transcript = required("QWEN_TTS_REFERENCE_TEXT") if mode == "clone" else None
+    # Explicit server-side migration of already-installed character voice IDs.
+    reference_profiles = tuple(value.strip() for value in os.environ.get("QWEN_TTS_REFERENCE_PROFILES", "").split(",") if value.strip()) if mode == "clone" else ()
     if not model_path.is_dir() or reference is not None and not reference.is_file():
         raise RuntimeError("Qwen model or reference audio is unavailable")
     model = None
@@ -79,7 +81,7 @@ def create_tts_app(load_model=None):
             raise HTTPException(429, "TTS busy")
         options = {"voice": speaker} if mode == "preset" else {"ref_audio": str(reference), "ref_text": transcript}
         profile = data.get("voice", "default")
-        if profile not in ("default", "current", os.environ.get("VOICE_TTS_VOICE", "default")):
+        if profile not in ("default", "current", os.environ.get("VOICE_TTS_VOICE", "default"), *reference_profiles):
             try:
                 if mode != "clone":
                     raise ValueError('Package cloning requires a Base model')

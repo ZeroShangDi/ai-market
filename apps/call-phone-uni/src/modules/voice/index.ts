@@ -7,6 +7,7 @@ import type { VoiceTranscript } from './transcript';
 import { activePackage } from '@/modules/pet-packages';
 import { rememberProposal, rejectProposal, submitConfirmedTask, type TaskNotice } from '@/services/voice-work';
 import { logger } from '@/services/logger';
+import { handleVoicePluginRequest } from '@/services/voice-plugin-host';
 
 export const voice = reactive({ opening: false, active: false, desktop: false });
 let revision = 0;
@@ -95,6 +96,12 @@ export async function openVoice(desktop = false) {
       if (event.startsWith('{')) {
         try {
           const value = JSON.parse(event);
+          if (value.type === 'plugin_host_request') {
+            void handleVoicePluginRequest(value, () => current === revision).then(result => {
+              if (result && current === revision) native.deliverTask(JSON.stringify(result));
+            }).catch(() => { /* Host error is retried with the same plugin request ID. */ });
+            return;
+          }
           if (value.type === 'task_proposal') { void confirmProposal(value,current); return; }
           if (value.type === 'task_notice_ack' && typeof value.id === 'string') { notices.get(value.id)?.(true);return; }
           if (value.type === 'activity' && ['listening','thinking','speaking','working'].includes(value.state)) scene(value.state);

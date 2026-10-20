@@ -8,7 +8,7 @@ history.replaceState(null, '', location.pathname);
 let revision = 0, peer, stream, timeout, request, heartbeat, taskChannel;
 window.portableHost = payload => {
   let value; try { value=JSON.parse(payload); } catch { return; }
-  if (['task_notice','task_notice_cancel'].includes(value.type) && taskChannel?.readyState === 'open') taskChannel.send(JSON.stringify(value));
+  if (['task_notice','task_notice_cancel','plugin_host_result'].includes(value.type) && taskChannel?.readyState === 'open') taskChannel.send(JSON.stringify(value));
 };
 function release(message = '对话已结束') {
   revision++; taskChannel = undefined;
@@ -44,7 +44,7 @@ start.onclick = async () => {
     channel.onmessage = event => {
       if (current !== revision) return;
       let value; try { value = JSON.parse(event.data); } catch { return; }
-      if (['task_proposal','task_notice_ack'].includes(value.type)) { window.PortableVoice?.task?.(JSON.stringify(value)); return; }
+      if (['task_proposal','task_notice_ack','plugin_host_request'].includes(value.type)) { window.PortableVoice?.task?.(JSON.stringify(value)); return; }
       if (value.type === 'transcript' && ['user','assistant'].includes(value.role) && typeof value.text === 'string' && value.text.length <= 6000) {
         const bubble = document.querySelector('#transcript');
         bubble.hidden = false;
@@ -82,7 +82,7 @@ start.onclick = async () => {
     request = new AbortController();
     const credential = ticket; ticket = ''; // One-use ticket; never silently replay a session.
     const response = await fetch('offer', {method:'POST',headers:{'Content-Type':'application/json','Authorization':`Bearer ${credential}`},
-      body:JSON.stringify({sdp:pc.localDescription.sdp,type:'offer',host_task_bridge:!!window.PortableVoice?.task}),signal:request.signal});
+      body:JSON.stringify({sdp:pc.localDescription.sdp,type:'offer',host_task_bridge:!!window.PortableVoice?.task,host_plugin_bridge:window.PortableVoice?.capabilities?.() === 'plugin-host-v1'}),signal:request.signal});
     if (!response.ok) throw new Error(response.status === 401 ? '会话已过期，请关闭后重新打开语音' : '语音服务未就绪，请稍后重试');
     const answer = await response.json();
     if (current !== revision) return;
