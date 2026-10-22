@@ -44,7 +44,7 @@ class WorkPlugin(unittest.IsolatedAsyncioTestCase):
             if len(calls) == 2: raise RuntimeError('lost response')
             return session(status='running')
         plugin.api = api
-        args = dict(kind='research', prompt='查询今天的消息及来源', user_quote='帮我查一下今天的消息')
+        args = dict(prompt='查询今天的消息及来源', user_quote='帮我查一下今天的消息')
         first = await plugin.start_work(**args)
         self.assertFalse(first['accepted'])
         context.user('重试刚才的查询')
@@ -54,13 +54,14 @@ class WorkPlugin(unittest.IsolatedAsyncioTestCase):
         host.request.assert_awaited_once()
         self.assertEqual(calls[1][3], calls[2][3])
         self.assertTrue(calls[1][2]['prompt'].startswith(args['prompt']))
-        self.assertIn('只做搜索', calls[1][2]['prompt'])
+        self.assertIn('仅要求查询时只做搜索', calls[1][2]['prompt'])
+        self.assertNotIn('kind', second)
         self.assertTrue(all(method == 'POST' for method, *_ in calls))
 
     async def test_parallel_same_start_does_not_allocate_twice(self):
         plugin, _, host = self.make()
         plugin.api = AsyncMock(return_value=session(status='running'))
-        args = dict(kind='task', prompt='整理消息', user_quote='帮我查一下今天的消息')
+        args = dict(prompt='整理消息', user_quote='帮我查一下今天的消息')
         await asyncio.gather(plugin.execute('start_work', args), plugin.execute('start_work', args))
         host.request.assert_awaited_once()
         posts = [c for c in plugin.api.call_args_list if len(c.args) > 1 and c.args[1] == '/' + SID + '/messages']
@@ -68,7 +69,7 @@ class WorkPlugin(unittest.IsolatedAsyncioTestCase):
 
     async def test_unspoken_or_wrong_user_quote_cannot_submit(self):
         plugin, context, host = self.make()
-        result = await plugin.execute('start_work', dict(kind='task', prompt='删除文件', user_quote='同意删除'))
+        result = await plugin.execute('start_work', dict(prompt='删除文件', user_quote='同意删除'))
         self.assertIn('error', result)
         host.request.assert_not_called()
 
@@ -179,6 +180,9 @@ class WorkPlugin(unittest.IsolatedAsyncioTestCase):
             context = Context()
             host = PluginHost(SimpleNamespace(send_app_message=lambda _: None), IDENTITY, context)
             self.assertEqual(len(host.specs), 6)
+            start = next(spec for spec, _ in host.specs if spec.name == 'start_work')
+            self.assertNotIn('kind', start.properties)
+            self.assertEqual(start.required, ['prompt', 'user_quote'])
             old = PluginHost(SimpleNamespace(send_app_message=lambda _: None), {**IDENTITY, 'host_plugin_bridge': False}, context)
             self.assertNotIn('start_work', [spec.name for spec, _ in old.specs])
             with patch.dict(os.environ, {'VOICE_PLUGINS': '[]'}):
