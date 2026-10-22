@@ -1,0 +1,10 @@
+# 项目文档
+
+- [开发规则](rules/README.md)：统一在一个文件中按条维护。
+- [迁移说明](migration.md)：新架构的路径、建设范围与最终迁移条件。
+- [运行工程说明](containers.md)：`containers` 的含义与工程组织方式。
+- [Python 语音基础包](../packages/voice/README.md)：8 个公开接口、HTTP 识别与合成、本机音频采集和播放；真实设备发声待验收。
+- [领域边界分析](domain-boundaries-first-pass.md)：外呼闭环的源码依据与迁移建议。
+- [早期架构蓝图](architecture/platform-blueprint/README.md)：历史设计资料，当前约束以开发规则为准。
+
+新架构当前以目录骨架与领域分析为主，语音已作为 `packages` 下的 Python 基础包独立实现；尚未迁移业务实现、确定新框架或完成旧工程测试。

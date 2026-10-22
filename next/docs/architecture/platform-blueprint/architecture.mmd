@@ -1,0 +1,17 @@
+flowchart BT
+  modules["modules：领域模块，具体边界待分析"]
+  apps["apps：用代码与配置组合模块、页面和业务流程"]
+  web["projects/web：PC 入口"]
+  mobile["projects/mobile：移动入口"]
+  desktop["projects/desktop：桌面入口，复用 Web"]
+  server["projects/server：基础 Server、模块后端与应用流程"]
+  packages["packages：按需提取共享资源与基础能力"]
+  support["docs 项目文档 / rules AI 开发规范 / ops 构建部署升级"]
+  modules -->|"提供公开能力"| apps
+  apps -->|"挂载页面"| web
+  apps -->|"挂载页面"| mobile
+  apps -->|"挂载页面"| desktop
+  apps -->|"加载应用流程"| server
+  modules -->|"加载领域后端"| server
+  packages -.->|"共享支撑，代表性连线"| server
+  support -.->|"文档、规范与交付支撑所有工程"| apps
