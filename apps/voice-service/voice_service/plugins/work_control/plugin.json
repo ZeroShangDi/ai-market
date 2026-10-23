@@ -1,19 +1,12 @@
 {
   "schemaVersion": 1,
   "id": "work_control",
-  "name": "查询与工作控制",
+  "name": "工作控制",
   "tools": [
     {
       "name": "start_work",
-      "description": "发起持久化后台查询或工作，立即返回接收状态，完成后在聊天空档汇报。先口头说明准备做什么。",
+      "description": "发起持久化后台工作，包括查资料、核实信息、制作与执行任务，立即返回接收状态，完成后在聊天空档汇报。先口头说明准备做什么。",
       "properties": {
-        "kind": {
-          "type": "string",
-          "enum": [
-            "research",
-            "task"
-          ]
-        },
         "prompt": {
           "type": "string",
           "description": "完整目标、必要上下文、约束和预期结果"
@@ -28,7 +21,6 @@
         }
       },
       "required": [
-        "kind",
         "prompt",
         "user_quote"
       ],
@@ -36,7 +28,7 @@
     },
     {
       "name": "list_work",
-      "description": "查看当前用户近期工作台任务和后台查询的真实状态；根据上下文识别对象，歧义时询问。",
+      "description": "查看当前用户近期工作台任务的真实状态；根据上下文识别对象，歧义时询问。",
       "properties": {
         "limit": {
           "type": "integer",

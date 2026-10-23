@@ -8,8 +8,7 @@ import httpx
 from openai import APIError
 
 BASE = '/internal/v1/agent/work/sessions'
-RESEARCH = '本轮是资料查询：只做搜索、阅读、核实和分析，不执行外部业务变更。给出结论、可靠来源及不确定性；需要补充信息时使用 AskUserQuestion。\n\n'
-TASK = '完成以下用户交办，必要时使用 AskUserQuestion，外部操作遵循原有审批。最终简洁汇报实际成果、产物及未完成事项，不把计划当结果。\n\n'
+WORK = '完成以下用户交办，严格遵循请求范围，不扩大执行目标。仅要求查询时只做搜索、阅读、核实和分析，不执行外部业务变更，并给出依据和不确定性。必要时使用 AskUserQuestion，外部操作遵循原有审批。最终简洁汇报实际成果、产物及未完成事项，不把计划当结果。\n\n'
 
 
 def bounded(value, limit=6000):
@@ -96,20 +95,18 @@ class WorkControl:
         except (ValueError, TypeError) as error:
             return {'error': str(error) if isinstance(error, ValueError) else '工具参数格式不正确'}
 
-    async def start_work(self, kind, prompt, user_quote, retry_id=None):
+    async def start_work(self, prompt, user_quote, retry_id=None):
         if not self.identity.get('host_plugin_bridge'):
             raise ValueError('当前入口不支持创建，请更新 App 或去工作台创建')
         turn = self.require_user(user_quote)
         prompt = bounded(prompt)
-        if kind not in ('research', 'task'):
-            raise ValueError('任务类型无效')
-        key = (turn, kind, prompt)
+        key = (turn, prompt)
         if retry_id:
             record = next((r for r in self.starts.values() if r['request_id'] == identifier(retry_id)), None)
-            if not record or record['prompt'] != prompt or record['kind'] != kind:
+            if not record or record['prompt'] != prompt:
                 raise ValueError('重试内容不一致，请先查看原任务')
         else:
-            record = self.starts.setdefault(key, {'request_id': str(uuid.uuid4()), 'prompt': prompt, 'kind': kind})
+            record = self.starts.setdefault(key, {'request_id': str(uuid.uuid4()), 'prompt': prompt})
         rid = record['request_id']
         try:
             if 'conversation' not in record:
@@ -122,9 +119,9 @@ class WorkControl:
                 result = await self.api('POST', body={'conversation_id': record['conversation']})
                 record['session'] = result['id']
             result = await self.api('POST', '/' + record['session'] + '/messages', {
-                'request_id': rid, 'prompt': prompt + '\n\n' + (RESEARCH if kind == 'research' else TASK),
+                'request_id': rid, 'prompt': prompt + '\n\n' + WORK,
                 'resource_ids': [], 'character': self.identity.get('character') or None}, rid)
-            return {'accepted': True, 'kind': kind, **self.receipt(result)}
+            return {'accepted': True, **self.receipt(result)}
         except (RuntimeError, TimeoutError):
             return {'accepted': False, 'retry_id': rid, 'session_id': record.get('session'),
                 'error': '提交结果尚未确认；使用 retry_id 和相同内容重试，不新建副本。'}
