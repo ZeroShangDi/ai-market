@@ -1,6 +1,6 @@
 # 新架构临时根目录
 
-`next/` 是未来项目根目录的暂存位置。新架构实现先在此独立建设，现有工程继续保留在仓库原位，便于原分支更新与合并。当前已建立目录骨架及独立 [Python 语音基础包](packages/voice/README.md)，尚未初始化应用运行工程。
+`next/` 是未来项目根目录的暂存位置。新架构实现先在此独立建设，现有工程继续保留在仓库原位，便于原分支更新与合并。当前已建立目录骨架及独立 ，尚未初始化应用运行工程。
 
 ```text
 next/
@@ -22,3 +22,20 @@ next/
 迁移约定见 [迁移说明](docs/migration.md)，开发约定见 [规范索引](docs/rules/README.md)。空目录使用 `.gitkeep` 占位，以便随 Git 保存；有实际文件后可删除占位文件。
 
 `containers` 表示应用宿主工程，不特指 Docker 容器。详见 [运行工程说明](docs/containers.md)。
+
+# 资源清单
+
+## packages
+
+[Python 语音基础包](packages/voice/README.md)
+
+# 人工补录规则（禁止AI修改，用户强制要求的AI行动规范）
+
+## 文档生成规则
+
+除 docs 外，仅一级（根目录），三级文件夹（例 packages/voice/README.md）下允许有 READEM.md 作为模块文档或项目说明，其他文档皆按功能分类存放（docs/features/xxx.yyy.md, xxx 代表功能模块，yyy 代表文档类型，如：issues/bugs/tests/reviews等类型）。
+
+## 代码修改规则
+
+1. 修改 next 时，禁止修改外部任何文件。
+2. packages、modules 等模块化文件夹，在非模块开发期间禁止修改，如需修改需先提交用户审批。
