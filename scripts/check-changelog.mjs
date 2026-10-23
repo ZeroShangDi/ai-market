@@ -5,8 +5,10 @@ import path from 'node:path';
 
 export function checkChangelog(cwd = process.cwd()) {
   const git = (...args) => execFileSync('git', args, { cwd, encoding: 'utf8' });
-  const paths = git('diff', '--cached', '--name-only', '-z', '--diff-filter=ACMRD').split('\0').filter(Boolean);
-  const code = paths.some(name => name !== 'CHANGELOG.md' && !/\.md$/i.test(name));
+  const paths = git('diff', '--cached', '--no-renames', '--name-only', '-z', '--diff-filter=ACMRD').split('\0').filter(Boolean);
+  // next 使用包内变更日志；混合提交中，外部代码仍须更新根日志。
+  // 展开重命名，避免把外部代码移入 next 时漏检原路径的删除。
+  const code = paths.some(name => !name.startsWith('next/') && name !== 'CHANGELOG.md' && !/\.md$/i.test(name));
   if (!code) return;
   if (!paths.includes('CHANGELOG.md')) throw new Error('本次包含代码或配置变化，请在 CHANGELOG.md 中补充对应说明并一同暂存。');
   const diff = git('diff', '--cached', '--unified=0', '--', 'CHANGELOG.md');

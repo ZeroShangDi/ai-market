@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import os from 'node:os';
@@ -11,7 +11,7 @@ function repository(t) {
   t.after(() => rmSync(cwd, { recursive: true, force: true }));
   const git = (...args) => execFileSync('git', args, { cwd, encoding: 'utf8', stdio: 'pipe' });
   git('init'); git('config', 'user.name', 'Test'); git('config', 'user.email', 'test@example.test');
-  return { cwd, git, write(name, text) { writeFileSync(path.join(cwd, name), text); } };
+  return { cwd, git, write(name, text) { mkdirSync(path.dirname(path.join(cwd, name)), { recursive: true }); writeFileSync(path.join(cwd, name), text); } };
 }
 
 test('code commits require a staged changelog entry, including the initial commit', t => {
@@ -37,4 +37,22 @@ test('changing only the changelog heading is insufficient', t => {
 test('pure documentation commits are allowed without a changelog entry', t => {
   const r = repository(t); r.write('README.md', '# 使用说明'); r.git('add', '.');
   assert.doesNotThrow(() => checkChangelog(r.cwd));
+});
+
+test('next code is exempt, but mixed external code still requires the root changelog', t => {
+  const r = repository(t); r.write('next/packages/voice/src/main.py', '# voice'); r.git('add', '.');
+  assert.doesNotThrow(() => checkChangelog(r.cwd));
+  r.write('app.js', 'const value = 1;'); r.git('add', '.');
+  assert.throws(() => checkChangelog(r.cwd), /一同暂存/);
+});
+
+test('similarly named directories are not exempt', t => {
+  const r = repository(t); r.write('next-other/app.js', 'const value = 1;'); r.git('add', '.');
+  assert.throws(() => checkChangelog(r.cwd), /一同暂存/);
+});
+
+test('moving external code into next still requires a root changelog entry', t => {
+  const r = repository(t); r.write('app.js', 'const value = 1;'); r.git('add', '.'); r.git('commit', '-m', 'test fixture');
+  mkdirSync(path.join(r.cwd, 'next')); r.git('mv', 'app.js', 'next/app.js');
+  assert.throws(() => checkChangelog(r.cwd), /一同暂存/);
 });
