@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 import httpx
 
-from voice.main import ProviderConfig, VoiceConfig, VoiceError
+from voice.main import ProviderConfig, VoiceConfig, VoiceError, create_voice
 from voice._provider import HttpSpeechProvider
 
 
@@ -88,3 +88,63 @@ class ProviderTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("SECRET", repr(config))
         with self.assertRaisesRegex(VoiceError, "INVALID_INPUT"):
             replace(config, tts_url="http://voice.example/speech")
+
+    async def test_pcm_is_yielded_before_response_ends_and_close_releases_response(self):
+        release, closed = asyncio.Event(), asyncio.Event()
+        class Body(httpx.AsyncByteStream):
+            async def __aiter__(self):
+                yield b"\1"
+                yield b"\0\2\0"  # 前一个采样跨网络块，不能丢掉或错位。
+                await release.wait()
+                yield b"\3\0"
+            async def aclose(self):
+                closed.set()
+        provider = self.provider(lambda request: httpx.Response(200, stream=Body(), headers={"content-type": "audio/pcm"}))
+        stream = provider.synthesize_stream("hi", VoiceConfig())
+        first = await asyncio.wait_for(stream.__anext__(), 1)
+        self.assertEqual(first, b"\1\0\2\0")
+        self.assertFalse(release.is_set())
+        await stream.aclose()
+        self.assertTrue(closed.is_set())
+
+    async def test_late_truncated_pcm_fails_after_initial_audio(self):
+        class Body(httpx.AsyncByteStream):
+            async def __aiter__(self):
+                yield b"\1\0"
+                yield b"\2"
+        provider = self.provider(lambda request: httpx.Response(200, stream=Body(), headers={"content-type": "audio/pcm"}))
+        stream = provider.synthesize_stream("hi", VoiceConfig())
+        self.assertEqual(await stream.__anext__(), b"\1\0")
+        with self.assertRaisesRegex(VoiceError, "INVALID_AUDIO"):
+            await stream.__anext__()
+
+    async def test_engine_streams_first_audio_then_interrupt_closes_http(self):
+        playing, released = asyncio.Event(), asyncio.Event()
+        class Body(httpx.AsyncByteStream):
+            async def __aiter__(self):
+                yield b"\1\0" * 20
+                await asyncio.Event().wait()
+            async def aclose(self): released.set()
+        class Terminal:
+            echo_cancellation = True
+            def open_capture(self, on_frame, on_error):
+                raise AssertionError("playback-only mode")
+            async def play_stream(self, chunks, rate, volume, started):
+                async for pcm in chunks:
+                    started()
+                    playing.set()
+        provider = self.provider(lambda request: httpx.Response(200, stream=Body(), headers={"content-type": "audio/pcm"}))
+        voice = create_voice(provider.config, audio_terminal=Terminal())
+        events = []
+        voice.subscribe(events.append)
+        sid = await voice.start(capture=False)
+        try:
+            voice.speak(session_id=sid, generation=0, speech_id="a", text="你好", seq=0, final=True)
+            await asyncio.wait_for(playing.wait(), 1)
+            await voice.interrupt()
+            await asyncio.sleep(0)
+            self.assertTrue(released.is_set())
+            self.assertFalse(any(e.get("phase") == "completed" for e in events))
+            self.assertTrue(any(e["type"] == "generation_cancelled" for e in events))
+        finally:
+            await voice.stop()

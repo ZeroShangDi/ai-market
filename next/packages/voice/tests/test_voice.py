@@ -75,7 +75,8 @@ class VoiceTests(unittest.IsolatedAsyncioTestCase):
         await self.voice.stop()
 
     def say(self, speech="a", text="你好", seq=0, final=True, sid=None):
-        return self.voice.speak(session_id=sid or self.sid, speech_id=speech, text=text, seq=seq, final=final)
+        return self.voice.speak(session_id=sid or self.sid, generation=self.voice._generation,
+                                speech_id=speech, text=text, seq=seq, final=final)
 
     async def settle(self):
         await asyncio.sleep(.01)
@@ -268,6 +269,42 @@ class VoiceTests(unittest.IsolatedAsyncioTestCase):
         await self.settle()
         self.assertFalse(self.audio.cancelled)
         self.assertFalse(any(e.get("reason") == "speech" for e in self.events))
+
+    async def test_cancel_notifies_even_before_first_generated_text_and_rejects_late_text(self):
+        old = self.voice._generation
+        self.assertEqual(await self.voice.interrupt(), [])
+        await self.settle()
+        cancel = [e for e in self.events if e["type"] == "generation_cancelled"][-1]
+        self.assertEqual(cancel["generation"], old)
+        self.assertEqual(cancel["next_generation"], old + 1)
+        with self.assertRaisesRegex(VoiceError, "STALE_GENERATION"):
+            self.voice.speak(session_id=self.sid, generation=old, speech_id="late", text="旧回复", seq=0, final=True)
+        self.say(speech="fresh")
+        await self.settle()
+        self.assertEqual(self.provider.texts, [("你好", "default")])
+
+    async def test_speech_start_invalidates_before_cancel_listener_can_submit_new_reply(self):
+        await self.voice.stop()
+        self.sid = await self.voice.start()
+        def listener(event):
+            if event["type"] == "generation_cancelled" and event["reason"] == "speech":
+                self.voice.speak(session_id=self.sid, generation=event["next_generation"],
+                                 speech_id="new", text="新回复", seq=0, final=True)
+        self.voice.subscribe(listener)
+        for _ in range(3):
+            self.audio.frames(array("h", [2000] * 320).tobytes())
+        await self.settle()
+        self.assertTrue(any(e.get("speech_id") == "new" and e.get("phase") == "completed" for e in self.events))
+
+    async def test_transcript_retains_generation_at_capture_and_local_aec_is_not_claimed(self):
+        await self.voice.stop()
+        self.sid = await self.voice.start()
+        self.emit_utterance()
+        await self.settle()
+        result = [e for e in self.events if e["type"] == "transcript"][-1]
+        self.assertEqual(result["generation"], self.voice._generation)
+        states = [e for e in self.events if e["type"] == "state"]
+        self.assertFalse(states[-1]["echo_cancellation"])
 
 
 class SegmentTests(unittest.TestCase):

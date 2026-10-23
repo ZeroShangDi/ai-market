@@ -12,3 +12,7 @@ dependencies = ["httpx==0.28.1", "sounddevice==0.5.1"]
 [tool.setuptools]
 packages = ["voice"]
 package-dir = { voice = "src" }
+include-package-data = false
+
+[tool.setuptools.package-data]
+voice = ["terminal/*.mjs"]

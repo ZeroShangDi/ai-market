@@ -36,6 +36,7 @@ class Voice:
         self._provider, self._audio, self._limits = provider, audio, limits
         self._config = VoiceConfig(voice_id=provider.config.voices[0].id)
         self._session_id = None
+        self._generation = 0
         self._muted = False
         self._capture = None
         self._listeners = set()
@@ -51,7 +52,8 @@ class Voice:
         self._lifecycle = asyncio.Lock()
 
     def _snapshot(self):
-        return {"type": "state", "session_id": self._session_id,
+        return {"type": "state", "session_id": self._session_id, "generation": self._generation,
+                "echo_cancellation": getattr(self._audio, "echo_cancellation", False),
                 "session": "active" if self._session_id else "idle",
                 "capture": "muted" if self._session_id and self._muted else "listening" if self._capture else "off",
                 "playback": "playing" if self._playing else "buffering" if self._queue else "idle", "muted": self._muted}
@@ -164,7 +166,7 @@ class Voice:
                     self._error("CAPTURE_FAILED", session_id=sid)
                 finally:
                     self._capture = None
-            await self._interrupt("stop")
+            await self._interrupt("stop", sid)
             tasks = [t for t in [self._recognition_task, *self._background] if t and t is not asyncio.current_task()]
             for task in tasks:
                 task.cancel()
@@ -213,19 +215,25 @@ class Voice:
                 raise VoiceError("CAPTURE_FAILED") from None
             self._state()
 
-    def speak(self, *, session_id: str, speech_id: str, seq: int, text: str, final: bool):
+    def speak(self, *, session_id: str, generation: int, speech_id: str, seq: int, text: str, final: bool):
         """接收外部回复文字，后台实际调用 TTS 并播放 PCM。
 
         Returns:
             accepted/duplicate 回执；实际完成由 playback 事件通知。
+        Args:
+            generation: 发起外部生成时从识别 / 状态事件取得的版本，
+                必须随整条生成流保持不变；禁止为迟到文字补上新版本。
         Raises:
             VoiceError: 旧会话、乱序、冲突、已取消播报或容量超限。
         """
-        if (not valid_id(session_id) or not valid_id(speech_id) or type(seq) is not int or seq < 0
+        if (not valid_id(session_id) or type(generation) is not int or generation < 0
+                or not valid_id(speech_id) or type(seq) is not int or seq < 0
                 or not isinstance(text, str) or type(final) is not bool or (not text and not final)):
             raise VoiceError("INVALID_INPUT")
         if not self._session_id or session_id != self._session_id:
             raise VoiceError("STALE_SESSION")
+        if generation != self._generation:
+            raise VoiceError("STALE_GENERATION")
         speech = self._records.get(speech_id)
         if speech:
             if speech.terminal in ("interrupted", "failed"):
@@ -261,8 +269,14 @@ class Voice:
         """停止合成和设备播放，返回被取消 ID；等待原生流清理后完成。"""
         return await self._interrupt("manual")
 
-    async def _interrupt(self, reason):
-        """先封闭回执再取消当前任务，避免取消期间迟到文本重新入队。"""
+    def _begin_interrupt(self, reason, sid=None):
+        """同步使外部生成版本与队列失效，连首块尚未返回的生成也会被通知。"""
+        sid = sid or self._session_id
+        if sid:
+            previous = self._generation
+            self._generation += 1
+            self._emit({"type": "generation_cancelled", "session_id": sid,
+                        "generation": previous, "next_generation": self._generation, "reason": reason})
         cancelled = []
         for speech in self._queue:
             if not speech.terminal:
@@ -274,9 +288,17 @@ class Voice:
         task, self._pump_task = self._pump_task, None
         if task and task is not asyncio.current_task():
             task.cancel()
-            await asyncio.gather(task, return_exceptions=True)
         self._state()
+        return cancelled, task
+
+    async def _finish_interrupt(self, cancelled, task):
+        """等待已取消任务释放资源，不再次触碰新一轮的播报队列。"""
+        if task and task is not asyncio.current_task():
+            await asyncio.gather(task, return_exceptions=True)
         return cancelled
+
+    async def _interrupt(self, reason, sid=None):
+        return await self._finish_interrupt(*self._begin_interrupt(reason, sid))
 
     def subscribe(self, listener: Callable):
         """同步发送状态快照，返回独立取消订阅函数；回调异常被隔离。"""
@@ -330,7 +352,6 @@ class Voice:
 
     async def _render(self, speech, text):
         """完成一块的真实合成与播放；发声前再次核验会话和取消状态。"""
-        pcm = await self._provider.synthesize(text, speech.config)
         if speech.terminal or self._session_id != speech.session_id:
             return
         def started():
@@ -341,7 +362,18 @@ class Voice:
                 speech.started = True
                 self._playback(speech, "started")
             self._state()
-        await self._audio.play(pcm, self._provider.config.sample_rate, speech.config.volume, started)
+        if hasattr(self._provider, "synthesize_stream") and hasattr(self._audio, "play_stream"):
+            chunks = self._provider.synthesize_stream(text, speech.config)
+            try:
+                await self._audio.play_stream(chunks, self._provider.config.sample_rate, speech.config.volume, started)
+            finally:
+                await chunks.aclose()
+        else:
+            # 兼容已注入的旧内部适配器；默认 HTTP + LocalAudio 必走流式路径。
+            pcm = await self._provider.synthesize(text, speech.config)
+            if speech.terminal or self._session_id != speech.session_id:
+                return
+            await self._audio.play(pcm, self._provider.config.sample_rate, speech.config.volume, started)
         if self._playing == speech.id:
             self._playing = None
             self._state()
@@ -352,10 +384,11 @@ class Voice:
             return
         started, utterance = self._segmenter.feed(pcm)
         if started and self._config.auto_interrupt:
-            self._spawn(self._interrupt("speech"))
+            # 在分发取消事件前封闭旧队列，避免宿主重入提交的新回复被误取消。
+            self._spawn(self._finish_interrupt(*self._begin_interrupt("speech")))
         if utterance:
             try:
-                self._recognition_queue.put_nowait((self._epoch, uuid4().hex, utterance))
+                self._recognition_queue.put_nowait((self._epoch, self._generation, uuid4().hex, utterance))
             except asyncio.QueueFull:
                 self._error("CAPACITY")
 
@@ -367,12 +400,13 @@ class Voice:
     async def _recognize(self, sid):
         """与采集独立的单消费者；识别慢时最多积压两句，不阻塞说话检测。"""
         while self._session_id == sid:
-            epoch, utterance_id, pcm = await self._recognition_queue.get()
+            epoch, generation, utterance_id, pcm = await self._recognition_queue.get()
             try:
                 text = await asyncio.wait_for(self._provider.transcribe(pcm, self._config.language), self._limits.operation_timeout_seconds)
                 # 静音 / 重新采集后 epoch 改变，不能把旧识别投递到新一轮。
                 if text and epoch == self._epoch and self._session_id == sid and not self._muted:
-                    self._emit({"type": "transcript", "session_id": sid, "utterance_id": utterance_id, "text": text, "final": True})
+                    self._emit({"type": "transcript", "session_id": sid, "generation": generation,
+                                "utterance_id": utterance_id, "text": text, "final": True})
             except asyncio.CancelledError:
                 raise
             except Exception as exc:

@@ -39,15 +39,44 @@ class HttpSpeechProvider:
             raise VoiceError("PROVIDER_FAILED") from None
 
     async def synthesize(self, text: str, config: VoiceConfig) -> bytes:
-        """将文字合成为真实 PCM；拒绝空音频、错误格式和不完整采样。"""
-        pcm, mime = await self._request(
-            self.config.tts_url, self.config.tts_key, self.config.max_audio_bytes,
-            json={"model": self.config.tts_model, "voice": config.voice_id,
-                  "input": text, "response_format": "pcm", "speed": config.rate},
-        )
-        if mime not in ("audio/pcm", "audio/raw", "application/octet-stream") or not pcm or len(pcm) % 2:
-            raise VoiceError("INVALID_AUDIO")
-        return pcm
+        """兼容需要完整 PCM 的内部调用；实时播报使用 synthesize_stream。"""
+        return b"".join([chunk async for chunk in self.synthesize_stream(text, config)])
+
+    async def synthesize_stream(self, text: str, config: VoiceConfig):
+        """收到 PCM 即产出，不等完整响应；取消或关闭迭代器会关闭 HTTP 流。
+
+        网络分块可把一个 16-bit 采样切成两半，只缓存尾部一个字节。
+        每次产出最多 8192 字节，总响应仍受 max_audio_bytes 限制。
+        """
+        import httpx
+        headers = {"Authorization": "Bearer " + self.config.tts_key} if self.config.tts_key else {}
+        total, pending = 0, b""
+        try:
+            async with httpx.AsyncClient(timeout=self.config.timeout_seconds, follow_redirects=False, trust_env=False) as client:
+                async with client.stream("POST", self.config.tts_url, headers=headers, json={
+                    "model": self.config.tts_model, "voice": config.voice_id, "input": text,
+                    "response_format": "pcm", "speed": config.rate, "stream": True,
+                }) as response:
+                    response.raise_for_status()
+                    if response.headers.get("content-type", "").split(";")[0].strip() not in ("audio/pcm", "audio/raw", "application/octet-stream"):
+                        raise VoiceError("INVALID_AUDIO")
+                    async for data in response.aiter_bytes():
+                        total += len(data)
+                        if total > self.config.max_audio_bytes:
+                            raise VoiceError("CAPACITY")
+                        # 不给 aiter_bytes 设置最小块长，避免首音等待凑满块。
+                        for offset in range(0, len(data), 8192):
+                            part = pending + data[offset:offset + 8192]
+                            size = len(part) // 2 * 2
+                            pending = part[size:]
+                            if size:
+                                yield part[:size]
+                    if not total or pending:
+                        raise VoiceError("INVALID_AUDIO")
+        except httpx.TimeoutException:
+            raise VoiceError("TIMEOUT") from None
+        except (httpx.HTTPError, ValueError):
+            raise VoiceError("PROVIDER_FAILED") from None
 
     async def transcribe(self, pcm: bytes, language: str) -> str:
         """把 16 kHz 单声道 PCM 封装成内存 WAV，返回最终识别文本。"""

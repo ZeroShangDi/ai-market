@@ -5,6 +5,31 @@ from dataclasses import dataclass, field
 import math
 import re
 from urllib.parse import urlsplit
+from typing import AsyncIterator, Callable, Protocol
+
+
+class CaptureHandle(Protocol):
+    """终端采集句柄；关闭必须释放设备且阻止旧帧继续投递。"""
+
+    def close(self) -> None: ...
+
+
+class AudioTerminal(Protocol):
+    """可信宿主注入的音频终端；输入是终端完成回声处理后的 16 kHz PCM。
+
+    不负责网络地址、鉴权或专网配置。echo_cancellation 必须反映真实能力。
+    """
+
+    echo_cancellation: bool
+
+    def open_capture(self, on_frame: Callable[[bytes], None], on_error: Callable[[], None]) -> CaptureHandle:
+        """回调提供 20 ms、单声道、s16le 音频帧；在所属事件循环投递。"""
+        ...
+
+    async def play_stream(self, chunks: AsyncIterator[bytes], sample_rate: int,
+                          volume: float, on_started: Callable[[], None]) -> None:
+        """有界缓冲播放；排空后返回，取消时立即停止设备并关闭输入流。"""
+        ...
 
 
 class VoiceError(Exception):
