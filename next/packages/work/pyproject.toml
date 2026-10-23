@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ai-market-work-kit"
+version = "0.1.0"
+requires-python = ">=3.10"
+description = "Injectable background work sessions and human interactions"
+
+[project.optional-dependencies]
+openai = ["openai-agents==0.24.0", "jsonschema==4.26.0"]
+claude = ["claude-agent-sdk==0.2.173", "jsonschema==4.26.0"]
+sdk = ["openai-agents==0.24.0", "claude-agent-sdk==0.2.173", "jsonschema==4.26.0"]
+
+[tool.setuptools]
+packages = ["work"]
+package-dir = {work = "src"}

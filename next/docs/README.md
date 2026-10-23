@@ -1,6 +1,9 @@
 # 项目文档
 
 - [开发规则](rules/README.md)：统一在一个文件中按条维护。
+- [聊天包契约](../packages/chat/README.md)：六方法 Python 实现，支持外部生成器、插件、配置与存储注入。
+- [工作包契约](../packages/work/README.md)：八方法 Python 实现，支持流式事件与显式恢复，mode 可选 OpenAI / Claude SDK，支持后台执行、人工答复及外部存储。
+- [聊天与工作公共契约](features/chat-work.contract.md)：外部注入口、跨包关联和宿主责任。
 - [迁移说明](migration.md)：新架构的路径、建设范围与最终迁移条件。
 - [运行工程说明](containers.md)：`containers` 的含义与工程组织方式。
 - [Python 语音基础包](../packages/voice/README.md)：8 个公开接口、HTTP 识别与合成、本机音频采集和播放；真实设备发声待验收。
