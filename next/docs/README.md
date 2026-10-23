@@ -1,5 +1,7 @@
 # 项目文档
 
+- [AI 模块契约与实现](../modules/ai/README.md)：多类型资源集合；backend 已提供会话、工作与连续语音，frontend 的组件、页面及状态资源按需交付。
+
 - [开发规则](rules/README.md)：统一在一个文件中按条维护。
 - [聊天包契约](../packages/chat/README.md)：六方法 Python 实现，支持外部生成器、插件、配置与存储注入。
 - [工作包契约](../packages/work/README.md)：八方法 Python 实现，支持流式事件与显式恢复，mode 可选 OpenAI / Claude SDK，支持后台执行、人工答复及外部存储。

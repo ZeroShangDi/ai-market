@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ai-market-ai-module"
+version = "0.1.0"
+requires-python = ">=3.10"
+description = "Backend resources of the AI module: conversation, work and voice"
+
+[project.optional-dependencies]
+chat = ["ai-market-chat-kit==0.1.0"]
+work = ["ai-market-work-kit==0.1.0"]
+voice = ["ai-market-chat-kit==0.1.0", "ai-market-voice-kit==0.1.0"]
+
+[tool.setuptools]
+packages = ["ai"]
+package-dir = {ai = "src"}
