@@ -208,7 +208,8 @@
         "query",
         "user_quote"
       ],
-      "requiresHost": true
+      "requiresHost": true,
+      "timeoutSeconds": 150
     }
   ]
 }

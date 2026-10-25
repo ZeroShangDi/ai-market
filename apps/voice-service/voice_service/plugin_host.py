@@ -75,6 +75,7 @@ class PluginHost:
         self.bridge = HostBridge(connection)
         self.plugins = []
         self.specs = []
+        self.timeouts = {}
         self.instructions = []
         # Code, tool schema and instructions are one process-lifetime snapshot.
         # Reading only JSON afresh would pair a new schema with cached old Python code.
@@ -89,6 +90,10 @@ class PluginHost:
                     continue
                 if any(s.name == spec['name'] for s, _ in self.specs):
                     raise ValueError('Duplicate voice plugin tool')
+                timeout = spec.get('timeoutSeconds', 60)
+                if isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or not 1 <= timeout <= 180:
+                    raise ValueError('Invalid plugin tool timeout')
+                self.timeouts[spec['name']] = timeout
                 self.specs.append((FunctionSchema(name=spec['name'], description=spec['description'],
                     properties=spec['properties'], required=spec['required']), plugin))
 
@@ -101,7 +106,7 @@ class PluginHost:
                     result = {'error': '操作尚未确认，请核对状态后重试；不能声称已完成。'}
                 await params.result_callback(result)
             # Interrupting speech must not cancel an admitted write or approval.
-            llm.register_function(spec.name, invoke, cancel_on_interruption=False, timeout_secs=60)
+            llm.register_function(spec.name, invoke, cancel_on_interruption=False, timeout_secs=self.timeouts[spec.name])
 
     async def prepare_notice(self, notice):
         for plugin in self.plugins:

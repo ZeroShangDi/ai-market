@@ -14,6 +14,8 @@ class PublicWebTests(unittest.IsolatedAsyncioTestCase):
         seen=[]
         def handler(request):
             seen.append(request)
+            if isinstance(events, Exception):
+                raise events
             return httpx.Response(200,text=''.join('data: '+json.dumps(e)+'\n\n' for e in events))
         real=httpx.AsyncClient
         with patch.dict(os.environ,{'AGENT_INTERNAL_TOKEN':'x'*32}), patch('voice_service.plugins.work_control.web.httpx.AsyncClient',side_effect=lambda **kw: real(transport=httpx.MockTransport(handler))):
@@ -36,3 +38,28 @@ class PublicWebTests(unittest.IsolatedAsyncioTestCase):
     async def test_failed_identity_does_not_search(self):
         result,seen=await self.lookup([],False)
         self.assertIn('error',result);self.assertEqual(seen,[])
+
+    async def test_authorization_timeout_is_explicit_and_does_not_search(self):
+        context = SimpleNamespace(get_messages=lambda: [{'role':'user','content':'查一下'}])
+        plugin = WorkControl({'tenant':'0','user':'7','device':'10'}, context,
+            SimpleNamespace(request=AsyncMock(side_effect=TimeoutError('private details'))))
+        with self.assertLogs('voice_service.plugins.work_control.web', level='WARNING') as logs:
+            result = await plugin.search_web('公开关键词', '查一下')
+        self.assertFalse(result['searched'])
+        self.assertIn('授权核验未完成', result['error'])
+        self.assertIn('stage=authorization', str(logs.output))
+        self.assertNotIn('private details', str(logs.output) + str(result))
+
+    async def test_failure_diagnostics_do_not_include_query_or_upstream_body(self):
+        with self.assertLogs('voice_service.plugins.work_control.web', level='WARNING') as logs:
+            result, _ = await self.lookup([{'type':'error','code':'WEB_SEARCH_UNAVAILABLE','message':'private body'}])
+        self.assertFalse(result['searched'])
+        self.assertIn('upstream_code=WEB_SEARCH_UNAVAILABLE', str(logs.output))
+        for sensitive in ['公开新闻', 'private body', 'x'*32]:
+            self.assertNotIn(sensitive, str(logs.output))
+
+    async def test_network_timeout_is_not_reported_as_missing_capability(self):
+        result, _ = await self.lookup(httpx.ReadTimeout('private query'))
+        self.assertFalse(result['searched'])
+        self.assertIn('等待超时', result['error'])
+        self.assertNotIn('private query', str(result))

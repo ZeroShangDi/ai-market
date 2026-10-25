@@ -192,6 +192,10 @@ class WorkPlugin(unittest.IsolatedAsyncioTestCase):
             context = Context()
             host = PluginHost(SimpleNamespace(send_app_message=lambda _: None), IDENTITY, context)
             self.assertEqual(len(host.specs), 9)
+            registered = {}
+            host.register(SimpleNamespace(register_function=lambda name, fn, **kw: registered.update({name: kw})))
+            self.assertEqual(registered['search_web']['timeout_secs'], 150)
+            self.assertEqual(registered['start_work']['timeout_secs'], 60)
             start = next(spec for spec, _ in host.specs if spec.name == 'start_work')
             self.assertNotIn('kind', start.properties)
             self.assertEqual(start.required, ['prompt', 'user_quote'])

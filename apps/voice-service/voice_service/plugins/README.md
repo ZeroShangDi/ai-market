@@ -8,6 +8,8 @@
 
 `activate(identity, context, host)` 返回插件实例：`enabled` 决定是否装载；`execute(name, arguments)` 执行清单中工具；`prepare_notice(notice)` 可将通知整理为口头摘要；可选 `notice_delivered(id)` 只在音频实际播放完成后调用。`identity` 来自签名票据，模型不能提供身份、服务地址或凭据。`context` 提供当前文字会话；`host.request` 是有界、带请求关联的通用宿主通信。
 
+工具清单可声明 `timeoutSeconds`（1–180 秒，默认 60 秒）；底座只负责通用有界执行，插件应为授权和实际操作预留足够时间。公开搜索插件内部等待 120 秒，外层 150 秒包含最多 20 秒手机授权。
+
 插件提示词约束行为，服务端权限和参数绑定负责执行边界。新增宿主能力必须进入受管理白名单，不能把通信接口做成任意 URL 代理。
 
 ## 工作控制插件
