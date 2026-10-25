@@ -77,4 +77,6 @@ class PublicWeb:
                 upstream_code, int((time.monotonic()-started)*1000), completed, len(sources))
             if isinstance(error, (TimeoutError, httpx.TimeoutException)):
                 return {'searched': False, 'error': '联网查询等待超时，尚未取得完整结果；可重试或创建后台查询任务，不代表没有联网能力。'}
+            if isinstance(error, httpx.HTTPStatusError) and error.response.status_code == 429:
+                return {'searched': False, 'error': '搜索服务当前繁忙，本次查询未被接收；请稍后再试，不要立即重复提交。'}
             return {'searched': False, 'error': '联网查询未完成或缺少可靠来源，请如实说明；可建议创建后台查询任务，不得编造实时结论。'}

@@ -13,6 +13,7 @@ from pipecat.services.settings import TTSSettings, STTSettings
 from pipecat.services.stt_service import SegmentedSTTService
 from pipecat.utils.time import time_now_iso8601
 from pipecat.services.openai.stt import OpenAISTTService, OpenAIRealtimeSTTService
+from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transcriptions.language import Language
 
 
@@ -30,6 +31,17 @@ def voice_llm_extra():
     if urlsplit(required("VOICE_LLM_URL")).hostname == "api.deepseek.com":
         return {"extra_body": {"thinking": {"type": "disabled"}}}
     return {}
+
+
+class VoiceLLMService(OpenAILLMService):
+    """Keep provider wire compatibility out of the shared conversation state."""
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        # Deferred tool results use developer messages in Pipecat. DeepSeek
+        # rejects that role, poisoning every subsequent request in the session.
+        # The adapter copies messages at the API boundary; user_turn() must
+        # never mistake a tool result for the user's latest authorization.
+        self.supports_developer_role = urlsplit(kwargs.get('base_url', '')).hostname != 'api.deepseek.com'
 
 
 def create_stt():
@@ -63,7 +75,9 @@ class MlxASRService(SegmentedSTTService):
                     raise ValueError()
                 if text.strip():
                     yield TranscriptionFrame(text.strip(),self._user_id,time_now_iso8601(),finalized=True)
-        except (httpx.HTTPError,ValueError,KeyError):
+        except (httpx.HTTPError,ValueError,KeyError) as error:
+            logging.getLogger(__name__).warning('asr_failed error_type=%s status=%s',
+                type(error).__name__, error.response.status_code if isinstance(error, httpx.HTTPStatusError) else None)
             yield ErrorFrame('语音识别失败，请再说一次')
 
 

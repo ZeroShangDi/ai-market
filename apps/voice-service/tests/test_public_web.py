@@ -16,6 +16,8 @@ class PublicWebTests(unittest.IsolatedAsyncioTestCase):
             seen.append(request)
             if isinstance(events, Exception):
                 raise events
+            if isinstance(events, int):
+                return httpx.Response(events)
             return httpx.Response(200,text=''.join('data: '+json.dumps(e)+'\n\n' for e in events))
         real=httpx.AsyncClient
         with patch.dict(os.environ,{'AGENT_INTERNAL_TOKEN':'x'*32}), patch('voice_service.plugins.work_control.web.httpx.AsyncClient',side_effect=lambda **kw: real(transport=httpx.MockTransport(handler))):
@@ -79,3 +81,10 @@ class PublicWebTests(unittest.IsolatedAsyncioTestCase):
             result = await plugin.execute('search_web', {'query':'公开新闻'})
             self.assertIn('error', result)
             host.request.assert_not_awaited()
+
+    async def test_busy_search_is_reported_without_automatic_resubmission(self):
+        result, seen = await self.lookup(429)
+        self.assertFalse(result['searched'])
+        self.assertIn('繁忙', result['error'])
+        self.assertIn('未被接收', result['error'])
+        self.assertEqual(len(seen), 1)

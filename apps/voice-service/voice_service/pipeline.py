@@ -9,7 +9,6 @@ from pipecat.pipeline.worker import PipelineWorker, PipelineParams
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair, LLMUserAggregatorParams
 from pipecat.processors.frame_processor import FrameProcessor, FrameDirection
-from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import TransportParams
 from pipecat.transports.smallwebrtc.transport import SmallWebRTCTransport
 from pipecat.turns.user_turn_strategies import UserTurnStrategies
@@ -19,7 +18,7 @@ from .plugin_host import PluginHost
 from .history import VoiceHistory
 from .work_bridge import WorkAnnouncements
 from .character import character_context
-from .providers import create_stt, StreamingPCMService, required, voice_llm_extra
+from .providers import create_stt, StreamingPCMService, VoiceLLMService, required, voice_llm_extra
 
 SYSTEM = """你是统子哥的语音对话助手。用自然简短的中文交流，通常一到三句，不使用 Markdown。
 日常对话直接回答；其他能力按已装载插件的工具和指引使用。角色资料只约束交流风格，当前插件协议决定能力用法。
@@ -70,8 +69,8 @@ class VoiceStates(FrameProcessor):
 def build_pipeline(connection, identity):
     transport = SmallWebRTCTransport(connection, TransportParams(audio_in_enabled=True, audio_out_enabled=True))
     stt, tts = create_stt(), StreamingPCMService(voice=identity.get("character") or None)
-    llm = OpenAILLMService(api_key=required("VOICE_LLM_API_KEY"), base_url=required("VOICE_LLM_URL"),
-                           settings=OpenAILLMService.Settings(model=required("VOICE_LLM_MODEL"), max_tokens=600, extra=voice_llm_extra()))
+    llm = VoiceLLMService(api_key=required("VOICE_LLM_API_KEY"), base_url=required("VOICE_LLM_URL"),
+                           settings=VoiceLLMService.Settings(model=required("VOICE_LLM_MODEL"), max_tokens=600, extra=voice_llm_extra()))
     persona = character_context(identity)
     context = LLMContext(messages=[])
     plugins = PluginHost(connection, identity, context)
