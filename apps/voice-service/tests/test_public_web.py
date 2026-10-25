@@ -7,8 +7,8 @@ import httpx
 from voice_service.plugins.work_control import WorkControl
 
 class PublicWebTests(unittest.IsolatedAsyncioTestCase):
-    async def lookup(self, events, grant=True):
-        context = SimpleNamespace(get_messages=lambda: [{'role':'user','content':'查一下今天公开新闻'}])
+    async def lookup(self, events, grant=True, content="查一下今天公开新闻"):
+        context = SimpleNamespace(get_messages=lambda: [{'role':'user','content':content}])
         host = SimpleNamespace(request=AsyncMock(return_value={'authorized':grant}))
         plugin = WorkControl({'tenant':'0','user':'7','device':'10'}, context, host)
         seen=[]
@@ -19,7 +19,7 @@ class PublicWebTests(unittest.IsolatedAsyncioTestCase):
             return httpx.Response(200,text=''.join('data: '+json.dumps(e)+'\n\n' for e in events))
         real=httpx.AsyncClient
         with patch.dict(os.environ,{'AGENT_INTERNAL_TOKEN':'x'*32}), patch('voice_service.plugins.work_control.web.httpx.AsyncClient',side_effect=lambda **kw: real(transport=httpx.MockTransport(handler))):
-            result=await plugin.search_web('公开新闻','查一下今天公开新闻')
+            result=await plugin.execute('search_web', {'query': '公开新闻'})
         return result,seen
 
     async def test_completed_search_requires_sources_and_sends_only_query(self):
@@ -44,7 +44,7 @@ class PublicWebTests(unittest.IsolatedAsyncioTestCase):
         plugin = WorkControl({'tenant':'0','user':'7','device':'10'}, context,
             SimpleNamespace(request=AsyncMock(side_effect=TimeoutError('private details'))))
         with self.assertLogs('voice_service.plugins.work_control.web', level='WARNING') as logs:
-            result = await plugin.search_web('公开关键词', '查一下')
+            result = await plugin.search_web('公开关键词')
         self.assertFalse(result['searched'])
         self.assertIn('授权核验未完成', result['error'])
         self.assertIn('stage=authorization', str(logs.output))
@@ -63,3 +63,19 @@ class PublicWebTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(result['searched'])
         self.assertIn('等待超时', result['error'])
         self.assertNotIn('private query', str(result))
+
+    async def test_search_uses_current_turn_without_model_repeating_transcript(self):
+        events = [{'type':'chunk','text':'结论'}, {'type':'sources','items':[{'title':'官方','url':'https://example.org'}]}, {'type':'done'}]
+        for content in ['查一下， 今天公开新闻。', '嗯，帮我查一下今天公开新闻吧！']:
+            with self.subTest(content=content):
+                result, seen = await self.lookup(events, content=content)
+                self.assertTrue(result['searched'])
+                self.assertNotIn(content, seen[0].content.decode())
+
+    async def test_missing_user_request_cannot_search_or_request_authorization(self):
+        for messages in [[], [{'role':'assistant','content':'查一下'}], [{'role':'user','content':'  '}]]:
+            host = SimpleNamespace(request=AsyncMock())
+            plugin = WorkControl({}, SimpleNamespace(get_messages=lambda: messages), host)
+            result = await plugin.execute('search_web', {'query':'公开新闻'})
+            self.assertIn('error', result)
+            host.request.assert_not_awaited()

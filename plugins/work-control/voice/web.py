@@ -8,13 +8,17 @@ import httpx
 
 
 class PublicWeb:
-    async def search_web(self, query, user_quote):
+    async def search_web(self, query):
         started = time.monotonic()
         stage = 'user_request'
         try:
-            self.require_user(user_quote)
+            # Read-only lookup uses the trusted conversation, not a model's
+            # transcription of it. Mutating tools retain require_user checks.
+            _, content = self.user_turn()
+            if not content.strip():
+                raise ValueError('没有当前用户请求')
         except ValueError:
-            logging.getLogger(__name__).warning('voice_search_failed stage=user_request reason=quote_mismatch')
+            logging.getLogger(__name__).warning('voice_search_failed stage=user_request reason=missing_user_turn')
             raise
         if not isinstance(query, str) or not query.strip() or len(query) > 2000:
             raise ValueError('查询内容无效')

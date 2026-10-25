@@ -198,15 +198,10 @@
         "query": {
           "type": "string",
           "description": "公开信息查询问题及必要公开关键词，最多2000字"
-        },
-        "user_quote": {
-          "type": "string",
-          "description": "完整逐字引用本轮用户请求，仅用于本地核验，不发给搜索服务"
         }
       },
       "required": [
-        "query",
-        "user_quote"
+        "query"
       ],
       "requiresHost": true,
       "timeoutSeconds": 150

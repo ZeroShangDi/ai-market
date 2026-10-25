@@ -195,6 +195,9 @@ class WorkPlugin(unittest.IsolatedAsyncioTestCase):
             registered = {}
             host.register(SimpleNamespace(register_function=lambda name, fn, **kw: registered.update({name: kw})))
             self.assertEqual(registered['search_web']['timeout_secs'], 150)
+            search = next(spec for spec, _ in host.specs if spec.name == 'search_web')
+            self.assertEqual(search.required, ['query'])
+            self.assertNotIn('user_quote', search.properties)
             self.assertEqual(registered['start_work']['timeout_secs'], 60)
             start = next(spec for spec, _ in host.specs if spec.name == 'start_work')
             self.assertNotIn('kind', start.properties)
