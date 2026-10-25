@@ -46,11 +46,11 @@ function setup() {
     resolveLocalFileSystemURL: (value, success, fail) => files.has(value) ? success({isFile:true,copyTo: (dir, name, done) => { const local = '/saved/' + name; files.add(local); done({toLocalURL: () => local}); }}) : fail(),
     requestFileSystem: (kind, success) => success({root:{getDirectory: (name, options, done) => done(directory)}}),
   } };
-  const requireMock = name => name === '@/api/http' ? {downloadWorkArtifact: async () => { downloads++; files.add('/temp'); return '/temp'; }} : name === '@/uni_modules/work-file-receiver' ? {shareDocument: (_path, _name, callback) => { shares++; callback(''); }} : {};
+  const requireMock = name => name === '@/api/http' ? {request: async (method, path) => { assert.equal(method, 'GET'); assert.ok(path.endsWith('/content')); return {name:'报告.csv',content_base64:'AAEC/w=='}; }, downloadWorkArtifact: async () => { downloads++; files.add('/temp'); return '/temp'; }} : name === '@/uni_modules/work-file-receiver' ? {shareBase64Document: (name, content, callback) => { assert.equal(name,'报告.csv'); assert.equal(content,'AAEC/w=='); shares++; callback(''); }} : {};
   vm.runInNewContext(ts.transpileModule(fs.readFileSync(path.join(__dirname, '../src/services/work-files.ts'), 'utf8'), {compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2020}}).outputText, {exports:output, require:requireMock, uni, plus, Date});
   return {output, files, counts: () => ({downloads,opens,shares})};
 }
-test('saved artifacts reopen and share without downloading; deleted files return to download state', async () => {
+test('saved artifacts reopen locally; sharing uses authenticated binary content and deleted files can download again', async () => {
   const h = setup(), file = {id:'f',name:'report.pdf'};
   await h.output.openWorkArtifact('s', file);
   const local = await h.output.localWorkArtifact('s', 'f'); assert.ok(local);

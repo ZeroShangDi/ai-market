@@ -124,8 +124,9 @@ function setMode(value: 'chat' | 'work') { if (!modeLocked.value) mode.value = v
 watch(() => state.activeId, () => { workStarted.value = false; workTitle.value = ''; mode.value = summary.value?.started ? 'work' : 'chat'; });
 watch(() => summary.value?.started, started => { if (started) mode.value = 'work'; });
 let preparingIncoming = false;
+let failedIncomingBatch = '';
 async function openIncomingConversation() {
-  if (preparingIncoming || !pageVisible.value || !state.initialized || !state.visible || !incomingWorkFiles.items.length || incomingWorkFiles.conversation || hasUnfinishedCall()) return;
+  if (preparingIncoming || state.loading || failedIncomingBatch === incomingWorkFiles.batch || !pageVisible.value || !state.initialized || !state.visible || !incomingWorkFiles.items.length || incomingWorkFiles.conversation || hasUnfinishedCall()) return;
   preparingIncoming = true;
   try {
     if (!await aiChat.newConversation(true)) throw new Error("会话创建失败");
@@ -133,9 +134,10 @@ async function openIncomingConversation() {
     if (!state.activeId || !pageVisible.value) return;
     incomingWorkFiles.conversation = state.activeId;
     mode.value = 'work';
-  } catch { toast('创建工作会话失败，文件已保留，返回页面可重试'); } finally { preparingIncoming = false; }
+  } catch { failedIncomingBatch = incomingWorkFiles.batch; toast('创建工作会话失败，文件已保留，返回页面可重试'); } finally { preparingIncoming = false; }
 }
-watch(() => [incomingWorkFiles.batch, pageVisible.value], () => { void openIncomingConversation(); });
+watch(pageVisible, visible => { if (!visible) failedIncomingBatch = ''; });
+watch(() => [incomingWorkFiles.batch, pageVisible.value, state.initialized, state.loading], () => { void openIncomingConversation(); });
 const requestedConversation = ref('');
 onLoad(query => { requestedConversation.value = String(query?.conversation || ''); });
 const historyVisible = ref(false), scrollTop = ref(0), followLatest = ref(true);

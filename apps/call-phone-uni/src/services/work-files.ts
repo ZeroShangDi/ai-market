@@ -1,4 +1,4 @@
-import { readDocument, shareDocument } from '@/uni_modules/work-file-receiver';
+import { readDocument, shareBase64Document } from '@/uni_modules/work-file-receiver';
 import { chooseAndroidDocument } from './android-document-picker';
 import { request, downloadWorkArtifact } from '@/api/http';
 
@@ -61,6 +61,15 @@ export async function openWorkArtifact(session: string, artifact: { id: string; 
   // #endif
   // #ifdef APP-PLUS
   if (typeof plus !== 'undefined') {
+    if (action === 'share') {
+      if (plus.os.name !== 'Android') throw new Error('当前平台暂不支持文件分享');
+      // As with diagnostics, create the outbound copy in native private storage.
+      // Do not widen the native path allowlist to uni-app's platform-dependent directories.
+      const data = await request<{ name: string; content_base64: string }>('GET', path + '/content');
+      await new Promise<void>((resolve, reject) => shareBase64Document(data.name, data.content_base64,
+        error => error ? reject(new Error(error)) : resolve()));
+      return;
+    }
     let local = await localWorkArtifact(session, artifact.id);
     if (!local) {
       const temporary = await downloadWorkArtifact(path);
@@ -73,11 +82,6 @@ export async function openWorkArtifact(session: string, artifact: { id: string; 
         }, () => reject(new Error('文件保存失败')));
       }, () => reject(new Error('下载文件不可用'))));
       uni.setStorageSync(artifactCacheKey(session, artifact.id), local);
-    }
-    if (action === 'share') {
-      if (plus.os.name !== 'Android') throw new Error('当前平台暂不支持文件分享');
-      await new Promise<void>((resolve, reject) => shareDocument(plus.io.convertLocalFileSystemURL(local), artifact.name, error => error ? reject(new Error(error)) : resolve()));
-      return;
     }
     const extension = artifact.name.split('.').pop()?.toLowerCase();
     await new Promise<void>((resolve, reject) => uni.openDocument({ filePath: local, fileType: extension as any, showMenu: true, success: () => resolve(), fail: () => {

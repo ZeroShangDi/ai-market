@@ -153,6 +153,20 @@ class WorkFileShareProvider : android.content.ContentProvider() {
 }
 
 object WorkFileShare {
+    @JvmStatic fun launchBase64(activity: Activity, name: String, content: String, callback: (String) -> Unit) {
+        activity.runOnUiThread {
+            val error = try {
+                require(content.length <= 12 * 1024 * 1024) { "文件过大" }
+                val bytes = Base64.decode(content, Base64.DEFAULT)
+                require(bytes.size <= 8 * 1024 * 1024) { "文件过大" }
+                val temporary = File.createTempFile("artifact-", ".bin", activity.cacheDir)
+                try { temporary.writeBytes(bytes); share(activity, temporary.path, name) }
+                finally { temporary.delete() }
+                ""
+            } catch (_: Exception) { "无法打开文件分享，请检查文件和接收应用后重试" }
+            callback(error)
+        }
+    }
     @JvmStatic fun launch(activity: Activity, path: String, name: String, callback: (String) -> Unit) {
         activity.runOnUiThread {
             val error = try { share(activity, path, name); "" } catch (_: Exception) { "无法打开文件分享，请检查文件和接收应用后重试" }
