@@ -48,3 +48,7 @@ unpackage/
 /apps/call-phone-uni/previews
 /.local/app-update/
 /next/.local
+
+/apps/agent-service/.plugin-bundle/
+/apps/call-phone-uni/src/pages/plugin-generated/
+/apps/call-phone-uni/src/modules/plugin-pages/catalog.json

@@ -11,12 +11,12 @@
         <view v-if="detail.parentId" class="belongs" role="button" @tap="detailId = `${detail.plugin.id}:plugin`"><text>所属插件</text><text>{{ detail.plugin.name }} ›</text></view>
         <view v-if="detail.type === 'plugins' && children.length" class="contents"><text class="section">包含的能力</text><view v-for="child in children" :key="child.key" class="child" role="button" @tap="detailId = child.key"><CapabilityIcon :kind="child.type" /><view class="child-copy"><text>{{ child.name }}</text><view class="badges"><text v-for="tag in capabilityTags(child)" :key="tag.text" class="badge" :class="tag.tone">{{ tag.text }}</text></view></view><text class="chevron">›</text></view></view>
         <view v-if="detail.type === 'mcp'" class="contents"><text class="section">提供的工具</text><view v-for="tool in detail.plugin.tools" :key="tool.id" class="tool-row"><text>{{ tool.label }}</text><text class="eyebrow">{{ tool.id }}</text></view></view>
-        <view v-if="!detail.plugin.builtin" class="detail-actions">
+        <view v-if="!detail.plugin.builtin || detail.plugin.selectable" class="detail-actions">
           <template v-if="!detail.parentId && ['plugins', 'skills'].includes(detail.type)">
             <button v-if="!detail.installed" class="primary" :disabled="saving" @tap="act(detail.plugin, 'install')">{{ detail.type === 'skills' ? '安装技能' : '安装插件' }}</button>
             <template v-else>
               <button :class="detail.enabled ? 'secondary' : 'primary'" :disabled="saving" @tap="toggle(detail)">{{ toggleLabel(detail) }}</button>
-              <button class="uninstall" :disabled="saving" @tap="uninstall(detail)">{{ detail.type === 'skills' ? '卸载技能' : '卸载插件' }}</button>
+              <button v-if="!detail.plugin.builtin" class="uninstall" :disabled="saving" @tap="uninstall(detail)">{{ detail.type === 'skills' ? '卸载技能' : '卸载插件' }}</button>
             </template>
           </template>
           <button v-else-if="detail.parentId && (!detail.installed || !detail.plugin.enabled)" class="primary" @tap="detailId = `${detail.plugin.id}:plugin`">管理所属插件</button>

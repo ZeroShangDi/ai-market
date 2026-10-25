@@ -1,8 +1,9 @@
+import pluginPages from '../plugin-pages/catalog.json';
 import { hasUnfinishedCall } from '@/services/calls';
 import { ensureSession } from '@/services/session';
 import { toast } from '@/ui/format';
 
-export type MobileAppId = 'ai-assistant' | 'dialer';
+export type MobileAppId = string;
 export type MobileAppType = 'uni' | 'h5';
 export interface MobileApp {
   id: MobileAppId;
@@ -22,6 +23,9 @@ export interface MobileApp {
 
 // The host owns discovery and navigation; each app keeps its own business pages.
 export const mobileApps: readonly MobileApp[] = [
+  ...pluginPages.map(page => ({ id: page.id, name: page.name, description: page.summary, summary: page.summary,
+    type: 'uni' as const, route: page.route, icon: 'app-ai' as const,
+    iconAsset: '', color: '#294fdb', background: '#eef2ff', category: '自动化', defaultFavorite: false, keywords: [page.name] })),
   {
     id: 'ai-assistant',
     name: 'AI 对话',

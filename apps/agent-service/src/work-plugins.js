@@ -1,6 +1,6 @@
 import { readFile, realpath } from 'node:fs/promises';
 import { join, isAbsolute } from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { contained } from './work-files.js';
 
 function fields(value) {
@@ -15,7 +15,10 @@ export function validatePluginResult(value) {
 
 /** Only deployment-approved absolute paths; never reads plugin configuration from user files or model inputs. */
 export async function discoverCapabilityPlugins({ ctx, entries }) {
-  entries ??= JSON.parse(process.env.WORK_CAPABILITY_PLUGINS || '[]');
+  if (entries == null) {
+    const root = process.env.WORK_BUILTIN_ROOT || fileURLToPath(new URL('../../../plugins', import.meta.url));
+    entries = [...JSON.parse(process.env.WORK_CAPABILITY_PLUGINS || '[]'), ...JSON.parse(await readFile(join(root,'runtime-catalog.json'),'utf8')).map(item => ({ path: join(root,item.directory) }))];
+  }
   if (!Array.isArray(entries) || entries.length > 20) throw new Error('Invalid plugin configuration');
   const workspaceRoot = entries.length ? await realpath(ctx.base) : ctx.base;
   const plugins = [];

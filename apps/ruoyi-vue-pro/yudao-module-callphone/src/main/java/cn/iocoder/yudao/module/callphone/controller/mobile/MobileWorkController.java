@@ -71,6 +71,13 @@ public class MobileWorkController {
         return ok(relay.request("POST", "/capabilities", body, null, actor(request)));
     }
 
+    @PostMapping("/extensions/{plugin:[a-z_]+}/{operation:[a-z_]+}")
+    @ApiAccessLog(requestEnable = false, responseEnable = false)
+    public ResponseEntity<JsonNode> extension(HttpServletRequest request,@PathVariable String plugin,@PathVariable String operation,@RequestBody JsonNode body) {
+        if ("receive".equals(operation)) throw new AgentRelay.Failure(400,"VALIDATION_ERROR","回调须使用独立入口");
+        return ok(relay.request("POST","/extensions/"+plugin+"/"+operation,body,null,actor(request)));
+    }
+
     @PostMapping
     @ApiAccessLog(requestEnable = false, responseEnable = false)
     public ResponseEntity<JsonNode> create(HttpServletRequest request, @RequestBody JsonNode body) {

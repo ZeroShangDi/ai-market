@@ -8,6 +8,7 @@ const base = '/api/v1/mobile/work/sessions';
 export interface WorkInteraction { id: string; kind: 'question' | 'approval'; binding: string; status: string; tool: string; input: any }
 export interface WorkPlugin {
   builtin?: boolean;
+  selectable?: boolean;
   catalogType?: 'plugins' | 'skills' | 'connections' | 'mcp';
   id: string; name: string; description: string; installed: boolean; enabled: boolean; tools: { id: string; label: string }[]; skills: { id?: string; name: string; description: string; enabled: boolean; standalone?: boolean }[];
   connection: { label?: string; actionLabel?: string; description?: string };

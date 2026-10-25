@@ -17,3 +17,6 @@
 !plugins/workspace-files/
 !plugins/workspace-files/skills/
 !plugins/workspace-files/skills/**
+
+!apps/agent-service/.plugin-bundle/
+!apps/agent-service/.plugin-bundle/**

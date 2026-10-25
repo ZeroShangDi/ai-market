@@ -12,6 +12,7 @@ services:
       AGENT_BIND_HOST: 0.0.0.0
       AGENT_PORT: 48082
       AGENT_DATA_DIR: /data
+      AI_SERVICE_URL: http://ai-service:48081
       AGENT_CHARACTER_ROOT: /pet-resources
       WORK_CAPABILITY_PLUGINS: '["/app/plugins/callphone"]'
       WORK_BUSINESS_URL: http://server:48080/admin-api/callphone/plugin/leads/import

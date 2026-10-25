@@ -3,6 +3,7 @@ import { timingSafeEqual } from 'node:crypto';
 import { ApiError, decimalId, uuid } from './validation.js';
 import { validateChat } from './web-chat.js';
 import { WorkStore } from './work.js';
+import { createPluginRuntime, conversationClient } from './plugin-runtime.js';
 
 function json(response, status, data) {
   // Small control responses close their connection explicitly. Otherwise a
@@ -27,20 +28,31 @@ async function body(request, maxBytes = 512 * 1024) {
   try { return JSON.parse(Buffer.concat(bytes).toString('utf8')); }
   catch { throw new ApiError(400, 'AGENT_INVALID_REQUEST', 'JSON 无效'); }
 }
-export async function createAgentServer({ internalToken, dataDir, webExecutor, workExecutor, workTimeoutMs } = {}) {
+export async function createAgentServer({ internalToken, dataDir, webExecutor, workExecutor, workTimeoutMs, runtimeOptions } = {}) {
   if (typeof internalToken !== 'string' || internalToken.length < 32) throw new Error('AGENT_INTERNAL_TOKEN must be at least 32 characters');
   const work = workExecutor ? new WorkStore({ dataDir, executor: workExecutor, timeoutMs: workTimeoutMs }) : null; await work?.init();
+  const plugins = work ? await createPluginRuntime({dataDir,work,createConversation:conversationClient(),...runtimeOptions}) : null;
   const workObservers = new Set();
   let webRunning = 0;
   const webControllers = new Set();
   const server = createServer(async (request, response) => {
     try {
       if (request.url === '/health' && request.method === 'GET') { json(response, 200, { status: 'ok' }); return; }
+      const hook = /^\/plugin-hooks\/([a-z_]+\/[a-f0-9-]+\/[a-f0-9]{64})$/.exec(new URL(request.url,'http://internal').pathname);
+      if(hook && request.method === 'POST' && plugins) {
+        json(response,202,{data:await plugins.receive(hook[1],await body(request,8000),request.headers['idempotency-key'])});return;
+      }
       const identity = authenticate(request, internalToken);
       const url = new URL(request.url, 'http://internal'); const path = url.pathname;
       if (path.startsWith('/internal/v1/agent/work/sessions')) {
         if (!work) throw new ApiError(503, 'WORK_UNAVAILABLE', 'Work 尚未配置');
         const base = '/internal/v1/agent/work/sessions';
+        const extension = /^\/extensions\/([a-z_]+)\/([a-z_]+)$/.exec(path.slice(base.length));
+        if(extension && request.method === 'POST' && plugins) {
+          const input=await body(request,20000);
+          const data=extension[2]==='receive' ? await plugins.receive(`${extension[1]}/${input.id}/${input.secret}`,input.payload,input.key) : await plugins.handle(identity,extension[1],extension[2],input);
+          json(response,200,{data});return;
+        }
         if (path === base + '/capabilities') {
           if (request.method === 'GET') { json(response, 200, { data: await work.capabilities(identity) }); return; }
           if (request.method === 'POST') { json(response, 200, { data: await work.configureCapability(identity, await body(request)) }); return; }
@@ -105,7 +117,7 @@ export async function createAgentServer({ internalToken, dataDir, webExecutor, w
       }
       throw new ApiError(404, 'AGENT_NOT_FOUND', '接口不存在');
     } catch (error) {
-      if (!response.headersSent && !response.destroyed) json(response, error instanceof ApiError ? error.status : 500, { error: { code: error instanceof ApiError ? error.code : 'AGENT_INTERNAL_ERROR', message: error instanceof ApiError ? error.message : 'Agent 服务内部错误' } });
+      if (!response.headersSent && !response.destroyed) json(response, Number.isInteger(error.status) && error.status >= 400 && error.status < 600 ? error.status : 500, { error: { code: error instanceof ApiError ? error.code : 'AGENT_INTERNAL_ERROR', message: Number.isInteger(error.status) ? error.message : 'Agent 服务内部错误' } });
     }
   });
   server.requestTimeout = 15000; server.headersTimeout = 10000;
@@ -114,5 +126,5 @@ export async function createAgentServer({ internalToken, dataDir, webExecutor, w
     console.warn('Agent HTTP client error:', error.code || 'UNKNOWN');
     socket.destroy();
   });
-  return { server, work, close: async () => { for (const observer of workObservers) observer(); for (const controller of webControllers) controller.abort(); await work?.close(); const closed = new Promise(resolve => server.close(resolve)); server.closeAllConnections(); await closed; } };
+  return { server, work, close: async () => { for (const observer of workObservers) observer(); for (const controller of webControllers) controller.abort(); await plugins?.close(); await work?.close(); const closed = new Promise(resolve => server.close(resolve)); server.closeAllConnections(); await closed; } };
 }

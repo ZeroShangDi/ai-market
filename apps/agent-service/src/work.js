@@ -130,8 +130,8 @@ export class WorkStore {
   async capabilities(actor) {
     const available = await this.capabilityCatalog(actor), state = await this.capabilityState(actor);
     return { items: [...await builtInCapabilities(), ...available.map(({ manifest }) => {
-      const saved = state.items.find(p => p.id === manifest.id);
-      return { id: manifest.id, catalogType: manifest.catalogType || 'plugins', name: manifest.name || manifest.id, description: manifest.description || '',
+      const saved = state.items.find(p => p.id === manifest.id) || (manifest.builtin ? { enabled:true, account:'当前账号' } : undefined);
+      return { id: manifest.id, builtin: !!manifest.builtin, selectable: true, catalogType: manifest.catalogType || 'plugins', name: manifest.name || manifest.id, description: manifest.description || '',
         skills: (manifest.skills || []).map(skill => ({ ...skill, enabled: !(saved?.disabledSkills || []).includes(skill.name) })),
         tools: Object.entries(manifest.tools || {}).map(([id, tool]) => ({ id, label: tool.label })),
         connection: { label: manifest.connection?.label, actionLabel: manifest.connection?.actionLabel, description: manifest.connection?.description },
@@ -148,6 +148,8 @@ export class WorkStore {
       if (!plugin) invalid('插件不可用');
       const state = await this.capabilityState(actor), next = structuredClone(state);
       let saved = next.items.find(p => p.id === input.plugin_id);
+      if (plugin.manifest.builtin && input.action === 'uninstall') invalid('内置插件不能卸载');
+      if (plugin.manifest.builtin && !saved) { saved = {id:input.plugin_id,enabled:true,account:'当前账号',disabledSkills:[]}; next.items.push(saved); }
       if (input.action === 'install') { if (!saved) next.items.push({ id: input.plugin_id, enabled: true, disabledSkills: [] }); }
       else {
         if (!saved) invalid('请先安装插件');
@@ -173,7 +175,7 @@ export class WorkStore {
   }
   async plugins(actor, id) {
     const s = this.get(actor, id), catalog = await this.capabilities(actor);
-    return { items: catalog.items.filter(p => !p.builtin).map(p => ({ ...p, added: !!s.plugins?.some(v => v.id === p.id && v.added) })) };
+    return { items: catalog.items.filter(p => !p.builtin || p.selectable).map(p => ({ ...p, added: !!s.plugins?.some(v => v.id === p.id && v.added) })) };
   }
   async configurePlugin(actor, id, input) {
     const s = this.get(actor, id);
