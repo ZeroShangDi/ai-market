@@ -30,6 +30,10 @@ public final class ChatController {
         @RequestParam(required=false) String cursor,@RequestParam(defaultValue="50") int limit) {
         return data(service.messages(actor(request),id,cursor,limit));
     }
+    @PostMapping("/conversations/{id}/transcripts") public Map<String,Object> transcript(HttpServletRequest request,
+        @PathVariable String id, @RequestBody @Valid Transcript input, @RequestHeader("Idempotency-Key") String key) {
+        return data(service.transcript(actor(request),id,input,key));
+    }
     @DeleteMapping("/conversations/{id}") public Map<String,Object> delete(HttpServletRequest request,@PathVariable String id) {
         return data(service.delete(actor(request),id));
     }

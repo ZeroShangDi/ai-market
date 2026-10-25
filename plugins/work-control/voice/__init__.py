@@ -1,11 +1,14 @@
 """Work connector and conversation policy, independent of microphone/UI state."""
 import asyncio
 import json
+import logging
 import os
 import uuid
 
 import httpx
 from openai import APIError
+from .history import ConversationHistory
+from .web import PublicWeb
 
 BASE = '/internal/v1/agent/work/sessions'
 WORK = '完成以下用户交办，严格遵循请求范围，不扩大执行目标。仅要求查询时只做搜索、阅读、核实和分析，不执行外部业务变更，并给出依据和不确定性。必要时使用 AskUserQuestion，外部操作遵循原有审批。最终简洁汇报实际成果、产物及未完成事项，不把计划当结果。\n\n'
@@ -21,7 +24,7 @@ def identifier(value):
     return str(uuid.UUID(value))
 
 
-class WorkControl:
+class WorkControl(ConversationHistory, PublicWeb):
     def __init__(self, identity, context, host):
         self.identity, self.context, self.host = identity, context, host
         self.enabled = len(os.environ.get('AGENT_INTERNAL_TOKEN', '')) >= 32 and identity.get('host_plugin_bridge') is True
@@ -108,6 +111,7 @@ class WorkControl:
         else:
             record = self.starts.setdefault(key, {'request_id': str(uuid.uuid4()), 'prompt': prompt})
         rid = record['request_id']
+        stage = 'allocate_conversation'
         try:
             if 'conversation' not in record:
                 result = await self.host.request('POST', '/api/v1/mobile/ai/conversations', {}, rid)
@@ -115,30 +119,37 @@ class WorkControl:
                 if not isinstance(conversation, str) or not conversation.isdecimal():
                     raise RuntimeError('会话创建未确认')
                 record['conversation'] = conversation
+            stage = 'create_session'
             if 'session' not in record:
                 result = await self.api('POST', body={'conversation_id': record['conversation']})
                 record['session'] = result['id']
+            stage = 'submit_message'
             result = await self.api('POST', '/' + record['session'] + '/messages', {
                 'request_id': rid, 'prompt': prompt + '\n\n' + WORK,
                 'resource_ids': [], 'character': self.identity.get('character') or None}, rid)
             return {'accepted': True, **self.receipt(result)}
-        except (RuntimeError, TimeoutError):
+        except (RuntimeError, TimeoutError) as error:
+            cause = error.__cause__
+            status = cause.response.status_code if isinstance(cause, httpx.HTTPStatusError) else None
+            logging.getLogger(__name__).warning('work_start_unconfirmed stage=%s status=%s error_type=%s', stage, status, type(error).__name__)
             return {'accepted': False, 'retry_id': rid, 'session_id': record.get('session'),
                 'error': '提交结果尚未确认；使用 retry_id 和相同内容重试，不新建副本。'}
 
     async def list_work(self, limit=15, before=None):
         if type(limit) is not int or not 1 <= limit <= 30:
             raise ValueError('分页数量无效')
-        items = (await self.api('GET'))['items']
+        result = await self.host.request('GET', '/api/v1/mobile/work/sessions', None, None)
+        if not isinstance(result, dict) or not isinstance(result.get('items'), list):
+            raise RuntimeError('工作列表未确认，请更新 App 后重试')
+        items = result['items']
+        total = len(items)
         if before:
             index = next((i for i, item in enumerate(items) if item['id'] == identifier(before)), None)
             if index is None:
                 raise ValueError('分页位置已变化，请重新查看')
             items = items[index + 1:]
         page = items[:limit]
-        verified = await asyncio.gather(*(self.authorize(item['id']) for item in page), return_exceptions=True)
-        return {'items': [item for item, result in zip(page, verified) if not isinstance(result, BaseException)],
-            'unavailable_count': sum(isinstance(result, BaseException) for result in verified),
+        return {'items': page, 'total': total, 'scope': 'current_account_work_page',
             'next_before': page[-1]['id'] if len(items) > limit else None}
 
     async def read_work(self, session_id, before=None, message_id=None, offset=0):

@@ -93,7 +93,7 @@ export async function createAgentServer({ internalToken, dataDir, webExecutor, w
         const heartbeat = setInterval(() => { if (!response.destroyed) response.write(': ping\n\n'); }, 15000);
         const deadline = setTimeout(abort, 170000);
         try {
-          for await (const event of webExecutor.stream(turns, { signal: controller.signal, identity })) emit(event);
+          for await (const event of webExecutor.stream(turns, { signal: controller.signal, identity, includeSources: request.headers['x-search-sources'] === '1' })) emit(event);
           if (!controller.signal.aborted) emit({ type: 'done' });
         } catch (error) {
           emit({ type: 'error', code: error instanceof ApiError ? error.code : 'WEB_CHAT_UNAVAILABLE', message: error instanceof ApiError ? error.message : '联网对话暂时不可用，请重试' });

@@ -55,7 +55,7 @@ test('session plugin lifecycle is explicit, scoped, durable and rechecks connect
   const second = await store.create(actor,{conversation_id:'2'});
   assert.equal((await store.plugins(actor,second.id)).items[0].connected,true);
   assert.equal((await store.plugins(actor,second.id)).items[0].added,false);
-  assert.equal((await store.capabilities({...actor,user:'8'})).items[0].connected,false);
+  assert.equal((await store.capabilities({...actor,user:'8'})).items.find(p=>p.id==='example').connected,false);
   await store.configureCapability(actor,{plugin_id:'example',action:'disable_skill',skill:'检查'});
   await assert.rejects(store.requireCapabilities(actor,['example'],'Skill',{skill:'example:inspect'}), /已停用/);
   await store.configureCapability(actor,{plugin_id:'example',action:'disable'});
@@ -72,4 +72,14 @@ test('session plugin lifecycle is explicit, scoped, durable and rechecks connect
   assert.equal((await store.plugins(actor,s.id)).items[0].added,false);
   await store.configureCapability(actor,{plugin_id:'example',action:'disconnect'});
   assert.equal((await store.plugins(actor,s.id)).items[0].connected,false); await store.close();
+});
+
+test('capability center includes builtin sources but never advertises fake install or work selection',async t=>{
+ const {WorkStore}=await import('../src/work.js');
+ const root=await mkdtemp(join(tmpdir(),'catalog-'));t.after(()=>rm(root,{recursive:true,force:true}));
+ const store=new WorkStore({dataDir:root,executor:{}});await store.init();t.after(()=>store.close());
+ const actor={tenant:'0',user:'1'},items=(await store.capabilities(actor)).items;
+ assert.deepEqual(items.filter(p=>p.builtin).map(p=>p.id),['work_control','characters','workspace_files']);
+ await assert.rejects(store.configureCapability(actor,{plugin_id:'characters',action:'uninstall'}),/插件不可用/);
+ const s=await store.create(actor,{conversation_id:'1'});assert.deepEqual((await store.plugins(actor,s.id)).items,[]);
 });

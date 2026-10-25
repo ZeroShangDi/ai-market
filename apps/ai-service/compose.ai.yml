@@ -12,6 +12,7 @@ services:
       AI_BIND_HOST: 0.0.0.0
       AI_CHARACTER_ROOT: /service/pet-resources
     expose: ["48081"]
+    ports: ["127.0.0.1:48081:48081"] # Local voice transcript writer; never public.
     volumes:
       - yudao-local-ai:/service/data
       - ../../.local/app-update/release/public/pet-resources:/service/pet-resources:ro

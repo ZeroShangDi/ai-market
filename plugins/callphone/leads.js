@@ -1,7 +1,7 @@
 import { readFile, lstat } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
-import { workspacePath } from '../../src/work-files.js';
-import { ApiError } from '../../src/validation.js';
+import { workspacePath } from './paths.js';
+import { ApiError } from './paths.js';
 
 const fail = message => { throw new ApiError(400, 'LEAD_IMPORT_INVALID', message); };
 const hash = value => createHash('sha256').update(value).digest('hex');

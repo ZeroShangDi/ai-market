@@ -3,8 +3,8 @@ services:
   agent-service:
     profiles: [agent]
     build:
-      context: ../agent-service
-      dockerfile: Dockerfile
+      context: ../..
+      dockerfile: apps/agent-service/Dockerfile
     restart: unless-stopped
     env_file:
       - ../agent-service/.env.local

@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, patch
 
 import httpx
 
-from voice_service.plugin_host import HostBridge, PluginHost
+from voice_service.plugin_host import HostBridge, PluginHost, load_package
 from voice_service.plugins.work_control import WorkControl
 
 SID = '12345678-1234-1234-1234-123456789012'
@@ -34,6 +34,14 @@ class WorkPlugin(unittest.IsolatedAsyncioTestCase):
         context = Context()
         host = SimpleNamespace(request=AsyncMock(return_value={'id': '42'}))
         return WorkControl(IDENTITY, context, host), context, host
+
+    async def test_plugin_schema_is_not_reloaded_without_its_python_code(self):
+        load_package.cache_clear()
+        first = load_package('work_control')
+        with patch('pathlib.Path.read_text', side_effect=AssertionError('Live schema reload')):
+            second = load_package('work_control')
+        self.assertIs(first, second)
+        self.assertNotIn('kind', first[1]['tools'][0]['properties'])
 
     async def test_query_is_durable_submission_without_waiting_for_completion_and_retry_is_same_request(self):
         plugin, context, host = self.make()
@@ -164,22 +172,26 @@ class WorkPlugin(unittest.IsolatedAsyncioTestCase):
                 await plugin.api('POST', f'/{SID}/interactions/{IID}', {'approved': True})
             client.assert_not_called()
 
-    async def test_list_excludes_sessions_without_workbench_access(self):
+    async def test_list_uses_exact_workbench_endpoint_and_total_before_pagination(self):
         plugin, _, host = self.make()
-        plugin.api = AsyncMock(return_value={'items': [{'id': SID}, {'id': IID}]})
-        async def check(method, path, body, rid):
-            if path.endswith(IID): raise RuntimeError('denied')
-            return {'id': SID}
-        host.request.side_effect = check
-        result = await plugin.list_work()
+        plugin.api = AsyncMock(side_effect=AssertionError('must not list internal records'))
+        host.request.return_value = {'items': [{'id': SID}, {'id': IID}]}
+        result = await plugin.list_work(limit=1)
         self.assertEqual(result['items'], [{'id': SID}])
-        self.assertEqual(result['unavailable_count'], 1)
+        self.assertEqual(result['total'], 2)
+        self.assertEqual(result['next_before'], SID)
+        second = await plugin.list_work(limit=1, before=SID)
+        self.assertEqual(second['items'], [{'id': IID}])
+        self.assertEqual(second['total'], 2)
+        self.assertIsNone(second['next_before'])
+        host.request.assert_awaited_with('GET', '/api/v1/mobile/work/sessions', None, None)
+        plugin.api.assert_not_called()
 
     async def test_plugin_loading_and_host_version_gate(self):
         with patch.dict(os.environ, ENV):
             context = Context()
             host = PluginHost(SimpleNamespace(send_app_message=lambda _: None), IDENTITY, context)
-            self.assertEqual(len(host.specs), 6)
+            self.assertEqual(len(host.specs), 9)
             start = next(spec for spec, _ in host.specs if spec.name == 'start_work')
             self.assertNotIn('kind', start.properties)
             self.assertEqual(start.required, ['prompt', 'user_quote'])

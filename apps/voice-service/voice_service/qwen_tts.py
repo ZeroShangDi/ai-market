@@ -118,9 +118,11 @@ def create_tts_app(load_model=None):
             except Exception:
                 failed.set()
             finally:
-                clear_cache()
-                done.set()
-                busy.release()
+                try:
+                    clear_cache()
+                finally:
+                    done.set()
+                    busy.release()
 
         thread = threading.Thread(target=generate, daemon=True)
         thread.start()

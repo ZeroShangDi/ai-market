@@ -1,21 +1,45 @@
 """Managed plugin loading and bounded host RPC; no domain tools live here."""
 import asyncio
+import httpx
 import importlib
 import json
 import os
 import re
 import uuid
 from pathlib import Path
+from functools import lru_cache
 
 from pipecat.adapters.schemas.function_schema import FunctionSchema
+
+
+@lru_cache(maxsize=20)
+def load_package(name):
+    if not isinstance(name, str) or not re.fullmatch(r'[a-z][a-z0-9_]{0,39}', name):
+        raise ValueError('Invalid managed voice plugin')
+    module = importlib.import_module(f'.plugins.{name}', __package__)
+    root = Path(module.__file__).parent
+    manifest = json.loads((root / 'plugin.json').read_text())
+    if manifest['id'] != name or manifest['schemaVersion'] != 1:
+        raise ValueError('Invalid voice plugin manifest')
+    return module, manifest, (root / 'SKILL.md').read_text()
+
+
+def load_packages():
+    names = json.loads(os.environ.get('VOICE_PLUGINS', '["work_control"]'))
+    if not isinstance(names, list) or len(names) > 20 or any(not isinstance(n, str) for n in names) or len(set(names)) != len(names):
+        raise ValueError('Invalid managed voice plugins')
+    return [load_package(name) for name in names]
 
 
 class HostBridge:
     def __init__(self, connection):
         self.connection = connection
         self.pending = {}
+        self.closed = False
 
     async def request(self, method, path, body, request_id):
+        if self.closed:
+            raise RuntimeError('语音宿主已关闭')
         key = str(uuid.uuid4())
         future = asyncio.get_running_loop().create_future()
         self.pending[key] = future
@@ -39,9 +63,10 @@ class HostBridge:
                 future.set_result(value.get('data'))
 
     def close(self):
+        self.closed = True
         for future in self.pending.values():
             if not future.done():
-                future.cancel()
+                future.set_exception(RuntimeError('语音宿主已关闭'))
         self.pending.clear()
 
 
@@ -51,23 +76,14 @@ class PluginHost:
         self.plugins = []
         self.specs = []
         self.instructions = []
-        names = json.loads(os.environ.get('VOICE_PLUGINS', '["work_control"]'))
-        if not isinstance(names, list) or len(names) > 20 or any(not isinstance(n, str) for n in names) or len(set(names)) != len(names):
-            raise ValueError('Invalid managed voice plugins')
-        for name in names:
-            if not isinstance(name, str) or not re.fullmatch(r'[a-z][a-z0-9_]{0,39}', name):
-                raise ValueError('Invalid managed voice plugin')
-            # Fixed package namespace, selected by deployment only, never model/user paths.
-            module = importlib.import_module(f'.plugins.{name}', __package__)
-            root = Path(module.__file__).parent
-            manifest = json.loads((root / 'plugin.json').read_text())
-            if manifest['id'] != name or manifest['schemaVersion'] != 1:
-                raise ValueError('Invalid voice plugin manifest')
+        # Code, tool schema and instructions are one process-lifetime snapshot.
+        # Reading only JSON afresh would pair a new schema with cached old Python code.
+        for module, manifest, instructions in load_packages():
             plugin = module.activate(identity=identity, context=context, host=self.bridge)
             if not plugin.enabled:
                 continue
             self.plugins.append(plugin)
-            self.instructions.append((root / 'SKILL.md').read_text())
+            self.instructions.append(instructions)
             for spec in manifest['tools']:
                 if spec.get('requiresHost') and not identity.get('host_plugin_bridge'):
                     continue
@@ -81,7 +97,7 @@ class PluginHost:
             async def invoke(params, plugin=plugin, name=spec.name):
                 try:
                     result = await plugin.execute(name, params.arguments)
-                except (ValueError, RuntimeError, TimeoutError):
+                except (ValueError, RuntimeError, TimeoutError, httpx.HTTPError):
                     result = {'error': '操作尚未确认，请核对状态后重试；不能声称已完成。'}
                 await params.result_callback(result)
             # Interrupting speech must not cancel an admitted write or approval.

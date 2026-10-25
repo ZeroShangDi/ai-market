@@ -133,6 +133,30 @@ public final class ChatService {
         result.put("busy",db.queryForObject("SELECT COUNT(*) FROM requests WHERE conversation_id=? AND status='running'",Integer.class,id(conversation))>0);
         return result;
     }
+    /** Append an observed voice transcript without invoking a model or creating a Work run. */
+    public synchronized Map<String,Object> transcript(Actor actor,String conversation,Transcript input,String key) {
+        owned(actor,conversation); uuid(key);
+        if(!key.equals(input.request_id()) || !Set.of("user","assistant").contains(input.role())
+            || input.content()==null || input.content().isBlank() || input.content().length()>6000) throw invalid("转写格式无效");
+        return tx.execute(status -> {
+            var previous=db.query("SELECT * FROM messages WHERE conversation_id=? AND request_id=?",
+                (rs,n)->message(rs),id(conversation),key);
+            if(!previous.isEmpty()) {
+                var old=previous.getFirst();
+                if(!input.role().equals(old.get("role")) || !input.content().equals(old.get("content")))
+                    throw new Problem("IDEMPOTENCY_CONFLICT","转写标识已用于其他内容",409);
+                return old;
+            }
+            long messageId=nextId(); String time=now();
+            boolean first=db.queryForObject("SELECT COUNT(*) FROM messages WHERE conversation_id=? AND role='user'",Integer.class,id(conversation))==0;
+            db.update("INSERT INTO messages(id,conversation_id,role,content_cipher,status,created_at,request_id) VALUES(?,?,?,?,?,?,?)",
+                messageId,id(conversation),input.role(),cipher.encrypt(input.content()),"complete",time,key);
+            if(first && input.role().equals("user")) db.update("UPDATE conversations SET title_cipher=? WHERE id=?",
+                cipher.encrypt("语音："+input.content().substring(0,Math.min(30,input.content().length()))),id(conversation));
+            db.update("UPDATE conversations SET updated_at=? WHERE id=?",time,id(conversation));
+            return Map.<String,Object>of("id",Long.toString(messageId),"request_id",key);
+        });
+    }
     public synchronized Map<String,Object> delete(Actor actor,String conversation) {
         if(conversations(actor,"AND id=?",id(conversation)).isEmpty()) throw missing();
         for(Run run:new ArrayList<>(live.values())) if(run.row.conversation().equals(conversation)) finish(run,"cancelled",null);

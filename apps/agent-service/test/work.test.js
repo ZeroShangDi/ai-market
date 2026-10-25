@@ -38,7 +38,7 @@ test('Work needs no customer/attachment, persists mappings, serializes, deduplic
   assert.equal(store.get({ ...actor, device: '99' }, s.id).id, s.id);
 });
 
-test('Question and approval bind exact parameters; refusal, duplicates, stale answers and restart expiration are safe', async t => {
+test('Question and approval bind exact parameters; refusal, duplicates and restart persistence are safe', async t => {
   let executed = false;
   const { store, s, dataDir } = await fixture(t, async ctx => {
     const answer = await ctx.ask('question', 'AskUserQuestion', { questions: [{ question: '名称？', options: [{ label: '测试' }] }] }, 'q');
@@ -56,8 +56,8 @@ test('Question and approval bind exact parameters; refusal, duplicates, stale an
   await store.get(actor, s.id)._save;
   await assert.rejects(store.answer(actor, s.id, a.id, { binding: 'changed', approved: true }), e => e.status === 409);
   const restarted = new WorkStore({ dataDir, executor: { run: async () => { throw new Error('must not replay'); } } }); await restarted.init();
-  assert.equal(restarted.get(actor, s.id).status, 'interrupted');
-  await assert.rejects(restarted.answer(actor, s.id, a.id, { binding: a.binding, approved: true }), e => e.status === 409);
+  assert.equal(restarted.get(actor, s.id).status, 'waiting');
+  assert.equal(restarted.get(actor, s.id).interactions[1].status, 'pending');
   assert.equal(restarted.get(actor, s.id).interactions[1].input._risk, 3);
   await store.answer(actor, s.id, a.id, { binding: a.binding, approved: false });
   await settle(store, s.id); assert.equal(executed, false);
@@ -234,7 +234,7 @@ test('Stopping and restarting cancel pending queue without replaying business ac
   const input = { request_id: randomUUID(), prompt: '补充', enqueue: true };
   await store.send(actor, s.id, input);
   const restarted = new WorkStore({ dataDir, executor: { run: () => { throw new Error('must not replay'); } } }); await restarted.init();
-  assert.deepEqual(restarted.get(actor, s.id).messages.map(m => m.delivery), ['interrupted', 'cancelled']);
+  assert.deepEqual(restarted.get(actor, s.id).messages.map(m => m.delivery), ['running', 'queued']);
   await restarted.close(); await store.stop(actor, s.id);
   assert.deepEqual(store.get(actor, s.id).messages.map(m => m.delivery), ['interrupted', 'cancelled']);
   await store.send(actor, s.id, input); assert.equal(store.get(actor, s.id).status, 'interrupted');
@@ -303,4 +303,62 @@ test('SDK cancellation expires only its bound approval and leaves other pending 
  assert.equal(store.get(actor,s.id).status,'waiting');
  await store.answer(actor,s.id,live.id,{binding:live.binding,approved:true}); await settle(store,s.id);
  assert.equal(store.get(actor,s.id).status,'idle');
+});
+
+test('waiting releases concurrency and execution timeout; answer resumes only after a slot is available', async t => {
+  let finishOther;
+  const {store,s}=await fixture(t,async ctx=>{
+    if(ctx.prompt==='other') { await new Promise(r=>finishOther=r); return {success:true,text:'other done'}; }
+    const reply=await ctx.ask('question','AskUserQuestion',{questions:[{question:'when?'}]},'q');
+    if(ctx.signal.aborted) throw Error('aborted');
+    assert.equal(reply.answers['when?'],'tomorrow'); return {success:true,text:'resumed'};
+  });
+  store.concurrency=1; store.timeoutMs=200;
+  await store.send(actor,s.id,{request_id:randomUUID(),prompt:'ask'});
+  const q=await waitFor(()=>store.get(actor,s.id).interactions[0]);
+  await new Promise(r=>setTimeout(r,220));
+  assert.equal(store.get(actor,s.id).status,'waiting'); assert.equal(store.occupied(),0);
+  const other=await store.create(actor,{conversation_id:'5'});
+  await store.send(actor,other.id,{request_id:randomUUID(),prompt:'other'});
+  await waitFor(()=>finishOther);
+  await store.answer(actor,s.id,q.id,{binding:q.binding,answers:{'when?':'tomorrow'}});
+  assert.equal(store.get(actor,s.id).status,'waiting'); assert.equal(store.occupied(),1);
+  finishOther(); await settle(store,other.id); await settle(store,s.id);
+  assert.equal(store.get(actor,s.id).status,'idle');
+});
+
+test('hibernated question survives restart and resumes native session using stored user answer', async t=>{
+  let resumed;
+  const {store,s,dataDir}=await fixture(t,async ctx=>{
+    await ctx.onSession('persisted-native');
+    await ctx.ask('question','AskUserQuestion',{questions:[{question:'which?'}]},'q');
+    if(ctx.signal.aborted) throw Error('sleep');
+    return {success:true,text:''};
+  });
+  store.suspendAfterMs=15;
+  await store.send(actor,s.id,{request_id:randomUUID(),prompt:'original'});
+  const q=await waitFor(()=>store.get(actor,s.id).interactions[0]);
+  await waitFor(()=>!store.runs.has(s.id));
+  assert.equal(store.get(actor,s.id).status,'waiting');
+  const restarted=new WorkStore({dataDir,executor:{run:async ctx=>{resumed=ctx;return {success:true,text:'restored'};}}});
+  await restarted.init(); t.after(()=>restarted.close());
+  assert.equal(resumed,undefined);
+  await restarted.answer(actor,s.id,q.id,{binding:q.binding,answers:{'which?':'blue'}});
+  await settle(restarted,s.id);
+  assert.equal(resumed.sessionId,'persisted-native'); assert.match(resumed.prompt,/blue/);
+  assert.equal(restarted.get(actor,s.id).status,'idle');
+  await restarted.answer(actor,s.id,q.id,{binding:q.binding,answers:{'which?':'blue'}});
+  assert.equal(restarted.get(actor,s.id).messages.filter(m=>m.role==='assistant').length,1);
+});
+
+test('cold suspended work can be stopped without resuming or leaving queued messages active',async t=>{
+ const {store,s}=await fixture(t,async ctx=>{await ctx.ask('question','AskUserQuestion',{questions:[{question:'q'}]},'q');if(ctx.signal.aborted)throw Error('sleep');return {success:true,text:''};});
+ store.suspendAfterMs=15;
+ await store.send(actor,s.id,{request_id:randomUUID(),prompt:'work'});
+ await waitFor(()=>store.get(actor,s.id).status==='waiting');
+ await store.send(actor,s.id,{request_id:randomUUID(),prompt:'later',enqueue:true});
+ await waitFor(()=>!store.runs.has(s.id));
+ await store.stop(actor,s.id);
+ assert.deepEqual(store.get(actor,s.id).messages.map(m=>m.delivery),['interrupted','cancelled']);
+ assert.equal(store.get(actor,s.id).interactions[0].status,'expired');
 });

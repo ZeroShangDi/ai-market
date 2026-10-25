@@ -5,11 +5,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends bubblewrap soca
     && rm -rf /var/lib/apt/lists/*
 ENV PATH="/opt/work-python/bin:${PATH}"
 WORKDIR /app
-COPY package*.json ./
+COPY apps/agent-service/package*.json ./
 RUN npm ci --omit=dev && mkdir /data && chown node:node /data
-COPY --chown=node:node src ./src
-COPY --chown=node:node resources ./resources
-COPY --chown=node:node plugins ./plugins
+COPY --chown=node:node apps/agent-service/src ./src
+COPY --chown=node:node plugins/workspace-files/skills ./resources/work-skills
+COPY --chown=node:node plugins/callphone ./plugins/callphone
+COPY --chown=node:node plugins/catalog.json ./plugins/catalog.json
+ENV WORK_BUILTIN_CATALOG=/app/plugins/catalog.json
 USER node
 ENV AGENT_BIND_HOST=0.0.0.0 AGENT_PORT=48082 AGENT_DATA_DIR=/data
 EXPOSE 48082

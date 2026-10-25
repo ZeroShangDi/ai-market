@@ -29,3 +29,11 @@
 插件测试随 agent-service 的 `npm test` 执行。仓库根目录运行 `node --env-file=apps/agent-service/.env.local scripts/work-lead-import-smoke.mjs --exercise` 可进行真实模型演练，需要已配置模型凭据。演练使用隔离内存业务替身，不写真实数据库；自动批准仅限脚本中的三条测试数据。
 
 2026-10-16 已通过真实模型发现技能、检查附件、导入授权、首次导入、重复导入与 WorkStore 重启后结果回放。后台接口及业务服务由 Java 测试验证。尚未部署、连接真实数据库完成端到端验收或真机验证；不得把模型演练当作生产导入成功。
+
+## 标准 MCP 独立入口
+
+在本目录执行 `npm ci`，由受信任部署者配置环境后运行 `node server.js`。其他 MCP 客户端使用自己的 stdio 配置连接，不依赖 Agent SDK。原 Work 适配继续使用 `work-plugin.json`，共用同一工具实现。
+
+环境：`WORK_WORKSPACE`（授权文件目录）、`WORK_RESOURCES_FILE`（受管理的附件数组 JSON，每项含 id/name/path/sha256）、`WORK_TENANT_ID`、`WORK_USER_ID`，以及原业务连接器 `WORK_BUSINESS_URL` / `AGENT_INTERNAL_TOKEN`。这是服务端受管理部署入口，不应向普通用户分发内部令牌。外部普通用户管理工作请使用 `../work-control` 的账号鉴权入口。
+
+独立 MCP 导入仍校验原文件摘要、字段映射与预览指纹，通过 MCP 用户表单确认写入；不支持表单的客户端只能预览，不能绕过审批。

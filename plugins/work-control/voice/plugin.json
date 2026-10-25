@@ -150,6 +150,65 @@
       "required": [
         "session_id"
       ]
+    },
+    {
+      "name": "list_conversations",
+      "description": "查看当前账号全部来源的聊天会话，包括手动创建、语音创建及工作关联会话。按 next_cursor 翻页，不能将首屏当作全部记录。",
+      "properties": {
+        "cursor": {
+          "type": "string",
+          "description": "上页 next_cursor"
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 30
+        }
+      },
+      "required": [],
+      "requiresHost": true
+    },
+    {
+      "name": "read_conversation",
+      "description": "读取同一账号的普通聊天历史，不限创建入口；工作执行详情使用 list_work/read_work。按 next_cursor 补读更早消息。",
+      "properties": {
+        "conversation_id": {
+          "type": "string",
+          "description": "list_conversations 返回的会话编号"
+        },
+        "cursor": {
+          "type": "string",
+          "description": "上页 next_cursor"
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 30
+        }
+      },
+      "required": [
+        "conversation_id"
+      ],
+      "requiresHost": true
+    },
+    {
+      "name": "search_web",
+      "description": "直接查询公开网页的最新信息并返回来源，用户要求查一下时直接调用，无需再次询问联网许可。仅发送查询所需关键词，不发送私人聊天、客户资料或凭据。不登录或执行写入。",
+      "properties": {
+        "query": {
+          "type": "string",
+          "description": "公开信息查询问题及必要公开关键词，最多2000字"
+        },
+        "user_quote": {
+          "type": "string",
+          "description": "完整逐字引用本轮用户请求，仅用于本地核验，不发给搜索服务"
+        }
+      },
+      "required": [
+        "query",
+        "user_quote"
+      ],
+      "requiresHost": true
     }
   ]
 }

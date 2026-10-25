@@ -53,6 +53,7 @@ start.onclick = async () => {
         return;
       }
       if (value.type !== 'voice') return;
+      if (value.state === 'warning') { state.textContent = value.message || '这次语音处理失败，可以继续说话'; window.PortableVoice?.activity?.('listening'); return; }
       if (value.state === 'error') { release(value.message || '语音服务暂时不可用'); return; }
       window.PortableVoice?.activity?.(value.state);
       if (!stream?.getAudioTracks()[0]?.enabled) return;

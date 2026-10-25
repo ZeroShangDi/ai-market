@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "id": "callphone",
+  "version": "0.1.0",
+  "name": "客户业务",
+  "skills": [
+    "skills/import-leads"
+  ],
+  "description": "客户业务",
+  "license": "UNLICENSED",
+  "dependencies": {
+    "node": ">=22",
+    "@modelcontextprotocol/sdk": "1.32.1"
+  },
+  "mcpServers": {
+    "callphone": {
+      "transport": "stdio",
+      "command": "node",
+      "args": [
+        "server.js"
+      ]
+    }
+  },
+  "hostAdapters": {
+    "work": "work-plugin.json",
+    "claude-code": ".claude-plugin/plugin.json"
+  }
+}

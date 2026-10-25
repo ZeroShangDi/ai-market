@@ -27,6 +27,7 @@ export async function discoverCapabilityPlugins({ ctx, entries }) {
     const manifest = JSON.parse(await readFile(join(root, 'work-plugin.json'), 'utf8'));
     if (manifest.schemaVersion !== 1 || !/^[a-z][a-z0-9_]{0,39}$/.test(manifest.id) || manifest.id === 'work' || plugins.some(p => p.manifest.id === manifest.id)
       || typeof manifest.entry !== 'string' || !manifest.tools || typeof manifest.tools !== 'object' || Array.isArray(manifest.tools)) throw new Error('Invalid plugin manifest');
+    if (manifest.catalogType != null && !['plugins', 'skills', 'connections', 'mcp'].includes(manifest.catalogType)) throw new Error('Invalid plugin catalog type');
     if (manifest.name != null && (typeof manifest.name !== 'string' || manifest.name.length > 80)
       || manifest.description != null && (typeof manifest.description !== 'string' || manifest.description.length > 500)
       || manifest.skills != null && (!Array.isArray(manifest.skills) || manifest.skills.length > 30 || manifest.skills.some(s => !s || typeof s.name !== 'string' || s.name.length > 80 || typeof s.description !== 'string' || s.description.length > 500 || s.id != null && !/^[a-z][a-z0-9-]{0,63}$/.test(s.id)))

@@ -1,6 +1,9 @@
 """Provider details stay inside the optional voice capability."""
+import asyncio
+import logging
 import os
 import re
+from urllib.parse import urlsplit
 from collections.abc import AsyncGenerator
 
 import httpx
@@ -18,6 +21,15 @@ def required(name: str) -> str:
     if not value:
         raise RuntimeError(f"Missing {name}")
     return value
+
+
+def voice_llm_extra():
+    # This low-latency speech adapter does not retain provider reasoning fields.
+    # DeepSeek now enables thinking by default and rejects tool continuations
+    # without reasoning_content. Keep this provider detail out of the pipeline.
+    if urlsplit(required("VOICE_LLM_URL")).hostname == "api.deepseek.com":
+        return {"extra_body": {"thinking": {"type": "disabled"}}}
+    return {}
 
 
 def create_stt():
@@ -43,7 +55,7 @@ class MlxASRService(SegmentedSTTService):
 
     async def run_stt(self,audio:bytes):
         try:
-            async with httpx.AsyncClient(timeout=httpx.Timeout(45,connect=3),follow_redirects=False) as client:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(45,connect=3),follow_redirects=False, trust_env=False) as client:
                 response=await client.post(self.url,content=audio,headers={'Authorization':'Bearer '+self.key,'Content-Type':'audio/wav'})
                 response.raise_for_status()
                 text=response.json()['text']
@@ -52,7 +64,7 @@ class MlxASRService(SegmentedSTTService):
                 if text.strip():
                     yield TranscriptionFrame(text.strip(),self._user_id,time_now_iso8601(),finalized=True)
         except (httpx.HTTPError,ValueError,KeyError):
-            yield ErrorFrame('语音识别失败，请结束后重试',fatal=True)
+            yield ErrorFrame('语音识别失败，请再说一次')
 
 
 def speech_segments(text: str):
@@ -87,29 +99,41 @@ class StreamingPCMService(TTSService):
 
     async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:
         yield TTSStartedFrame(context_id=context_id)
-        received = False
         try:
-            async with httpx.AsyncClient(timeout=httpx.Timeout(60, connect=5), follow_redirects=False) as client:
+            # Bound the whole utterance, including an upstream that keeps sending bad audio.
+            async with asyncio.timeout(90), httpx.AsyncClient(timeout=httpx.Timeout(30, connect=5),
+                    follow_redirects=False, trust_env=False) as client:
                 for segment in speech_segments(text):
-                    received = False
-                    async with client.stream("POST", self.url, headers={"Authorization": f"Bearer {self.key}"},
-                                             json={"model": self.model, "voice": self.voice,
-                                                   "input": segment, "response_format": "pcm", "stream": True}) as response:
-                        response.raise_for_status()
-                        if response.headers.get("content-type", "").split(";")[0] not in {
-                            "audio/pcm", "audio/raw", "application/octet-stream"}:
-                            raise ValueError("Expected raw PCM")
-                        pending = b""
-                        async for chunk in response.aiter_bytes():
-                            pending += chunk
-                            size = len(pending) // 2 * 2
-                            if size:
-                                received = True
-                                yield TTSAudioRawFrame(pending[:size], self.sample_rate, 1, context_id=context_id)
-                                pending = pending[size:]
-                        if pending or not received:
-                            raise ValueError("Incomplete PCM")
-        except (httpx.HTTPError, ValueError):
-            yield ErrorFrame("语音合成失败，请结束后重试", fatal=True)
+                    for attempt in range(9):
+                        async with client.stream("POST", self.url, headers={"Authorization": f"Bearer {self.key}"},
+                                json={"model": self.model, "voice": self.voice, "input": segment,
+                                      "response_format": "pcm", "stream": True}) as response:
+                            # An interrupted GPU generator needs time to release its lock. Retry only
+                            # explicit busy responses, never a partially played sentence.
+                            if response.status_code == 429 and attempt < 8:
+                                await asyncio.sleep(0.25 * (attempt + 1))
+                                continue
+                            response.raise_for_status()
+                            if response.headers.get("content-type", "").split(";")[0] not in {
+                                    "audio/pcm", "audio/raw", "application/octet-stream"}:
+                                raise ValueError("Expected raw PCM")
+                            pending, received = b"", 0
+                            max_bytes = int(min(45, max(8, len(segment) * 0.6)) * self.sample_rate * 2)
+                            async for chunk in response.aiter_bytes(chunk_size=4800):
+                                pending += chunk
+                                size = len(pending) // 2 * 2
+                                if size:
+                                    received += size
+                                    if received > max_bytes:
+                                        raise ValueError("Speech exceeded duration budget")
+                                    yield TTSAudioRawFrame(pending[:size], self.sample_rate, 1, context_id=context_id)
+                                    pending = pending[size:]
+                            if pending or not received:
+                                raise ValueError("Incomplete PCM")
+                            break
+        except (httpx.HTTPError, ValueError, TimeoutError) as error:
+            status = error.response.status_code if isinstance(error, httpx.HTTPStatusError) else None
+            logging.getLogger(__name__).warning('tts_failed error_type=%s status=%s', type(error).__name__, status)
+            yield ErrorFrame("语音合成失败，可以继续对话")
         finally:
             yield TTSStoppedFrame(context_id=context_id)

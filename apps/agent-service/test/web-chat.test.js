@@ -33,11 +33,12 @@ const done = {type:'result',subtype:'success',usage:{input_tokens:12,output_toke
 test('real executor forwards text deltas, records actual sources and cleans isolated execution files', async () => {
   let options;
   const executor=createWebChatExecutor({provider:'deepseek',deepseekApiKey:'test-secret',loadSdk:async()=>fakeSdk([search,result,textDelta('基于资料回答'),done],value=>options=value)});
-  const events=[]; for await(const event of executor.stream([{role:'user',content:'问题'}])) events.push(event);
+  const events=[]; for await(const event of executor.stream([{role:'user',content:'问题'}],{includeSources:true})) events.push(event);
   assert.deepEqual(options.tools,['WebSearch']); assert.deepEqual(options.allowedTools,['WebSearch']);
   assert.equal(options.persistSession,false); assert.deepEqual(options.settingSources,[]);
   assert.equal(options.env.ANTHROPIC_API_KEY,''); assert.equal(options.env.ANTHROPIC_AUTH_TOKEN,'test-secret');
   assert.ok(events.some(e=>e.stage==='searching')); assert.match(events.filter(e=>e.type==='chunk').map(e=>e.text).join(''),/https:\/\/example.org\/source/);
+  assert.equal(events.find(e=>e.type==='sources').items[0].url,'https://example.org/source');
   await assert.rejects(access(options.cwd));
 });
 test('search errors and ungrounded model links cannot be reported as a successful search', async () => {

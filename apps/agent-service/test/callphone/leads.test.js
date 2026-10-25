@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import { mkdtemp, rm, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { uploadFile } from '../../../src/work-files.js';
-import { parseLeadCsv, prepareLeadImport, createLeadTools, createLeadBridge } from '../leads.js';
+import { uploadFile } from '../../src/work-files.js';
+import { parseLeadCsv, prepareLeadImport, createLeadTools, createLeadBridge } from '../../../../plugins/callphone/leads.js';
 import * as sdk from '@anthropic-ai/claude-agent-sdk';
 import { z } from 'zod';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
@@ -82,4 +82,17 @@ test('bridge rejects forged or incomplete receipts and surfaces revoked permissi
 test('CSV with NUL bytes has an attachment/encoding error rather than a misleading missing-header error', () => {
   assert.throws(() => parseLeadCsv('\0'.repeat(20)), /CSV 含空字节/);
   assert.throws(() => parseLeadCsv('name,phone\na\0,+12025550101'), /CSV 含空字节/);
+});
+
+test('portable official MCP adapter previews and requires human consent before import',async t=>{
+ const {createServer}=await import('../../../../plugins/callphone/server.js');
+ const ctx=await fixture(t);let writes=0;
+ const server=await createServer(ctx,{bridge:async()=>{writes++;return [];}});
+ const client=new Client({name:'external-mcp-host',version:'1'});
+ const [a,b]=InMemoryTransport.createLinkedPair();await Promise.all([server.connect(a),client.connect(b)]);t.after(()=>client.close());
+ assert.equal((await client.listTools()).tools.length,2);
+ const preview=await client.callTool({name:'preview_lead_import',arguments:{resource_id:ctx.resources[0].id}});
+ const data=JSON.parse(preview.content[0].text);assert.ok(data.fingerprint);
+ const denied=await client.callTool({name:'import_leads',arguments:{resource_id:ctx.resources[0].id,fingerprint:data.fingerprint}});
+ assert.equal(denied.isError,true);assert.equal(writes,0);
 });

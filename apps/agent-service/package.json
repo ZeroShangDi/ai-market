@@ -8,7 +8,7 @@
   },
   "scripts": {
     "start": "node --env-file-if-exists=.env.local src/main.js",
-    "test": "node --test test/*.test.js plugins/*/test/*.test.js",
+    "test": "node --test test/*.test.js test/callphone/*.test.js",
     "check": "node --check src/main.js && node --check src/server.js && node --check src/provider.js && node --check src/web-chat.js && node --check src/work.js && node --check src/work-files.js && node --check src/work-executor.js && node --check src/work-plugins.js"
   },
   "dependencies": {

@@ -1,0 +1,91 @@
+{
+  "schemaVersion": 1,
+  "items": [
+    {
+      "id": "work_control",
+      "name": "会话与工作",
+      "description": "创建、查询和续聊工作，读取聊天记录及处理待办。标准 MCP 接入与语音适配共享服务端权限。",
+      "source": "work-control",
+      "builtin": true,
+      "tools": [
+        {
+          "id": "create_conversation",
+          "label": "创建聊天"
+        },
+        {
+          "id": "list_conversations",
+          "label": "查询聊天"
+        },
+        {
+          "id": "read_conversation",
+          "label": "读取聊天"
+        },
+        {
+          "id": "create_work",
+          "label": "创建工作"
+        },
+        {
+          "id": "list_work",
+          "label": "查询工作"
+        },
+        {
+          "id": "read_work",
+          "label": "读取工作"
+        },
+        {
+          "id": "send_work",
+          "label": "提交与续聊"
+        },
+        {
+          "id": "answer_work",
+          "label": "答复待办"
+        },
+        {
+          "id": "stop_work",
+          "label": "中断工作"
+        }
+      ],
+      "skills": [
+        {
+          "name": "工作会话管理",
+          "description": "管理持久化工作与聊天历史",
+          "enabled": true
+        }
+      ],
+      "catalogType": "plugins"
+    },
+    {
+      "id": "characters",
+      "name": "人物卡片",
+      "description": "随当前选择的角色应用性格与交流风格，切换由角色选择控制。",
+      "source": "characters",
+      "builtin": true,
+      "tools": [],
+      "skills": [
+        {
+          "name": "人物性格与交流",
+          "description": "角色包中的 persona.md 与 skills.md",
+          "enabled": true
+        }
+      ],
+      "catalogType": "skills"
+    },
+    {
+      "id": "workspace_files",
+      "name": "工作文件",
+      "description": "在授权工作区内读取、生成与发布文件。",
+      "source": "workspace-files",
+      "builtin": true,
+      "tools": [],
+      "skills": [
+        {
+          "id": "workspace-files",
+          "name": "工作文件处理",
+          "description": "文件读取、编辑与产物发布",
+          "enabled": true
+        }
+      ],
+      "catalogType": "skills"
+    }
+  ]
+}

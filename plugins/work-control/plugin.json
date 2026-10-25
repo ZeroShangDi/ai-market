@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "id": "work-control",
+  "version": "0.1.0",
+  "name": "会话与工作",
+  "skills": [
+    "skills/work-control"
+  ],
+  "description": "会话与工作",
+  "license": "UNLICENSED",
+  "dependencies": {
+    "node": ">=22",
+    "@modelcontextprotocol/sdk": "1.32.1"
+  },
+  "mcpServers": {
+    "work-control": {
+      "transport": "stdio",
+      "command": "node",
+      "args": [
+        "server.js"
+      ]
+    }
+  },
+  "hostAdapters": {
+    "voice": "voice/plugin.json"
+  }
+}

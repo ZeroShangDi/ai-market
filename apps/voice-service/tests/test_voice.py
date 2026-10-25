@@ -38,6 +38,13 @@ class Tickets(unittest.TestCase):
 
 
 class SpeechSegments(unittest.TestCase):
+    def test_voice_deepseek_disables_unhandled_reasoning_protocol(self):
+        from voice_service.providers import voice_llm_extra
+        with patch.dict(os.environ, {'VOICE_LLM_URL': 'https://api.deepseek.com/v1'}):
+            self.assertEqual(voice_llm_extra(), {'extra_body': {'thinking': {'type': 'disabled'}}})
+        with patch.dict(os.environ, {'VOICE_LLM_URL': 'https://example.test/v1'}):
+            self.assertEqual(voice_llm_extra(), {})
+
     def test_long_input_preserves_words_and_skips_nonspoken_punctuation(self):
         from voice_service.providers import speech_segments
         text='甲'*241
@@ -69,6 +76,50 @@ class Providers(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(any(isinstance(f,ErrorFrame) for f in frames))
             await service.cleanup()
 
+    async def test_busy_after_interruption_retries_without_replaying_audio(self):
+        from voice_service.providers import StreamingPCMService
+        from pipecat.frames.frames import TTSAudioRawFrame, ErrorFrame
+        real_client = httpx.AsyncClient
+        calls = []
+        def handler(request):
+            calls.append(request)
+            return httpx.Response(429 if len(calls) == 1 else 200,
+                headers={'content-type':'audio/pcm'}, content=b'\x01\x02')
+        with patch.dict(os.environ,ENV), patch('voice_service.providers.httpx.AsyncClient',
+                side_effect=lambda **kwargs: real_client(transport=httpx.MockTransport(handler))):
+            service = StreamingPCMService(); service._sample_rate = 24000
+            frames = [f async for f in service.run_tts('你好', 'turn')]
+            self.assertEqual(len(calls), 2)
+            self.assertEqual(b''.join(f.audio for f in frames if isinstance(f, TTSAudioRawFrame)), b'\x01\x02')
+            self.assertFalse(any(isinstance(f, ErrorFrame) for f in frames))
+            await service.cleanup()
+
+    async def test_broken_stream_is_not_replayed_and_next_utterance_can_succeed(self):
+        from voice_service.providers import StreamingPCMService
+        from pipecat.frames.frames import TTSAudioRawFrame, ErrorFrame, TTSStoppedFrame
+        real_client = httpx.AsyncClient
+        calls = []
+        class Broken(httpx.AsyncByteStream):
+            async def __aiter__(self):
+                yield b'\x01\x02' * 2400
+                raise httpx.ReadError('synthetic transport loss')
+        def handler(request):
+            calls.append(request)
+            return httpx.Response(200, headers={'content-type':'audio/pcm'},
+                stream=Broken()) if len(calls) == 1 else httpx.Response(200,
+                    headers={'content-type':'audio/pcm'}, content=b'\x01\x02')
+        with patch.dict(os.environ,ENV), patch('voice_service.providers.httpx.AsyncClient',
+                side_effect=lambda **kwargs: real_client(transport=httpx.MockTransport(handler))):
+            service = StreamingPCMService(); service._sample_rate = 24000
+            first = [f async for f in service.run_tts('第一句话', 'first')]
+            self.assertEqual(len(calls), 1)
+            self.assertTrue(any(isinstance(f, TTSAudioRawFrame) for f in first))
+            self.assertTrue(any(isinstance(f, ErrorFrame) and not f.fatal for f in first))
+            self.assertIsInstance(first[-1], TTSStoppedFrame)
+            second = [f async for f in service.run_tts('第二句话', 'second')]
+            self.assertFalse(any(isinstance(f, ErrorFrame) for f in second))
+            await service.cleanup()
+
     async def test_partial_sample_and_http_failure_are_explicit_errors(self):
         from voice_service.providers import StreamingPCMService
         from pipecat.frames.frames import ErrorFrame
@@ -81,6 +132,7 @@ class Providers(unittest.IsolatedAsyncioTestCase):
                 service._sample_rate=24000
                 frames=[frame async for frame in service.run_tts('你好','turn-1')]
                 self.assertTrue(any(isinstance(f,ErrorFrame) for f in frames))
+                self.assertTrue(all(not f.fatal for f in frames if isinstance(f,ErrorFrame)))
                 await service.cleanup()
 
     async def test_independent_qwen_worker_streams_pcm_and_checks_authorization(self):
@@ -186,6 +238,7 @@ class Providers(unittest.IsolatedAsyncioTestCase):
         for agent_token in ('', SECRET):
             with patch.dict(os.environ,{**ENV,'AGENT_INTERNAL_TOKEN':agent_token}):
                 worker=build_pipeline(Connection(),{'tenant':'0','user':'7','device':'10'})
+                self.assertIsNone(worker._idle_timeout_secs)
                 await worker.cleanup()
 
     @unittest.skipUnless(os.environ.get('VOICE_TEST_NETWORK') == '1', 'Requires local UDP sockets')
