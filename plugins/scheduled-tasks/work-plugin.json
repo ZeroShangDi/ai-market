@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "id": "scheduled_tasks",
+  "builtin": true,
+  "name": "定时任务",
+  "entry": "index.js",
+  "description": "按指定时间发送 HTTP 通知",
+  "tools": {
+    "list_rules": {
+      "label": "查看规则",
+      "risk": 1
+    },
+    "read_runs": {
+      "label": "查看触发记录",
+      "risk": 1
+    },
+    "manage_rule": {
+      "label": "管理规则",
+      "risk": 2
+    }
+  },
+  "skills": [
+    {
+      "id": "scheduled-tasks",
+      "name": "定时任务",
+      "description": "按指定时间发送 HTTP 通知"
+    }
+  ]
+}

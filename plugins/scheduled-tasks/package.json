@@ -1,0 +1,8 @@
+{
+  "name": "ai-market-scheduled-tasks",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.32.1"
+  }
+}
