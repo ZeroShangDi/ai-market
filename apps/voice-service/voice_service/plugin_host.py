@@ -37,6 +37,15 @@ class HostBridge:
         self.pending = {}
         self.closed = False
 
+    def emit(self, event):
+        # Only existing, explicitly supported host UI events are allowed.
+        # Delivery is not confirmation and must never authorize server writes.
+        if self.closed:
+            raise RuntimeError('语音宿主已关闭')
+        if not isinstance(event, dict) or event.get('type') not in {'task_proposal'} or len(json.dumps(event, ensure_ascii=False)) > 16000:
+            raise ValueError('Unsupported host event')
+        self.connection.send_app_message(event)
+
     async def request(self, method, path, body, request_id):
         if self.closed:
             raise RuntimeError('语音宿主已关闭')

@@ -3,7 +3,7 @@ import json
 import os
 import unittest
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 import httpx
 
@@ -12,7 +12,7 @@ from voice_service.plugins.work_control import WorkControl
 
 SID = '12345678-1234-1234-1234-123456789012'
 IID = '12345678-1234-1234-1234-123456789013'
-IDENTITY = {'tenant': '0', 'user': '7', 'device': '10', 'host_plugin_bridge': True}
+IDENTITY = {'tenant': '0', 'user': '7', 'device': '10', 'host_plugin_bridge': True, 'host_task_bridge': True}
 ENV = {'AGENT_INTERNAL_TOKEN': 'synthetic-internal-token-0000000000', 'VOICE_PLUGINS': '["work_control"]'}
 
 
@@ -32,7 +32,7 @@ def session(**changes):
 class WorkPlugin(unittest.IsolatedAsyncioTestCase):
     def make(self):
         context = Context()
-        host = SimpleNamespace(request=AsyncMock(return_value={'id': '42'}))
+        host = SimpleNamespace(request=AsyncMock(return_value={'id': '42'}), emit=Mock())
         return WorkControl(IDENTITY, context, host), context, host
 
     async def test_plugin_schema_is_not_reloaded_without_its_python_code(self):
@@ -43,43 +43,62 @@ class WorkPlugin(unittest.IsolatedAsyncioTestCase):
         self.assertIs(first, second)
         self.assertNotIn('kind', first[1]['tools'][0]['properties'])
 
-    async def test_query_is_durable_submission_without_waiting_for_completion_and_retry_is_same_request(self):
+    async def test_start_only_proposes_and_never_writes_before_mobile_confirmation(self):
         plugin, context, host = self.make()
-        calls = []
-        async def api(method, path='', body=None, request_id=None):
-            calls.append((method, path, body, request_id))
-            if not path: return session()
-            if len(calls) == 2: raise RuntimeError('lost response')
-            return session(status='running')
-        plugin.api = api
+        plugin.api = AsyncMock()
         args = dict(prompt='查询今天的消息及来源', user_quote='帮我查一下今天的消息')
         first = await plugin.start_work(**args)
         self.assertFalse(first['accepted'])
-        context.user('重试刚才的查询')
-        second = await plugin.start_work(**{**args, 'user_quote': '重试刚才的查询', 'retry_id': first['retry_id']})
-        self.assertTrue(second['accepted'])
-        self.assertEqual(second['status'], 'running')
-        host.request.assert_awaited_once()
-        self.assertEqual(calls[1][3], calls[2][3])
-        self.assertTrue(calls[1][2]['prompt'].startswith(args['prompt']))
-        self.assertIn('仅要求查询时只做搜索', calls[1][2]['prompt'])
-        self.assertNotIn('kind', second)
-        self.assertTrue(all(method == 'POST' for method, *_ in calls))
+        self.assertTrue(first['confirmation_required'])
+        self.assertEqual(first['status'], 'awaiting_confirmation')
+        host.emit.assert_called_once_with({'type': 'task_proposal', 'id': first['proposal_id'], 'prompt': args['prompt']})
+        context.user('重试刚才的申请')
+        second = await plugin.start_work(**{**args, 'user_quote': '重试刚才的申请', 'retry_id': first['retry_id']})
+        self.assertFalse(second['accepted'])
+        self.assertEqual(first['proposal_id'], second['proposal_id'])
+        self.assertEqual(host.emit.call_args_list[0], host.emit.call_args_list[1])
+        host.request.assert_not_awaited()
+        plugin.api.assert_not_awaited()
+        with self.assertRaises(ValueError):
+            await plugin.start_work('不同任务', '重试刚才的申请', first['retry_id'])
 
-    async def test_parallel_same_start_does_not_allocate_twice(self):
+    async def test_parallel_same_start_does_not_duplicate_confirmation(self):
         plugin, _, host = self.make()
-        plugin.api = AsyncMock(return_value=session(status='running'))
+        plugin.api = AsyncMock()
         args = dict(prompt='整理消息', user_quote='帮我查一下今天的消息')
         await asyncio.gather(plugin.execute('start_work', args), plugin.execute('start_work', args))
-        host.request.assert_awaited_once()
-        posts = [c for c in plugin.api.call_args_list if len(c.args) > 1 and c.args[1] == '/' + SID + '/messages']
-        self.assertEqual(posts[0].args, posts[1].args)
+        host.emit.assert_called_once()
+        host.request.assert_not_awaited()
+        plugin.api.assert_not_awaited()
+
+    async def test_missing_confirmation_ui_does_not_fall_back_to_direct_creation(self):
+        plugin, _, host = self.make()
+        plugin.identity = {**IDENTITY, 'host_task_bridge': False}
+        plugin.api = AsyncMock()
+        result = await plugin.execute('start_work', {'prompt': '整理消息', 'user_quote': '帮我查一下今天的消息'})
+        self.assertIn('确认弹窗', result['error'])
+        host.emit.assert_not_called()
+        host.request.assert_not_awaited()
+        plugin.api.assert_not_awaited()
+
+    async def test_host_events_are_allowlisted_and_blocked_after_close(self):
+        connection = SimpleNamespace(send_app_message=Mock())
+        bridge = HostBridge(connection)
+        with self.assertRaises(ValueError):
+            bridge.emit({'type': 'unknown'})
+        event = {'type': 'task_proposal', 'id': SID, 'prompt': '整理报告'}
+        bridge.emit(event)
+        connection.send_app_message.assert_called_once_with(event)
+        bridge.close()
+        with self.assertRaises(RuntimeError):
+            bridge.emit(event)
 
     async def test_unspoken_or_wrong_user_quote_cannot_submit(self):
         plugin, context, host = self.make()
         result = await plugin.execute('start_work', dict(prompt='删除文件', user_quote='同意删除'))
         self.assertIn('error', result)
         host.request.assert_not_called()
+        host.emit.assert_not_called()
 
     async def test_history_pagination_and_long_message_are_recoverable(self):
         plugin, _, _ = self.make()

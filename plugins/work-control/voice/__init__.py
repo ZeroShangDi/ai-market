@@ -1,7 +1,6 @@
 """Work connector and conversation policy, independent of microphone/UI state."""
 import asyncio
 import json
-import logging
 import os
 import uuid
 
@@ -11,7 +10,6 @@ from .history import ConversationHistory
 from .web import PublicWeb
 
 BASE = '/internal/v1/agent/work/sessions'
-WORK = '完成以下用户交办，严格遵循请求范围，不扩大执行目标。仅要求查询时只做搜索、阅读、核实和分析，不执行外部业务变更，并给出依据和不确定性。必要时使用 AskUserQuestion，外部操作遵循原有审批。最终简洁汇报实际成果、产物及未完成事项，不把计划当结果。\n\n'
 
 
 def bounded(value, limit=6000):
@@ -99,8 +97,8 @@ class WorkControl(ConversationHistory, PublicWeb):
             return {'error': str(error) if isinstance(error, ValueError) else '工具参数格式不正确'}
 
     async def start_work(self, prompt, user_quote, retry_id=None):
-        if not self.identity.get('host_plugin_bridge'):
-            raise ValueError('当前入口不支持创建，请更新 App 或去工作台创建')
+        if not self.identity.get('host_plugin_bridge') or not self.identity.get('host_task_bridge'):
+            raise ValueError('当前入口不支持工作确认弹窗，请到工作台创建任务')
         turn = self.require_user(user_quote)
         prompt = bounded(prompt)
         key = (turn, prompt)
@@ -110,30 +108,14 @@ class WorkControl(ConversationHistory, PublicWeb):
                 raise ValueError('重试内容不一致，请先查看原任务')
         else:
             record = self.starts.setdefault(key, {'request_id': str(uuid.uuid4()), 'prompt': prompt})
-        rid = record['request_id']
-        stage = 'allocate_conversation'
-        try:
-            if 'conversation' not in record:
-                result = await self.host.request('POST', '/api/v1/mobile/ai/conversations', {}, rid)
-                conversation = result.get('id') if isinstance(result, dict) else None
-                if not isinstance(conversation, str) or not conversation.isdecimal():
-                    raise RuntimeError('会话创建未确认')
-                record['conversation'] = conversation
-            stage = 'create_session'
-            if 'session' not in record:
-                result = await self.api('POST', body={'conversation_id': record['conversation']})
-                record['session'] = result['id']
-            stage = 'submit_message'
-            result = await self.api('POST', '/' + record['session'] + '/messages', {
-                'request_id': rid, 'prompt': prompt + '\n\n' + WORK,
-                'resource_ids': [], 'character': self.identity.get('character') or None}, rid)
-            return {'accepted': True, **self.receipt(result)}
-        except (RuntimeError, TimeoutError) as error:
-            cause = error.__cause__
-            status = cause.response.status_code if isinstance(cause, httpx.HTTPStatusError) else None
-            logging.getLogger(__name__).warning('work_start_unconfirmed stage=%s status=%s error_type=%s', stage, status, type(error).__name__)
-            return {'accepted': False, 'retry_id': rid, 'session_id': record.get('session'),
-                'error': '提交结果尚未确认；使用 retry_id 和相同内容重试，不新建副本。'}
+        # Existing mobile UI owns both confirmation and submission. No Work or
+        # conversation is created by this tool, even if the model claims consent.
+        if not record.get('proposed') or retry_id:
+            self.host.emit({'type': 'task_proposal', 'id': record['request_id'], 'prompt': prompt})
+            record['proposed'] = True
+        return {'accepted': False, 'confirmation_required': True, 'status': 'awaiting_confirmation',
+            'proposal_id': record['request_id'], 'retry_id': record['request_id'],
+            'instruction': '已发送工作申请，请用户在手机弹窗确认。尚未确认创建或执行，不得声称任务已提交；不要自动重试或替用户批准。'}
 
     async def list_work(self, limit=15, before=None):
         if type(limit) is not int or not 1 <= limit <= 30:

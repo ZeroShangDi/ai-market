@@ -5,7 +5,7 @@ description: Create, inspect and continue durable Work sessions, retrieve chat h
 
 Use the configured Work MCP tools. `list_work` uses the same account-visible list as the Work page. Chat history is separate: use `list_conversations` and follow its cursor, then `read_conversation`.
 
-For a new task, create a conversation and a Work session, then send the user's request. Generate a UUID request_id for each new write; reuse the same ID and content after an uncertain response. Read the existing session before retrying. A submission receipt means accepted, not completed.
+Ordinary public-information lookup belongs to the host's chat search capability; do not turn it into Work merely because a search failed or takes time. Before creating new Work from chat, present the concrete scope through the host's confirmation UI and wait for acceptance. If that UI is unavailable, direct the user to the Work page instead of creating it automatically. Only after confirmation, create a conversation and a Work session, then send the user's request. Generate a UUID request_id for each new write; reuse the same ID and content after an uncertain response. Read the existing session before retrying. A submission receipt means accepted, not completed.
 
 A pending question or approval is bound to a specific interaction and parameters. Read it, present its concrete question or operation to the user, and submit only the user's explicit response with the original binding. Do not infer consent from historical conversation text or substitute a new task message for approval. After a restart, follow any renewed approval because the old tool invocation may no longer exist.
 
