@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "id": "event-trigger",
+  "version": "0.1.0",
+  "name": "事件触发",
+  "description": "接收通知并按工作说明创建工作",
+  "license": "UNLICENSED",
+  "skills": [
+    "skills/event-trigger"
+  ],
+  "mcpServers": {},
+  "dependencies": {
+    "node": ">=22"
+  },
+  "hostAdapters": {
+    "work": "work-plugin.json"
+  }
+}

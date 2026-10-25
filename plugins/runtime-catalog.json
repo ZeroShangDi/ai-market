@@ -2,5 +2,9 @@
   {
     "id": "scheduled_tasks",
     "directory": "scheduled-tasks"
+  },
+  {
+    "id": "event_trigger",
+    "directory": "event-trigger"
   }
 ]

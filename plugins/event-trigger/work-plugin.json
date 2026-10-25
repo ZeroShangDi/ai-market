@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "id": "event_trigger",
+  "builtin": true,
+  "name": "事件触发",
+  "entry": "index.js",
+  "description": "接收通知并按工作说明创建工作",
+  "tools": {
+    "list_rules": {
+      "label": "查看规则",
+      "risk": 1
+    },
+    "read_runs": {
+      "label": "查看触发记录",
+      "risk": 1
+    },
+    "manage_rule": {
+      "label": "管理规则",
+      "risk": 2
+    }
+  },
+  "skills": [
+    {
+      "id": "event-trigger",
+      "name": "事件触发",
+      "description": "接收通知并按工作说明创建工作"
+    }
+  ]
+}
