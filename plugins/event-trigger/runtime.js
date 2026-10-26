@@ -3,7 +3,7 @@ import { Store, owner, string, fail } from './lib/store.js';
 export async function activateRuntime(host) {
   const store = new Store(host.dataDir); await store.init();
   let busy = false, closed = false;
-  const view = r => ({ id:r.id, title:r.title, prompt:r.prompt, enabled:r.enabled, created_at:r.created_at, updated_at:r.updated_at });
+  const view = r => ({ id:r.id, conversation_id:r.conversation_id||null, title:r.title, prompt:r.prompt, enabled:r.enabled, created_at:r.created_at, updated_at:r.updated_at });
   const endpoint = r => `${host.publicBase}/event_trigger/${r.id}/${r.secret}`;
   const created = r => ({...view(r), ...(host.publicBase ? {url:endpoint(r), curl:`curl -X POST '${endpoint(r)}' -H 'Content-Type: application/json' --data '{}'`} : {})});
   async function handle(actor, operation, input = {}) {
@@ -16,10 +16,11 @@ export async function activateRuntime(host) {
     }
     return store.transaction(state => {
       if (operation === 'create') {
+        if(input.conversation_id != null && !/^[1-9]\d{0,18}$/.test(String(input.conversation_id)))fail(400,'来源会话无效');
         const id = host.uuid(input.request_id), previous = state.rules.find(r => r.id === id && r.owner === owner(actor));
         if (previous) return created(previous);
         const now = new Date().toISOString();
-        const r = { id, owner:owner(actor), actor, title:string(input.title,80), prompt:string(input.prompt,5000), secret:randomBytes(32).toString('hex'), enabled:true, created_at:now, updated_at:now };
+        const r = { id, owner:owner(actor), actor, conversation_id:input.conversation_id||null, title:string(input.title,80), prompt:string(input.prompt,5000), secret:randomBytes(32).toString('hex'), enabled:true, created_at:now, updated_at:now };
         state.rules.push(r); return created(r);
       }
       const r = store.rule(actor,input.id,state);

@@ -5,9 +5,14 @@ export function runtimeTools(id) {
       async function request(operation,input) {
         const origin=config.url||process.env.PLUGIN_AGENT_URL||'http://127.0.0.1:48082';
         const response=await fetch(`${origin}/internal/v1/agent/work/sessions/extensions/${id}/${operation}`,{method:'POST',redirect:'error',signal:AbortSignal.timeout(20000),
-          headers:{Authorization:`Bearer ${process.env.AGENT_INTERNAL_TOKEN}`,'Content-Type':'application/json','X-AI-Tenant':ctx.identity.tenant,'X-AI-User':ctx.identity.user,'X-AI-Device':ctx.identity.device || '1'},body:JSON.stringify(input)});
+          headers:{Authorization:`Bearer ${process.env.AGENT_INTERNAL_TOKEN}`,'Content-Type':'application/json','X-AI-Tenant':ctx.identity.tenant,'X-AI-User':ctx.identity.user,'X-AI-Device':ctx.identity.device || '1'},body:JSON.stringify({...input,...(operation==='create'?{conversation_id:ctx.conversationId}:{})})});
         if(!response.ok)throw Error(`插件请求未确认 (${response.status})，请查询状态`);
-        return {content:[{type:'text',text:JSON.stringify((await response.json()).data)}]};
+        const data=(await response.json()).data;
+        if(['create','update','pause','resume','delete'].includes(operation) && data.id) await ctx.emitResult({
+          title:data.title,summary:id==='scheduled_tasks'?'定时任务':(data.prompt||'事件触发').slice(0,2000),rows:[],
+          resource:{id:data.id,subtitle:data.schedule_label||'收到事件时执行',status:operation==='delete'?'已删除':data.synced===false?'待同步':data.enabled?'已开启':'已暂停'}
+        });
+        return {content:[{type:'text',text:JSON.stringify(data)}]};
       }
       return {tools:[
         sdk.tool('list_rules','查看当前账号的规则。',{},()=>request('list',{})),
