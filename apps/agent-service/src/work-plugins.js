@@ -10,7 +10,13 @@ function fields(value) {
 export function validatePluginResult(value) {
   if (!value || typeof value.title !== 'string' || value.title.length > 240 || typeof value.summary !== 'string' || value.summary.length > 2000
     || !Array.isArray(value.rows) || value.rows.length > 500 || value.rows.some(row => !row || ['label', 'status', 'detail'].some(key => typeof row[key] !== 'string' || row[key].length > 500))) throw new Error('Invalid plugin result');
-  return { title: value.title, summary: value.summary, rows: value.rows.map(({ label, status, detail }) => ({ label, status, detail })) };
+  let resource;
+  if(value.resource != null) {
+    const r=value.resource;
+    if(!r || typeof r.id!=='string' || !/^[a-zA-Z0-9_-]{1,100}$/.test(r.id) || typeof r.subtitle!=='string' || r.subtitle.length>240 || typeof r.status!=='string' || r.status.length>40)throw Error('Invalid plugin resource');
+    resource={id:r.id,subtitle:r.subtitle,status:r.status};
+  }
+  return { ...(resource?{resource}:{}), title: value.title, summary: value.summary, rows: value.rows.map(({ label, status, detail }) => ({ label, status, detail })) };
 }
 
 /** Only deployment-approved absolute paths; never reads plugin configuration from user files or model inputs. */
@@ -60,7 +66,7 @@ export async function loadCapabilityPlugins({ sdk, z, ctx, entries }) {
   for (const { root, manifest, module, config } of available.filter(p => selected.includes(p.manifest.id))) {
     await pluginConnection({ module, config }, ctx.identity);
     const runtime = await module.activate({ sdk, z, config, ctx: { cwd: ctx.cwd, resources: ctx.resources,
-      identity: ctx.identity, signal: ctx.signal,
+      identity: ctx.identity, conversationId:ctx.conversationId, signal: ctx.signal,
       emitResult: value => ctx.onEvent('plugin_result', { plugin_id: manifest.id, ...validatePluginResult(value) }),
     } });
     if (!Array.isArray(runtime.tools) || runtime.tools.length !== Object.keys(manifest.tools).length) throw new Error('Plugin tool manifest mismatch');

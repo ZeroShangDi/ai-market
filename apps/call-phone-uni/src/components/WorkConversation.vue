@@ -33,6 +33,11 @@
                 <view class="file-download" role="button" :aria-label="(downloaded[item.file.id] ? '查看 ' : '下载 ') + item.file.name" @tap="download(item.file)"><text>{{ downloading === item.file.id ? '处理中' : downloaded[item.file.id] ? '查看' : '下载' }}</text></view>
                 <view class="file-download" role="button" :aria-label="'分享 ' + item.file.name" @tap="download(item.file, true)"><text>分享</text></view>
               </view>
+              <view v-else-if="item.kind === 'receipt' && item.receipt.resource" class="plugin-resource" role="button" :aria-label="'查看 ' + item.receipt.title" @tap="openPluginResource(item.receipt)">
+                <view class="resource-icon"><TIcon name="task" size="23px" /></view>
+                <view class="resource-copy"><text class="resource-title">{{ item.receipt.title }}</text><text class="resource-subtitle">{{ item.receipt.resource.subtitle }}</text><text class="resource-status">{{ item.receipt.resource.status }} · 点击查看当前状态</text></view>
+                <TIcon name="chevron-right" size="18px" color="#999" />
+              </view>
               <view v-else-if="item.kind === 'receipt'" class="plugin-receipt">
                 <text class="receipt-title">{{ item.receipt.title }}</text><text>{{ item.receipt.summary }}</text>
                 <view role="button" class="details-toggle" @tap="toggleDetail('receipt', item.receipt.sequence)">{{ detailOpen('receipt', item.receipt.sequence) ? '收起详情' : '查看详情' }}</view>
@@ -111,6 +116,7 @@
 import { incomingWorkFiles, readIncomingWorkFile, discardIncomingWorkFile } from '@/services/incoming-work-files';
 import { workElapsed, approvalFields, workFileCategories, fileAppearance, acceptsWorkFile, supportedWorkFileExtensions } from '@/ui/work-presentation';
 import { workTurns } from '@/ui/work-timeline';
+import pluginPages from '@/modules/plugin-pages/catalog.json';
 import ComposerAttachments from './ComposerAttachments.vue';
 import WorkFilePicker, { type PickerFile } from './WorkFilePicker.vue';
 import { recentWorkFiles, rememberWorkFile, readRecentWorkFile } from '@/services/recent-work-files';
@@ -126,6 +132,11 @@ import { hasUnfinishedCall } from '@/services/calls';
 import { handleMarkdownClick } from '@/ui/chat-markdown';
 import { toast } from '@/ui/format';
 
+function openPluginResource(receipt:any) {
+  const page=pluginPages.find(p=>p.id===receipt.plugin_id);
+  if(!page || !receipt.resource?.id){toast('该插件管理页面暂不可用');return;}
+  uni.navigateTo({url:`${page.route}?rule=${encodeURIComponent(receipt.resource.id)}`});
+}
 const props = defineProps<{ conversationId: string; visible: boolean }>();
 const emit = defineEmits<{ (event: 'started'): void; (event: 'title', value: string): void }>();
 const controller = createWorkController(), state = controller.state;
@@ -351,4 +362,8 @@ async function download(file: { id: string; name: string }, share = false) {
 .add-menu-row { height: auto; min-height: 36px; padding: 6px 8px; border-radius: 16px; }
 .add-menu-row:active { background: #eceef1; }
 .reply-actions { display: flex; margin-top: 10px; color: #8b9099; }.reply-actions > view { padding: 8px; border-radius: 8px; }.reply-actions > view:active { background: #f0f2f5; }
+</style>
+
+<style scoped>
+.plugin-resource{display:flex;align-items:center;gap:12px;padding:16px;margin:12px 0;background:#fff;border:1px solid #e8e9ed;border-radius:18px}.resource-icon{display:flex;align-items:center;justify-content:center;width:44px;height:44px;border-radius:13px;background:#eef2ff;color:#5772bd;flex-shrink:0}.resource-copy{display:flex;flex-direction:column;gap:5px;min-width:0;flex:1}.resource-title{font-size:15px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.resource-subtitle{font-size:13px;color:#686b76}.resource-status{font-size:11px;color:#9699a3}
 </style>

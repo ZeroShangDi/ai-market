@@ -83,3 +83,10 @@ test('capability center includes builtin sources but never advertises fake insta
  await assert.rejects(store.configureCapability(actor,{plugin_id:'characters',action:'uninstall'}),/插件不可用/);
  const s=await store.create(actor,{conversation_id:'1'});assert.deepEqual((await store.plugins(actor,s.id)).items,[]);
 });
+
+test('plugin resource cards allow bounded IDs and text without arbitrary navigation',()=>{
+ const value={title:'规则',summary:'已创建',rows:[],resource:{id:'rule_123',subtitle:'每天 09:00',status:'已开启',url:'javascript:alert(1)'}};
+ assert.deepEqual(validatePluginResult(value).resource,{id:'rule_123',subtitle:'每天 09:00',status:'已开启'});
+ assert.throws(()=>validatePluginResult({...value,resource:{...value.resource,id:'../../outside'}}));
+ assert.throws(()=>validatePluginResult({...value,resource:{...value.resource,subtitle:'x'.repeat(241)}}));
+});

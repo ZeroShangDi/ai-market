@@ -267,7 +267,7 @@ export class WorkStore {
         return { prompt: next.content, currentResourceIds: next.resource_ids || [],
           resources: s.resources.filter(r => s.messages.some(m => m.role === 'user' && !['queued', 'cancelled'].includes(m.delivery) && m.resource_ids?.includes(r.id))) };
       };
-      const result = await this.executor.run({ persona: s.persona || '', onTurnResult: finishTurn, validatePlugins: (tool, input) => this.requireCapabilities(actor, pluginIds, tool, input), ...this.paths(s), sessionId: s.sdk_session_id, pluginIds: (s.plugins || []).filter(p => p.added).map(p => p.id), prompt, identity: { tenant: s.tenant, user: s.user },
+      const result = await this.executor.run({ conversationId:s.conversation_id, persona: s.persona || '', onTurnResult: finishTurn, validatePlugins: (tool, input) => this.requireCapabilities(actor, pluginIds, tool, input), ...this.paths(s), sessionId: s.sdk_session_id, pluginIds: (s.plugins || []).filter(p => p.added).map(p => p.id), prompt, identity: { tenant: s.tenant, user: s.user },
         currentResourceIds: ids, resources: s.resources.filter(r => s.messages.some(message => message.role === 'user' && !['queued', 'cancelled'].includes(message.delivery) && message.resource_ids?.includes(r.id))), signal: run.controller.signal,
         onSession: async id => { ensureCurrent(); if (s.sdk_session_id && s.sdk_session_id !== id) throw conflict('原生会话映射不一致，请核对后继续'); s.sdk_session_id = id; await this.save(s); },
         onEvent: (type, data) => { ensureCurrent(); return this.emit(s, type, data); },
