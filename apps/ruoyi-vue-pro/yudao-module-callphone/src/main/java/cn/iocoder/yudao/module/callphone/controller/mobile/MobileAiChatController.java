@@ -53,7 +53,7 @@ public class MobileAiChatController {
             return;
         }
         relay.forward(request.getMethod(),path,request.getParameter("cursor"),request.getParameter("limit"),body,
-            request.getHeader("Idempotency-Key"),tenant.toString(),user.getId().toString(),deviceId,response);
+            request.getHeader("Idempotency-Key"),tenant.toString(),user.getId().toString(),deviceId,response,request.getParameter("source_type"));
     }
     /** Prevent the shared exception logger from retaining a chat request body. */
     @ExceptionHandler(Exception.class)

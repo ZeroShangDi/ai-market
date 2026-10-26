@@ -37,10 +37,10 @@ public class MobileWorkController {
 
     AgentActor actor(HttpServletRequest request) { return MobileAgentAccess.requireActor(request, devices); }
     private String id(String value) { return MobileAgentAccess.uuid(value); }
-    private void conversation(JsonNode data, AgentActor actor) {
+    private JsonNode conversation(JsonNode data, AgentActor actor) {
         String value = data.path("conversation_id").asText();
         if (!value.matches("[1-9][0-9]{0,18}")) throw new AgentRelay.Failure(400, "VALIDATION_ERROR", "会话标识无效");
-        chat.requireConversation(value, actor.tenantId().toString(), actor.userId().toString(), actor.deviceId());
+        return chat.requireConversation(value, actor.tenantId().toString(), actor.userId().toString(), actor.deviceId());
     }
     private JsonNode owned(AgentActor actor, String id) {
         JsonNode result = relay.request("GET", "/" + id, null, null, actor);
@@ -54,7 +54,13 @@ public class MobileWorkController {
         AgentActor actor = actor(request);
         var items = json.createArrayNode();
         for (JsonNode item : relay.request("GET", "", null, null, actor).path("data").path("items")) {
-            try { conversation(item, actor); items.add(item); }
+            try {
+                JsonNode metadata=conversation(item, actor);
+                var row=(com.fasterxml.jackson.databind.node.ObjectNode)item.deepCopy();
+                if(metadata!=null && metadata.hasNonNull("source_type")) row.put("source_type",metadata.path("source_type").asText());
+                if(metadata!=null && metadata.hasNonNull("parent_id")) row.put("parent_id",metadata.path("parent_id").asText());
+                items.add(row);
+            }
             catch (MobileAiRelay.ConversationFailure error) { if (error.status != 403) throw error; }
         }
         return ok(json.createObjectNode().set("data", json.createObjectNode().set("items", items)));
@@ -81,8 +87,11 @@ public class MobileWorkController {
     @PostMapping
     @ApiAccessLog(requestEnable = false, responseEnable = false)
     public ResponseEntity<JsonNode> create(HttpServletRequest request, @RequestBody JsonNode body) {
-        AgentActor actor = actor(request); conversation(body, actor);
-        return ok(relay.request("POST", "", json.createObjectNode().put("conversation_id", body.path("conversation_id").asText()), null, actor));
+        AgentActor actor = actor(request); JsonNode metadata = conversation(body, actor);
+        var input = json.createObjectNode().put("conversation_id", body.path("conversation_id").asText());
+        input.put("source_type", metadata == null ? "manual" : metadata.path("source_type").asText("manual"));
+        if(metadata != null && metadata.hasNonNull("parent_id")) input.put("parent_id",metadata.path("parent_id").asText());
+        return ok(relay.request("POST", "", input, null, actor));
     }
     @GetMapping("/{sessionId}")
     @ApiAccessLog(requestEnable = false, responseEnable = false)

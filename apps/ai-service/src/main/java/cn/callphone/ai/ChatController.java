@@ -20,11 +20,11 @@ public final class ChatController {
     private final ChatService service;
     public ChatController(ChatService service) {this.service=service;}
     private static Map<String,Object> data(Object value) {return Map.of("data",value);}
-    @PostMapping("/conversations") public Map<String,Object> create(HttpServletRequest request,@RequestHeader("Idempotency-Key") String key) {
-        return data(service.create(actor(request),key));
+    @PostMapping("/conversations") public Map<String,Object> create(HttpServletRequest request,@RequestHeader("Idempotency-Key") String key, @RequestBody(required=false) Map<String,String> input) {
+        return data(service.create(actor(request),key,input==null?"manual":input.getOrDefault("source_type","manual"),input==null?null:input.get("parent_id")));
     }
-    @GetMapping("/conversations") public Map<String,Object> list(HttpServletRequest request,@RequestParam(required=false) String cursor,@RequestParam(defaultValue="20") int limit) {
-        return data(service.list(actor(request),cursor,limit));
+    @GetMapping("/conversations") public Map<String,Object> list(HttpServletRequest request,@RequestParam(required=false) String cursor,@RequestParam(defaultValue="20") int limit,@RequestParam(required=false) String source_type) {
+        return data(service.list(actor(request),cursor,limit,source_type));
     }
     @GetMapping("/conversations/{id}/messages") public Map<String,Object> messages(HttpServletRequest request,@PathVariable String id,
         @RequestParam(required=false) String cursor,@RequestParam(defaultValue="50") int limit) {

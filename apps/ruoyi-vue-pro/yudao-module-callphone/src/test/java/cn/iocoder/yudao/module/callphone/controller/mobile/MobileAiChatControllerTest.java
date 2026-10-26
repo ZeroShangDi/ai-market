@@ -25,7 +25,7 @@ class MobileAiChatControllerTest {
         try(var security=mockStatic(SecurityFrameworkUtils.class)) {
             security.when(SecurityFrameworkUtils::getLoginUser).thenReturn(user);
             controller.forward(request,response,"{}");verify(devices).requireDevice(10L,"device-key");
-            verify(relay).forward("POST","/messages/stream",null,null,"{}",null,"1","7","10",response);
+            verify(relay).forward("POST","/messages/stream",null,null,"{}",null,"1","7","10",response,null);
             user.setScopes(List.of("callphone-device:11"));assertThrows(Exception.class,()->controller.forward(request,response,"{}"));
             user.setScopes(List.of("callphone-device:10"));TenantContextHolder.setTenantId(2L);assertThrows(Exception.class,()->controller.forward(request,response,"{}"));
             verifyNoMoreInteractions(relay);

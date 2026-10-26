@@ -74,6 +74,7 @@
       @visible-change="historyVisible = $event.visible">
       <view class="history-panel">
         <text class="history-title">会话历史</text>
+        <view class="source-tabs"><view v-for="source in historySources" :key="source.id" :class="{ selected: state.sourceType === source.id }" role="button" @tap="aiChat.filterSource(source.id)">{{ source.label }}</view></view>
         <input v-model="historyQuery" class="history-search" placeholder="搜索会话标题" confirm-type="search" />
         <text v-if="workInbox.error" class="error-note" @tap="refreshWorkInbox">{{ workInbox.error }} · 重试</text>
         <view class="history-new" role="button" @tap="newChat"><TIcon name="add" size="18px" />开始新会话</view>
@@ -154,13 +155,14 @@ const pageStyle = computed(() => {
   // #endif
 });
 const lastMessageId = computed(() => active.value?.messages.at(-1)?.id);
+const historySources = [{ id: 'manual', label: '手动' }, { id: 'voice', label: '语音' }, { id: 'schedule', label: '定时' }, { id: 'event', label: '事件' }] as const;
 const history = computed(() => {
   const items = state.conversations.filter(item => !mockEnabled || item.messages.length).map(item => {
     const work = workInbox.items.find(w => w.conversation_id === item.id && w.started);
     return { ...item, title: work?.title || item.title, updated_at: work?.updated_at || item.updated_at, work };
   });
   for (const work of workInbox.items.filter(w => w.started)) if (!items.some(i => i.id === work.conversation_id)) items.push({ id: work.conversation_id, title: work.title, updated_at: work.updated_at, messages: [], draft: '', work });
-  return items.filter(item => item.title.toLowerCase().includes(historyQuery.value.trim().toLowerCase())).sort((a, b) => b.updated_at.localeCompare(a.updated_at));
+  return items.filter(item => (item.source_type || item.work?.source_type || 'manual') === state.sourceType).filter(item => item.title.toLowerCase().includes(historyQuery.value.trim().toLowerCase())).sort((a, b) => b.updated_at.localeCompare(a.updated_at));
 });
 let searchTimer: ReturnType<typeof setTimeout> | undefined;
 watch(historyQuery, query => {
@@ -319,6 +321,7 @@ onUnload(() => {
 :deep(.t-chat-message__base) { padding-left: 0 !important; font-size: 12px; color: #7787a5; }
 :deep(.t-chat-message--base.user .t-chat-content) { padding: 12px 16px; border-radius: 16px 4px 16px 16px; color: #263e82; max-width: 90%; }
 :deep(.t-chat-markdown) { font-size: 14px; line-height: 1.8; color: #374259; }
+.source-tabs { display: flex; gap: 20px; margin-top: 16px; color: #8791a4; font-size: 14px; }.source-tabs .selected { color: #294fdb; font-weight: 600; }
 .history-panel { max-width: 500px; margin: auto; padding: 26px 20px calc(24px + env(safe-area-inset-bottom)); }
 .history-title { display: block; font-size: 20px; font-weight: 600; }.history-subtitle { display: block; font-size: 11px; color: #929bad; margin-top: 7px; }
 .history-new { display: flex; align-items: center; justify-content: center; gap: 6px; background: #edf2ff; color: #294fdb; font-size: 14px; padding: 13px; border-radius: 12px; margin: 22px 0 16px; }

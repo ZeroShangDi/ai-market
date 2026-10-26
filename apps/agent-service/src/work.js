@@ -82,14 +82,14 @@ export class WorkStore {
     return s;
   }
   view(s) {
-    return { id: s.id, conversation_id: s.conversation_id, status: s.status, run_id: s.run_id || null, sdk_session_id: s.sdk_session_id,
+    return { id: s.id, conversation_id: s.conversation_id, source_type: s.source_type || 'manual', parent_id: s.parent_id || null, status: s.status, run_id: s.run_id || null, sdk_session_id: s.sdk_session_id,
       sequence: s.sequence, messages: s.messages, interactions: s.interactions, resources: s.resources, plugins: s.plugins || [], artifacts: s.artifacts,
       snapshots: s.snapshots, created_at: s.created_at, updated_at: s.updated_at };
   }
   list(actor) {
     return [...this.sessions.values()].filter(s => s.tenant === actor.tenant && s.user === actor.user)
       .sort((a, b) => b.updated_at.localeCompare(a.updated_at)).map(s => ({
-        id: s.id, conversation_id: s.conversation_id, title: s.messages.find(m => m.role === 'user')?.content.slice(0, 60) || '新工作',
+        id: s.id, conversation_id: s.conversation_id, source_type: s.source_type || 'manual', parent_id: s.parent_id || null, title: s.messages.find(m => m.role === 'user')?.content.slice(0, 60) || '新工作',
         status: s.status, started: !!s.messages.length, updated_at: s.updated_at, sequence: s.sequence,
         pending: s.interactions.filter(i => i.status === 'pending').map(i => i.kind),
         unread: s.events.some(e => e.type === 'result' && e.data.success && e.sequence > (s.seen_sequence || 0)),
@@ -105,11 +105,17 @@ export class WorkStore {
     const conversation = decimalId(input?.conversation_id, 'conversation_id');
     const found = [...this.sessions.values()].find(s => s.tenant === actor.tenant && s.user === actor.user && s.conversation_id === conversation);
     if (found) return this.view(found);
+    const source = input.source_type || 'manual';
+    if (!['manual', 'voice', 'schedule', 'event'].includes(source)) invalid('来源类型无效');
+    const parent = input.parent_id == null ? null : decimalId(input.parent_id, 'parent_id');
     const now = new Date().toISOString();
-    const s = { id: randomUUID(), tenant: actor.tenant, user: actor.user, conversation_id: conversation, status: 'idle', sdk_session_id: null,
+    const s = { id: randomUUID(), tenant: actor.tenant, user: actor.user, conversation_id: conversation, source_type: source, parent_id: parent, status: 'idle', sdk_session_id: null,
       sequence: 0, events: [], messages: [], interactions: [], resources: [], artifacts: [], snapshots: [], receipts: {}, created_at: now, updated_at: now };
     this.sessions.set(s.id, s);
-    try { for (const path of Object.values(this.paths(s))) await mkdir(path, { recursive: true, mode: 0o700 }); await this.save(s); }
+    try {
+      for (const path of Object.values(this.paths(s))) await mkdir(path, { recursive: true, mode: 0o700 });
+      await this.save(s);
+    }
     catch (e) { this.sessions.delete(s.id); throw e; }
     return this.view(s);
   }

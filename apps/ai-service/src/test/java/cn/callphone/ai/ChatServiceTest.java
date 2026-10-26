@@ -39,6 +39,19 @@ class ChatServiceTest {
     String conversation() {return (String)service.create(actor,UUID.randomUUID().toString()).get("id");}
     Send input(String conv,String content) {return new Send(UUID.randomUUID().toString(),conv,content,null);}
     List<Map<String,Object>> finish(Send input) {return service.send(actor,input,input.request_id()).map(e->e.data()).filter(Objects::nonNull).collectList().block(Duration.ofSeconds(5));}
+    @Test void sourceFilterRunsBeforePaginationAndParentsStayOwned() {
+        String parent=conversation();
+        for(int i=0;i<5;i++) service.create(actor,UUID.randomUUID().toString(),"event",parent);
+        var manual=(List<Map<String,Object>>)service.list(actor,null,2,"manual").get("items");
+        assertEquals(1,manual.size());assertEquals(parent,manual.getFirst().get("id"));
+        var page=service.list(actor,null,2,"event");
+        assertEquals(2,((List<?>)page.get("items")).size());assertNotNull(page.get("next_cursor"));
+        var next=service.list(actor,(String)page.get("next_cursor"),2,"event");
+        assertEquals(2,((List<?>)next.get("items")).size());
+        assertThrows(Problem.class,()->service.create(new Actor("1","8","11"),UUID.randomUUID().toString(),"event",parent));
+        assertThrows(Problem.class,()->service.create(actor,UUID.randomUUID().toString(),"invalid",null));
+        assertEquals(parent,((List<Map<String,Object>>)page.get("items")).getFirst().get("parent_id"));
+    }
     @Test void voiceTranscriptsAreEncryptedIdempotentOwnedAndDoNotGenerate() {
         String conv=conversation(), key=UUID.randomUUID().toString();
         var input=new Transcript(key,"user","语音测试内容");

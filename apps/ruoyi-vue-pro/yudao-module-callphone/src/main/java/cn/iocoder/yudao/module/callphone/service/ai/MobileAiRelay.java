@@ -29,20 +29,26 @@ public class MobileAiRelay {
         public ConversationFailure(int status) { super("Conversation access failed"); this.status=status; }
     }
     /** Task association must refer to a conversation owned by this authenticated employee. */
-    public void requireConversation(String conversation,String tenant,String user,String device) {
+    public com.fasterxml.jackson.databind.JsonNode requireConversation(String conversation,String tenant,String user,String device) {
         if(conversation==null || !conversation.matches("[1-9][0-9]{0,18}")) throw new ConversationFailure(403);
         if(internalToken==null || internalToken.length()<32) throw new ConversationFailure(503);
         try {
             var request=HttpRequest.newBuilder(URI.create(serviceUrl.replaceAll("/+$","")+"/internal/v1/ai/conversations/"+conversation+"/messages?limit=1"))
                 .timeout(Duration.ofSeconds(10)).header("Authorization","Bearer "+internalToken)
                 .header("X-AI-Tenant",tenant).header("X-AI-User",user).header("X-AI-Device",device).GET().build();
-            int status=client.send(request,HttpResponse.BodyHandlers.discarding()).statusCode();
+            var upstream=client.send(request,HttpResponse.BodyHandlers.ofString());
+            int status=upstream.statusCode();
             if(status!=200) throw new ConversationFailure(status==403 || status==404?403:503);
+            return json.readTree(upstream.body()).path("data").path("conversation");
         } catch(InterruptedException e) { Thread.currentThread().interrupt(); throw new ConversationFailure(503); }
         catch(IOException | IllegalArgumentException e) { throw new ConversationFailure(503); }
     }
     public void forward(String method,String path,String cursor,String limit,String body,String key,
                         String tenant,String user,String device,HttpServletResponse response) throws IOException {
+        forward(method,path,cursor,limit,body,key,tenant,user,device,response,null);
+    }
+    public void forward(String method,String path,String cursor,String limit,String body,String key,
+                        String tenant,String user,String device,HttpServletResponse response,String source) throws IOException {
         response.setHeader("Cache-Control","no-store");
         if(!allowed(method,path)) { error(response,405,"VALIDATION_ERROR","请求路径或方法不支持");return; }
         if(internalToken==null || internalToken.length()<32) {error(response,503,"AI_UNAVAILABLE","AI 服务尚未配置，请联系管理员");return;}
@@ -58,6 +64,10 @@ public class MobileAiRelay {
             if(limit!=null) {
                 if(!limit.matches("[0-9]{1,3}")) {error(response,400,"VALIDATION_ERROR","分页大小无效");return;}
                 query+=(query.isEmpty()?"?":"&")+"limit="+limit;
+            }
+            if(source!=null) {
+                if(!java.util.Set.of("manual","voice","schedule","event").contains(source)) {error(response,400,"VALIDATION_ERROR","来源类型无效");return;}
+                query+=(query.isEmpty()?"?":"&")+"source_type="+source;
             }
             HttpRequest.Builder builder=HttpRequest.newBuilder(URI.create(serviceUrl.replaceAll("/+$","")+"/internal/v1/ai"+path+query))
                 .timeout(Duration.ofSeconds(210)).header("Authorization","Bearer "+internalToken)

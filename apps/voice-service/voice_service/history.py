@@ -37,7 +37,7 @@ class VoiceHistory:
                 for attempt in range(3):
                     try:
                         if self.conversation is None:
-                            result = await self.bridge.request('POST', '/api/v1/mobile/ai/conversations', {}, self.key)
+                            result = await self.bridge.request('POST', '/api/v1/mobile/ai/conversations', {'source_type': 'voice'}, self.key)
                             value = result['id']
                             if not isinstance(value, str) or not value.isascii() or not value.isdecimal():
                                 raise ValueError('Invalid conversation')

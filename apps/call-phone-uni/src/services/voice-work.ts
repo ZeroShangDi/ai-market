@@ -31,7 +31,7 @@ export async function submitConfirmedTask(id: string): Promise<string> {
   try {
     check();
     if (!item.conversation) {
-      const conversation = await request<{id:string}>('POST','/api/v1/mobile/ai/conversations',{},id);
+      const conversation = await request<{id:string}>('POST','/api/v1/mobile/ai/conversations',{source_type:'voice'},id);
       check(); item.conversation = conversation.id;
     }
     if (!item.session) {

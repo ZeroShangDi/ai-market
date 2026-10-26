@@ -67,8 +67,11 @@ public final class ChatService {
             (rs,n) -> conversation(rs),args.toArray());
     }
     private Map<String,Object> conversation(ResultSet rs) throws SQLException {
-        return Map.of("id",rs.getString("id"),"title",cipher.decrypt(rs.getString("title_cipher")),
-            "created_at",rs.getString("created_at"),"updated_at",rs.getString("updated_at"));
+        var result = new LinkedHashMap<String,Object>();
+        result.put("id",rs.getString("id")); result.put("title",cipher.decrypt(rs.getString("title_cipher")));
+        result.put("created_at",rs.getString("created_at")); result.put("updated_at",rs.getString("updated_at"));
+        result.put("source_type",rs.getString("source_type")); result.put("parent_id",rs.getString("parent_id"));
+        return result;
     }
     private Map<String,Object> owned(Actor actor,String conversation) {
         List<Map<String,Object>> rows=conversations(actor,"AND id=? AND deleted=FALSE",id(conversation));
@@ -76,19 +79,35 @@ public final class ChatService {
         return rows.getFirst();
     }
     public synchronized Map<String,Object> create(Actor actor,String key) {
+        return create(actor,key,"manual",null);
+    }
+    public synchronized Map<String,Object> create(Actor actor,String key,String source,String parent) {
         uuid(key);
+        if(source==null) source="manual";
+        if(!Set.of("manual","voice","schedule","event").contains(source)) throw invalid("来源类型无效");
+        if(parent!=null) owned(actor,parent);
+        final String origin=source;
         return tx.execute(status -> {
             List<Long> previous=db.query("SELECT conversation_id FROM conversation_creates WHERE tenant_id=? AND user_id=? AND device_id=? AND request_id=?",
                 (rs,n)->rs.getLong(1),actor.tenant(),actor.user(),actor.device(),key);
-            if(!previous.isEmpty()) return owned(actor,previous.getFirst().toString());
+            if(!previous.isEmpty()) {
+                var existing=owned(actor,previous.getFirst().toString());
+                if(!origin.equals(existing.get("source_type")) || !Objects.equals(parent,existing.get("parent_id"))) throw invalid("同一请求编号不能修改会话来源");
+                return existing;
+            }
             long id=nextId(); String time=now();
-            db.update("INSERT INTO conversations(id,tenant_id,user_id,title_cipher,created_at,updated_at) VALUES(?,?,?,?,?,?)",
-                id,actor.tenant(),actor.user(),cipher.encrypt("新会话"),time,time);
+            db.update("INSERT INTO conversations(id,tenant_id,user_id,title_cipher,created_at,updated_at,source_type,parent_id) VALUES(?,?,?,?,?,?,?,?)",
+                id,actor.tenant(),actor.user(),cipher.encrypt("新会话"),time,time,origin,parent==null?null:id(parent));
             db.update("INSERT INTO conversation_creates VALUES(?,?,?,?,?)",actor.tenant(),actor.user(),actor.device(),key,id);
             return owned(actor,Long.toString(id));
         });
     }
     public synchronized Map<String,Object> list(Actor actor,String cursor,int limit) {
+        return list(actor,cursor,limit,null);
+    }
+    public synchronized Map<String,Object> list(Actor actor,String cursor,int limit,String source) {
+        if(source!=null && !Set.of("manual","voice","schedule","event").contains(source)) throw invalid("来源类型无效");
+        String filter=source==null?"":" AND source_type='"+source+"'";
         limit=Math.clamp(limit,1,100);
         List<Map<String,Object>> rows;
         if(cursor!=null && !cursor.isBlank()) {
@@ -96,9 +115,9 @@ public final class ChatService {
             try { parts=new String(Base64.getUrlDecoder().decode(cursor),StandardCharsets.UTF_8).split(",",-1);
                 if(parts.length!=2) throw new IllegalArgumentException(); Instant.parse(parts[0]); id(parts[1]);
             } catch(Exception e) { throw invalid("分页游标无效"); }
-            rows=conversations(actor,"AND deleted=FALSE AND (updated_at<? OR (updated_at=? AND id<?)) ORDER BY updated_at DESC,id DESC LIMIT ?",
+            rows=conversations(actor,"AND deleted=FALSE"+filter+" AND (updated_at<? OR (updated_at=? AND id<?)) ORDER BY updated_at DESC,id DESC LIMIT ?",
                 parts[0],parts[0],id(parts[1]),limit+1);
-        } else rows=conversations(actor,"AND deleted=FALSE ORDER BY updated_at DESC,id DESC LIMIT ?",limit+1);
+        } else rows=conversations(actor,"AND deleted=FALSE"+filter+" ORDER BY updated_at DESC,id DESC LIMIT ?",limit+1);
         String next=null;
         if(rows.size()>limit) {
             rows=new ArrayList<>(rows.subList(0,limit)); var last=rows.getLast();
@@ -121,12 +140,13 @@ public final class ChatService {
             (rs,n)->message(rs),id(conversation),before,limit);
     }
     public synchronized Map<String,Object> messages(Actor actor,String conversation,String cursor,int limit) {
-        owned(actor,conversation); limit=Math.clamp(limit,1,100);
+        var metadata=owned(actor,conversation); limit=Math.clamp(limit,1,100);
         List<Map<String,Object>> rows=messageRows(conversation,cursor==null || cursor.isBlank()?Long.MAX_VALUE:id(cursor),limit+1);
         String next=null;
         if(rows.size()>limit) { rows=new ArrayList<>(rows.subList(0,limit)); next=(String)rows.getLast().get("id"); }
         Collections.reverse(rows);
         var result=page(rows,next);
+        result.put("conversation",metadata);
         List<String> running=db.query("SELECT request_id FROM requests WHERE conversation_id=? AND status='running' AND device_id=?",
             (rs,n)->rs.getString(1),id(conversation),actor.device());
         result.put("active_request_id",running.isEmpty()?null:running.getFirst());

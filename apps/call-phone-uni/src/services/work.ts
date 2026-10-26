@@ -23,7 +23,7 @@ export interface WorkSession {
 }
 export interface WorkEvent { created_at?: string; sequence: number; type: string; data: any; run_id: string }
 
-export interface WorkSummary { id: string; conversation_id: string; title: string; status: string; started: boolean; updated_at: string; sequence: number; pending: string[]; unread: boolean }
+export interface WorkSummary { source_type?: import('@/types/ai-chat').ConversationSource; parent_id?: string | null; id: string; conversation_id: string; title: string; status: string; started: boolean; updated_at: string; sequence: number; pending: string[]; unread: boolean }
 export const workInbox = reactive({ items: [] as WorkSummary[], loading: false, error: '' });
 let inboxEpoch = 0;
 function clearInbox() { inboxEpoch++; workInbox.items = []; workInbox.loading = false; workInbox.error = ''; }
