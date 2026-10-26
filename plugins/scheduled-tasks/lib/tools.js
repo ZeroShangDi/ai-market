@@ -5,9 +5,14 @@ export function runtimeTools(id) {
       async function request(operation,input) {
         const origin=config.url||process.env.PLUGIN_AGENT_URL||'http://127.0.0.1:48082';
         const response=await fetch(`${origin}/internal/v1/agent/work/sessions/extensions/${id}/${operation}`,{method:'POST',redirect:'error',signal:AbortSignal.timeout(20000),
-          headers:{Authorization:`Bearer ${process.env.AGENT_INTERNAL_TOKEN}`,'Content-Type':'application/json','X-AI-Tenant':ctx.identity.tenant,'X-AI-User':ctx.identity.user,'X-AI-Device':ctx.identity.device || '1'},body:JSON.stringify(input)});
+          headers:{Authorization:`Bearer ${process.env.AGENT_INTERNAL_TOKEN}`,'Content-Type':'application/json','X-AI-Tenant':ctx.identity.tenant,'X-AI-User':ctx.identity.user,'X-AI-Device':ctx.identity.device || '1'},body:JSON.stringify({...input,...(operation==='create'?{conversation_id:ctx.conversationId}:{})})});
         if(!response.ok)throw Error(`插件请求未确认 (${response.status})，请查询状态`);
-        return {content:[{type:'text',text:JSON.stringify((await response.json()).data)}]};
+        const data=(await response.json()).data;
+        if(['create','update','pause','resume','delete'].includes(operation) && data.id) await ctx.emitResult({
+          title:data.title,summary:id==='scheduled_tasks'?'定时任务':(data.prompt||'事件触发').slice(0,2000),rows:[],
+          resource:{id:data.id,subtitle:data.schedule_label||'收到事件时执行',status:operation==='delete'?'已删除':data.synced===false?'待同步':data.enabled?'已开启':'已暂停'}
+        });
+        return {content:[{type:'text',text:JSON.stringify(data)}]};
       }
       return {tools:[
         sdk.tool('list_rules','查看当前账号的规则。',{},()=>request('list',{})),
@@ -15,6 +20,7 @@ export function runtimeTools(id) {
         sdk.tool('manage_rule','创建、修改、暂停、恢复或删除规则。创建重试使用相同 request_id。工作说明包含筛选与执行范围；不替代服务端授权。',{
           operation:z.enum(['create','update','pause','resume','delete','endpoint']),id:z.string().uuid().optional(),request_id:z.string().uuid().optional(),
           title:z.string().max(80).optional(),prompt:z.string().max(5000).optional(),url:z.string().max(2000).optional(),
+          schedule:z.object({kind:z.enum(['once','daily','interval','weekly','monthly']),time:z.string().optional(),date:z.string().optional(),offset:z.string().optional(),interval:z.number().optional(),unit:z.enum(['minutes','hours']).optional(),weekdays:z.array(z.number()).optional(),monthday:z.number().optional()}).optional(),
           cron:z.string().max(100).optional(),run_at:z.string().nullable().optional(),timezone:z.string().optional(),payload:z.record(z.string(),z.unknown()).optional()
         },({operation,...input})=>request(operation,input))
       ],approval:async(tool,input)=>tool==='manage_rule'?[{label:'操作',value:input.operation},{label:'规则',value:input.title||input.id||'新规则'},{label:'工作说明或目标',value:(input.prompt||input.url||'沿用已有设置').slice(0,500)}]:[]};

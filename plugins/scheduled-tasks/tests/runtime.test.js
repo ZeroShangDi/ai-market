@@ -20,6 +20,11 @@ test('scheduler uses only HTTP MCP tasks, persists once receipts and sends a sta
   const host={dataDir,uuid,cron,callbackBase:'http://127.0.0.1:48082/plugin-hooks',validateTarget:()=>{},deliver:async(url,payload,key)=>delivered.push({url,payload,key})};
   let plugin=await schedules(host);
   const rule=await plugin.handle(actor,'create',{request_id:randomUUID(),title:'单次',run_at:'2026-01-01T00:00:00Z',url:'https://example.test/hooks',payload:{x:1}});
+  const interval=await plugin.handle(actor,'create',{request_id:randomUUID(),title:'间隔',schedule:{kind:'interval',interval:7,unit:'hours'},url:'https://example.test/hooks'});
+  assert.equal(tasks.find(t=>t.name.endsWith(interval.id)).schedule,'@every 25200s');
+  const daily=await plugin.handle(actor,'update',{id:interval.id,schedule:{kind:'daily',time:'08:30'}});
+  assert.equal(daily.interval_seconds,null);assert.equal(daily.cron,'30 8 * * *');
+  await plugin.handle(actor,'delete',{id:interval.id});
   assert.equal(rule.synced,true);assert.equal(tasks.length,1);assert.equal(tasks[0].method,'POST');
   const secret=tasks[0].url.split('/').at(-1);
   await assert.rejects(plugin.receive(rule.id,'wrong'),e=>e.status===404);

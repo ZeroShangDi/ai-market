@@ -1,3 +1,4 @@
+import { compileSchedule, scheduleLabel } from './ui/schedule.js';
 import { schedulerClient } from './scheduler.js';
 import { randomUUID, randomBytes, timingSafeEqual } from 'node:crypto';
 import { Store, owner, string, fail } from './lib/store.js';
@@ -6,11 +7,13 @@ export async function activateRuntime(host) {
   host = {...host, cron:host.cron || scheduler?.call};
   const store = new Store(host.dataDir); await store.init();
   let busy=false, closed=false;
-  const view = ({secret,actor,owner,...r}) => r;
+  const view = ({secret,actor,owner,...r}) => ({...r, schedule_label:scheduleLabel(r)});
   function validate(input) {
     string(input.title,80); string(input.url,2000); host.validateTarget(input.url);
     if (input.run_at) { if (!/(Z|[+-]\d{2}:\d{2})$/.test(input.run_at) || !Number.isFinite(Date.parse(input.run_at))) fail(400,'执行时间无效'); }
-    else {
+    else if (input.interval_seconds != null) {
+      if (!Number.isInteger(input.interval_seconds) || input.interval_seconds<60 || input.interval_seconds>36000000) fail(400,'执行间隔无效');
+    } else {
       string(input.cron,100);
       if (input.cron.trim().split(/\s+/).length !== 5 || !/^[\d*,/\-\s]+$/.test(input.cron)) fail(400,'请使用五段 cron 表达式');
     }
@@ -24,7 +27,7 @@ export async function activateRuntime(host) {
       const name=`ai-market:${r.id}`;
       const existing=tasks.find(t=>t.name===name);
       if (r.deleted) { if(existing) await host.cron('remove_task',{id:existing.id}); continue; }
-      const config={name, schedule:r.run_at?'* * * * *':`CRON_TZ=${r.timezone} ${r.cron}`, enabled:r.enabled,
+      const config={name, schedule:r.run_at?'* * * * *':r.interval_seconds?`@every ${r.interval_seconds}s`:`CRON_TZ=${r.timezone} ${r.cron}`, enabled:r.enabled,
         url:`${host.callbackBase}/scheduled_tasks/${r.id}/${r.secret}`,method:'POST',headers:{'Content-Type':'application/json'},body:'{}'};
       if(existing) {
         if(Object.entries(config).some(([key,value])=>JSON.stringify(existing[key])!==JSON.stringify(value))) await host.cron('update_task',{id:existing.id,...config});
@@ -35,19 +38,21 @@ export async function activateRuntime(host) {
   let syncTail=Promise.resolve();
   function reconcile() { const next=syncTail.then(reconcileNow);syncTail=next.catch(()=>{});return next; }
   async function handle(actor,op,input={}) {
+    if(input.schedule) {try {input={...input,...compileSchedule(input.schedule)};} catch(e){fail(400,e.message);}}
     if(op==='list') return {items:store.state.rules.filter(r=>r.owner===owner(actor)&&!r.deleted).map(view), available:!!host.cron};
     if(op==='runs') {store.rule(actor,input.id);return {items:store.state.runs.filter(r=>r.rule_id===input.id).slice(-100).reverse().map(({url,payload,...r})=>r)};}
     if (!host.cron) fail(503,'定时进程尚未配置');
     const result=await store.transaction(state=>{
       if(op==='create') {
+        if(input.conversation_id != null && !/^[1-9]\d{0,18}$/.test(String(input.conversation_id)))fail(400,'来源会话无效');
         const id=host.uuid(input.request_id), old=state.rules.find(r=>r.id===id&&r.owner===owner(actor)); if(old) return view(old);
         validate(input); const now=new Date().toISOString();
-        const r={id,owner:owner(actor),actor,title:input.title,url:input.url,payload:input.payload??{},cron:input.run_at?null:input.cron,run_at:input.run_at||null,timezone:input.timezone||'Asia/Shanghai',enabled:true,secret:randomBytes(32).toString('hex'),created_at:now,updated_at:now};
+        const r={id,owner:owner(actor),actor,title:input.title,url:input.url,payload:input.payload??{},cron:input.run_at?null:input.cron,run_at:input.run_at||null,timezone:input.timezone||'Asia/Shanghai',interval_seconds:input.interval_seconds||null,conversation_id:input.conversation_id||null,enabled:true,secret:randomBytes(32).toString('hex'),created_at:now,updated_at:now};
         state.rules.push(r);return view(r);
       }
       const r=store.rule(actor,input.id,state);
       if(op==='update') {
-        const next={...r,...Object.fromEntries(['title','url','payload','cron','run_at','timezone'].filter(k=>k in input).map(k=>[k,input[k]]))};
+        const next={...r,...Object.fromEntries(['title','url','payload','cron','run_at','timezone','interval_seconds'].filter(k=>k in input).map(k=>[k,input[k]]))};
         validate(next);Object.assign(r,next);
       } else if(op==='pause'||op==='resume') r.enabled=op==='resume';
       else if(op==='delete') {r.deleted=true;r.enabled=false;}

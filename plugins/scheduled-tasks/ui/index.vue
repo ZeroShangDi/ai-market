@@ -1,86 +1,67 @@
 <template>
   <view class="page">
-    <MobileHeader :title="definition?.name || '插件'" back-icon-name="chevron-left" back-fallback="/pages/apps/index" />
+    <MobileHeader title="定时任务" back-icon-name="chevron-left" back-fallback="/pages/apps/index" />
+    <view class="toolbar"><view class="filters"><button v-for="tab in tabs" :key="tab.key" class="filter" :class="{active:filter===tab.key}" @tap="filter=tab.key">{{ tab.label }}<text class="count">{{ count(tab.key) }}</text></button></view><button class="icon-button" aria-label="刷新任务" :disabled="busy" @tap="execute(load)"><TIcon name="refresh" size="19px" /></button></view>
+    <view v-if="error" class="error" role="alert">{{ error }}</view>
     <scroll-view scroll-y class="content">
-      <view v-if="error" class="error">{{ error }}</view>
-      <template v-if="definition">
-        <template v-if="editing">
-          <view v-for="field in definition.fields" :key="field.key" class="field">
-            <text>{{ field.label }}</text>
-            <textarea v-if="field.type !== 'text'" v-model="form[field.key]" :maxlength="field.key === 'prompt' ? 5000 : 6000" auto-height />
-            <input v-else v-model="form[field.key]" :placeholder="field.placeholder || ''" :maxlength="2000" />
-          </view>
-          <button :disabled="busy" @tap="save">保存</button><button :disabled="busy" @tap="editing = false">取消</button>
-        </template>
-        <template v-else>
-          <button :disabled="busy" @tap="edit()">新建</button>
-          <view v-for="rule in rules" :key="rule.id" class="rule">
-            <view class="heading"><text>{{ rule.title }}</text><text class="status">{{ rule.enabled ? '已启用' : '已暂停' }}</text></view>
-            <view class="actions">
-              <text @tap="edit(rule)">修改</text><text @tap="action(rule, rule.enabled ? 'pause' : 'resume')">{{ rule.enabled ? '暂停' : '恢复' }}</text>
-              <text @tap="records(rule)">记录</text><text v-if="definition.endpoint" @tap="copyEndpoint(rule)">复制接收地址</text><text @tap="remove(rule)">删除</text>
-            </view>
-          </view>
-          <view v-if="!rules.length && !busy" class="empty">暂无规则</view>
-          <view v-if="runs !== null" class="runs">
-            <view class="heading"><text>触发记录</text><text @tap="runs = null">收起</text></view>
-            <view v-for="run in runs" :key="run.id" class="run" @tap="openRun(run)">
-              <text>{{ run.created_at }}</text><text>{{ status(run.status) }}</text><text v-if="run.conversation_id">查看工作 ›</text>
-            </view><text v-if="!runs.length">暂无触发</text>
-          </view>
-        </template>
-      </template>
+      <view v-if="!loaded && !error" class="empty"><TIcon name="time" size="28px" /><text>正在读取任务…</text></view>
+      <view v-else-if="loaded && !visibleRules.length" class="empty"><view class="empty-icon"><TIcon name="time" size="30px" /></view><text class="empty-title">{{ filter==='all'?'暂无定时任务':filter==='enabled'?'暂无已开启任务':'暂无已暂停任务' }}</text></view>
+      <view v-for="rule in visibleRules" :key="rule.id" class="task-card" :class="{paused:!rule.enabled,highlight:focused===rule.id}">
+        <view class="card-top"><view class="kind"><view class="kind-icon"><TIcon name="time" size="17px" /></view><text>定时任务</text></view><view class="card-controls"><button class="toggle" :class="{on:rule.enabled}" role="switch" :aria-checked="rule.enabled" :aria-label="(rule.enabled?'暂停':'开启')+rule.title" :disabled="busy" @tap="action(rule,rule.enabled?'pause':'resume')"><view class="knob" /></button><button class="icon-button" :aria-label="rule.title+'的更多操作'" :disabled="busy" @tap="menu(rule)"><TIcon name="more" size="21px" /></button></view></view>
+        <view class="card-main" role="button" :aria-label="'查看'+rule.title" @tap="openRule(rule)"><text class="task-title">{{ rule.title }}</text><view class="card-footer"><text v-if="!rule.enabled" class="paused-label">已暂停</text><text>{{ subtitle(rule) }}</text><TIcon name="chevron-right" size="14px" /></view></view>
+      </view>
+      <view class="safe-bottom" />
     </scroll-view>
+    <view v-if="editing" class="overlay" @tap="closeEditor"><view class="sheet" @tap.stop><view class="sheet-handle" /><view class="sheet-header"><text>编辑定时任务</text><button class="icon-button" aria-label="关闭编辑" :disabled="busy" @tap="closeEditor"><TIcon name="close" size="20px" /></button></view><scroll-view scroll-y class="sheet-body">
+      <view class="field"><text class="label">任务标题</text><input v-model="form.title" maxlength="80" placeholder="填写清晰的任务标题" /></view>
+      <view class="field"><text class="label">执行时间</text><picker :range="frequencies" :value="frequencyIndex" @change="setFrequency"><view class="picker"><text>{{ form.schedule.kind==='custom'?'保留现有时间规则':frequencies[frequencyIndex] }}</text><TIcon name="chevron-down" size="16px" /></view></picker>
+      <template v-if="form.schedule.kind==='interval'"><view class="control-row"><input v-model="form.schedule.interval" type="number" maxlength="5" /><picker :range="['分钟','小时']" :value="form.schedule.unit==='hours'?1:0" @change="form.schedule.unit=Number($event.detail.value)?'hours':'minutes'"><view class="picker">{{ form.schedule.unit==='hours'?'小时':'分钟' }}<TIcon name="chevron-down" size="16px" /></view></picker></view></template>
+      <template v-else-if="form.schedule.kind!=='custom'"><view v-if="form.schedule.kind==='weekly'" class="weekdays"><button v-for="day in days" :key="day.value" class="weekday" :class="{selected:form.schedule.weekdays.includes(day.value)}" :aria-label="'星期'+day.label" @tap="toggleDay(day.value)">{{ day.label }}</button></view><view class="control-row"><picker v-if="form.schedule.kind==='once'" mode="date" :value="form.schedule.date" @change="form.schedule.date=$event.detail.value"><view class="picker">{{ form.schedule.date }}<TIcon name="calendar" size="16px" /></view></picker><picker v-if="form.schedule.kind==='monthly'" :range="monthdays" :value="Number(form.schedule.monthday)-1" @change="form.schedule.monthday=Number($event.detail.value)+1"><view class="picker">每月 {{ form.schedule.monthday }} 日<TIcon name="chevron-down" size="16px" /></view></picker><picker mode="time" :value="form.schedule.time" @change="form.schedule.time=$event.detail.value"><view class="picker">{{ form.schedule.time }}<TIcon name="time" size="16px" /></view></picker></view></template><text class="timezone">{{ form.schedule.kind==='once'?'时区 '+form.schedule.offset:form.timezone }}{{ form.schedule.kind==='monthly'&&form.schedule.monthday>28?' · 当月没有该日期时跳过':'' }}</text></view>
+      <view v-if="editError" class="error" role="alert">{{ editError }}</view>
+    </scroll-view><view class="sheet-actions"><button class="secondary" :disabled="busy" @tap="closeEditor">取消</button><button class="primary" :disabled="busy" @tap="save">{{ busy?'保存中…':'保存修改' }}</button></view></view></view>
+    <view v-if="runs!==null" class="overlay" @tap="runs=null"><view class="sheet" @tap.stop><view class="sheet-handle" /><view class="sheet-header"><text>触发记录</text><button class="icon-button" aria-label="关闭记录" @tap="runs=null"><TIcon name="close" size="20px" /></button></view><text class="record-title">{{ recordsTitle }}</text><scroll-view scroll-y class="sheet-body"><view v-if="!runs.length" class="empty"><text>暂无触发记录</text></view><view v-for="run in runs" :key="run.id" class="run" @tap="openRun(run)"><view class="run-dot" :class="{failed:run.status==='failed'}" /><view class="run-copy"><text>{{ status(run.status) }}</text><text class="run-date">{{ dateLabel(run.created_at) }}</text></view><TIcon v-if="run.conversation_id" name="chevron-right" size="18px" /></view></scroll-view></view></view>
   </view>
 </template>
 <script setup lang="ts">
-import { computed, reactive, ref } from 'vue';
-import { onLoad, onUnload } from '@dcloudio/uni-app';
+import {computed,reactive,ref} from 'vue';
+import {onLoad,onShow,onUnload} from '@dcloudio/uni-app';
 import MobileHeader from '@/components/MobileHeader.vue';
-import pageDefinition from './page.json';
-import { request, onSessionChange, onDeviceChange } from '@/api/http';
-import { previewRequestId } from '@/services/ai-chat-preview';
-import { ensureSession } from '@/services/session';
-import { toast } from '@/ui/format';
-const plugin = ref('scheduled_tasks'), definition = computed<{name:string;endpoint:boolean;fields:{key:string;label:string;type:string;placeholder?:string;default?:string}[]}>(() => pageDefinition);
-const rules = ref<any[]>([]), runs = ref<any[] | null>(null), editing = ref(false), busy = ref(false), error = ref('');
-const form = reactive<Record<string,string>>({}); let editId = '', createKey = '', epoch = 0;
-const reset = () => { epoch++; rules.value = []; runs.value = null; editing.value = false; error.value = ''; Object.keys(form).forEach(k => delete form[k]); };
-const unsubs = [onSessionChange(reset), onDeviceChange(reset)]; onUnload(() => { reset(); unsubs.forEach(fn => fn()); });
-const call = (op: string, data: any = {}) => request<any>('POST', `/api/v1/mobile/work/sessions/extensions/${plugin.value}/${op}`, data);
-async function load() { const generation=epoch; const result = await call('list'); if(generation===epoch) rules.value = result.items; }
-async function execute(fn: () => Promise<void>) {
-  if(busy.value)return; const generation=epoch; busy.value=true; error.value='';
-  try { await fn(); } catch(e:any) { if(generation===epoch) error.value=e.message || '操作失败，请刷新状态'; }
-  finally { busy.value=false; }
-}
-onLoad(async options => { if(definition.value && await ensureSession()) await execute(load); });
-function edit(rule?:any) {
-  if(busy.value)return; editId=rule?.id || ''; createKey=previewRequestId();
-  for(const field of definition.value?.fields || []) {
-    const value=rule?.[field.key]; form[field.key]=value == null ? ('default' in field ? String(field.default) : '') : field.type==='json'?JSON.stringify(value,null,2):String(value);
-  }
-  editing.value=true; runs.value=null;
-}
-async function save() { await execute(async () => {
-  const generation=epoch, data:any={};
-  for(const field of definition.value?.fields || []) {
-    const value=form[field.key]?.trim();
-    if(value) data[field.key]=field.type==='json'?JSON.parse(value):value;
-    else if(editId && field.key==='run_at') data[field.key]=null;
-  }
-  const result=await call(editId?'update':'create',{...data,...(editId?{id:editId}:{request_id:createKey})});
-  if(generation!==epoch)return;
-  if(result.synced===false)toast('已保存，调度同步待重试');
-  editing.value=false;await load();
-}); }
-async function action(rule:any, op:string) { await execute(async()=>{ await call(op,{id:rule.id});await load(); }); }
-function remove(rule:any) { uni.showModal({title:'删除规则',content:rule.title,success:r=>{if(r.confirm)void action(rule,'delete');}}); }
-async function records(rule:any) { await execute(async()=>{const generation=epoch;const result=await call('runs',{id:rule.id});if(generation===epoch)runs.value=result.items;}); }
-async function copyEndpoint(rule:any) { await execute(async()=>{const generation=epoch;const result=await call('endpoint',{id:rule.id});if(generation===epoch)uni.setClipboardData({data:result.url});}); }
-function openRun(run:any) { if(run.conversation_id)uni.navigateTo({url:`/pages/ai-chat/index?conversation=${encodeURIComponent(run.conversation_id)}`}); }
-function status(value:string) { return ({queued:'排队中',dispatching:'提交中',submitted:'工作已提交',delivered:'通知已送达',failed:'触发失败'} as Record<string,string>)[value] || value; }
+import TIcon from '@tdesign/uniapp/icon/icon.vue';
+import {request,onSessionChange,onDeviceChange} from '@/api/http';
+import {ensureSession} from '@/services/session';
+import {toast} from '@/ui/format';
+import {frequencies,readSchedule,compileSchedule,scheduleLabel} from './schedule.js';
+const rules=ref<any[]>([]),runs=ref<any[]|null>(null),editing=ref(false),busy=ref(false),loaded=ref(false),error=ref(''),editError=ref(''),filter=ref('all'),focused=ref(''),recordsTitle=ref('');
+const form=reactive<any>({}),tabs=[{key:'all',label:'全部'},{key:'enabled',label:'已开启'},{key:'paused',label:'已暂停'}];
+let editId='',epoch=0,ready=false;
+const matches=(r:any,key:string)=>key==='all'||(key==='enabled'?r.enabled:!r.enabled);
+const count=(key:string)=>rules.value.filter(r=>matches(r,key)).length;
+const visibleRules=computed(()=>rules.value.filter(r=>matches(r,filter.value)));
+const reset=()=>{epoch++;ready=false;rules.value=[];runs.value=null;editing.value=false;loaded.value=false;error.value='';};
+const unsubs=[onSessionChange(reset),onDeviceChange(reset)];onUnload(()=>{reset();unsubs.forEach(fn=>fn());});
+const call=(op:string,data:any={})=>request<any>('POST','/api/v1/mobile/work/sessions/extensions/scheduled_tasks/'+op,data);
+async function load(){const version=epoch,result=await call('list');if(version===epoch){rules.value=result.items;loaded.value=true;if(result.available===false)error.value='定时服务暂不可用';}}
+async function execute(fn:()=>Promise<void>){if(busy.value)return;const version=epoch;busy.value=true;error.value='';try{await fn();}catch(e:any){if(version===epoch)error.value=e.message||'操作失败，请重试';}finally{busy.value=false;}}
+onLoad(async options=>{focused.value=options?.rule||'';if(await ensureSession()){ready=true;await execute(load);}});
+onShow(()=>{if(ready&&!editing.value)void execute(load);});
+function edit(rule:any){if(busy.value)return;editId=rule.id;Object.assign(form,{title:rule.title,prompt:rule.prompt||''});Object.assign(form,{timezone:rule.timezone||'Asia/Shanghai',schedule:{time:'09:00',date:new Date().toISOString().slice(0,10),offset:'+08:00',interval:1,unit:'hours',weekdays:[1],monthday:1,...readSchedule(rule)}}); editing.value=true;editError.value='';}
+function closeEditor(){if(!busy.value)editing.value=false;}
+async function save(){if(busy.value)return;editError.value='';if(!form.title?.trim()){editError.value='请填写任务标题';return;}let data:any;try{data={title:form.title.trim()};if(form.schedule.kind!=='custom'){compileSchedule(form.schedule);data.schedule={...form.schedule,interval:Number(form.schedule.interval)};}}catch(e:any){editError.value=e.message;return;}await execute(async()=>{const version=epoch,result=await call('update',{id:editId,...data});if(version!==epoch)return;if(result.synced===false)toast('已保存，调度同步待重试');editing.value=false;await load();});if(error.value)editError.value=error.value;}
+async function action(rule:any,op:string){await execute(async()=>{const result=await call(op,{id:rule.id});if(result.synced===false)toast('已保存，调度同步待重试');await load();});}
+function menu(rule:any){const labels=['编辑','触发记录',...(rule.conversation_id?['打开对话']:[]), '删除'];uni.showActionSheet({itemList:labels,success:({tapIndex})=>{const label=labels[tapIndex];if(label==='编辑')edit(rule);else if(label==='触发记录')void records(rule);else if(label==='打开对话')openConversation(rule.conversation_id);else if(label==='复制接收地址')void copyEndpoint(rule);else if(label==='删除')uni.showModal({title:'删除定时任务？',content:rule.title,confirmText:'删除',confirmColor:'#c24c51',success:r=>{if(r.confirm)void action(rule,'delete');}});}});}
+async function records(rule:any){await execute(async()=>{const version=epoch,result=await call('runs',{id:rule.id});if(version===epoch){runs.value=result.items;recordsTitle.value=rule.title;}});}
+async function copyEndpoint(rule:any){await execute(async()=>{const version=epoch,result=await call('endpoint',{id:rule.id});if(version===epoch)uni.setClipboardData({data:result.url});});}
+function openConversation(id:string){uni.navigateTo({url:'/pages/ai-chat/index?conversation='+encodeURIComponent(id)});}
+function openRule(rule:any){if(rule.conversation_id)openConversation(rule.conversation_id);else void records(rule);}
+function openRun(run:any){if(run.conversation_id)openConversation(run.conversation_id);}
+function status(value:string){return ({queued:'等待触发处理',dispatching:'正在提交工作',submitted:'工作已提交',delivered:'通知已送达',failed:'触发失败'} as Record<string,string>)[value]||value;}
+function dateLabel(value:string){const d=new Date(value);return Number.isFinite(d.getTime())?d.toLocaleString('zh-CN',{hour12:false}):'—';}
+const kinds=['once','daily','interval','weekly','monthly'],days=[{value:1,label:'一'},{value:2,label:'二'},{value:3,label:'三'},{value:4,label:'四'},{value:5,label:'五'},{value:6,label:'六'},{value:0,label:'日'}],monthdays=Array.from({length:31},(_,i)=>`${i+1} 日`);
+const frequencyIndex=computed(()=>Math.max(0,kinds.indexOf(form.schedule?.kind)));
+function setFrequency(event:any){form.schedule.kind=kinds[Number(event.detail.value)];}
+function toggleDay(day:number){const list=form.schedule.weekdays;form.schedule.weekdays=list.includes(day)?list.filter((n:number)=>n!==day):[...list,day];}
+const subtitle=(rule:any)=>scheduleLabel(rule);
 </script>
 <style scoped>
-.page{height:100vh;display:flex;flex-direction:column;background:#fff}.content{flex:1;min-height:0;box-sizing:border-box;padding:20px}.field{margin:18px 0;font-size:14px}.field input,.field textarea{background:#f5f7fa;padding:12px;margin-top:8px;border-radius:10px;box-sizing:border-box;width:100%}.rule,.runs{padding:20px 0;border-bottom:1px solid #edf0f5}.heading,.actions{display:flex;justify-content:space-between;gap:12px}.status{color:#8791a4;font-size:12px}.actions{margin-top:16px;flex-wrap:wrap;color:#294fdb;font-size:13px}.error{color:#bf3737;margin-bottom:14px}.empty{padding:40px;text-align:center;color:#8791a4}.run{display:flex;flex-direction:column;gap:8px;padding:14px 0;font-size:13px}button{margin:10px 0;font-size:14px}
+.page{height:100vh;display:flex;flex-direction:column;background:#f8f9fb;color:#252833}.toolbar{display:flex;align-items:center;justify-content:space-between;padding:14px 20px 18px}.filters{display:flex;gap:6px}.filter{display:flex;gap:6px;align-items:center;padding:8px 10px;border-radius:10px;background:transparent;color:#8b8f99;font-size:13px;line-height:22px;margin:0}.filter.active{background:#fff;color:#29344e;box-shadow:0 2px 8px #25355208;font-weight:600}.count{font-size:11px;opacity:.65}.content{flex:1;min-height:0}.task-card{margin:0 20px 14px;background:#fff;border:1px solid #e8eaf0;border-radius:20px;overflow:hidden;box-shadow:0 3px 12px #20305003}.task-card.highlight{border-color:#a6b5dc}.card-top{padding:14px 16px 0;display:flex;align-items:center;justify-content:space-between}.kind{display:flex;align-items:center;gap:8px;color:#818590;font-size:12px}.kind-icon{width:29px;height:29px;border-radius:9px;background:#f0f3fa;color:#6b7d9f;display:flex;align-items:center;justify-content:center}.card-controls{display:flex;align-items:center;gap:10px}.icon-button{display:flex;align-items:center;justify-content:center;width:36px;height:36px;padding:0;margin:0;background:transparent;color:#9296a0;border-radius:10px}.toggle{width:36px;height:22px;padding:3px;background:#dfe2e8;border-radius:16px;margin:0;display:flex;align-items:center}.toggle.on{background:#5778d5}.knob{width:16px;height:16px;border-radius:50%;background:#fff;box-shadow:0 1px 3px #0002;transition:transform .15s}.on .knob{transform:translateX(14px)}.card-main{padding:10px 18px 17px}.task-title{display:block;font-size:16px;font-weight:600;line-height:25px;overflow-wrap:anywhere}.task-summary{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;font-size:13px;line-height:21px;color:#80848e;margin-top:6px}.card-footer{display:flex;gap:9px;align-items:center;margin-top:16px;color:#9095a0;font-size:12px;line-height:18px}.card-footer>text:nth-last-child(2){flex:1}.paused-label{color:#a1a5ad}.paused .kind-icon{background:#f4f4f6;color:#aaadb5}.paused .task-title{color:#777d87}.error{font-size:13px;color:#b54f56;background:#fff1f1;border-radius:10px;padding:12px 14px;margin:0 20px 12px;line-height:20px}.empty{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;padding:80px 20px;color:#a0a5af;font-size:14px}.empty-icon{width:72px;height:72px;background:#edf0f6;border-radius:24px;display:flex;align-items:center;justify-content:center;color:#9aa6bf}.empty-title{color:#7e8592}.safe-bottom{height:40px}.overlay{position:fixed;inset:0;z-index:1000;background:#18233560;display:flex;align-items:flex-end}.sheet{width:100%;max-height:88vh;display:flex;flex-direction:column;background:#fff;border-radius:26px 26px 0 0;padding-bottom:env(safe-area-inset-bottom);box-shadow:0 -8px 40px #17223a12}.sheet-handle{width:34px;height:4px;border-radius:3px;background:#e3e6ed;margin:10px auto 0}.sheet-header{display:flex;align-items:center;justify-content:space-between;padding:14px 22px;font-size:18px;font-weight:600}.sheet-body{flex:1;min-height:0;max-height:62vh;box-sizing:border-box;padding:0 22px 18px}.field{margin:12px 0 22px}.label{display:block;font-size:13px;color:#818591;margin-bottom:9px}.field input,.field textarea,.picker{border:1px solid #e3e6ec;border-radius:12px;background:#fff;padding:13px 14px;width:100%;box-sizing:border-box;font-size:14px;color:#343a49;min-height:48px}.field textarea{height:132px;line-height:23px}.picker{display:flex;align-items:center;justify-content:space-between;gap:8px}.control-row{display:flex;gap:10px;margin-top:10px}.control-row>picker,.control-row>input{flex:1;min-width:0}.weekdays{display:flex;justify-content:space-between;gap:4px;margin:12px 0}.weekday{width:36px;height:38px;line-height:38px;padding:0;margin:0;background:#f4f5f8;color:#8a8e99;font-size:13px;border-radius:11px}.weekday.selected{background:#ebf0ff;color:#5274ce;font-weight:600}.timezone{font-size:12px;color:#9298a5;margin-top:10px;display:block}.sheet-actions{display:flex;gap:12px;padding:16px 22px 22px;border-top:1px solid #f0f1f4}.primary,.secondary{flex:1;border-radius:13px;padding:13px;font-size:15px;line-height:22px;margin:0}.primary{background:#5276d3;color:#fff;font-weight:600}.secondary{background:#f4f5f8;color:#7c8290}.record-title{font-size:13px;color:#8a90a0;padding:0 22px 12px}.run{display:flex;align-items:center;gap:12px;padding:18px 0;border-bottom:1px solid #f0f1f4;font-size:14px}.run-dot{width:7px;height:7px;border-radius:50%;background:#6b8dcd}.run-dot.failed{background:#ca7479}.run-copy{flex:1;display:flex;flex-direction:column;gap:7px}.run-date{font-size:12px;color:#9a9eaa}button::after{border:0}button[disabled]{opacity:.5}.sheet .error{margin:0 0 12px}@media(min-width:650px){.toolbar,.content{width:640px;align-self:center}.sheet{max-width:560px;margin:0 auto}.task-card{margin-bottom:18px}}
 </style>
