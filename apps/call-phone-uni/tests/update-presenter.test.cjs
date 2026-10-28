@@ -25,7 +25,7 @@ function harness({ latest = release, storage = new Map(), configured = true } = 
   };
   const service = createUpdateService({ latest: async () => { checks++; return published; } }, platform);
   const make = () => createUpdatePresenter(service, platform.identity, {
-    toast: value => notices.push(value), confirm: options => dialogs.push(options),
+    toast: value => notices.push(value), openDialog: async () => { dialogs.push(true); },
     readSkip: key => storage.get(key), saveSkip: (key, value) => storage.set(key, value),
   }, { configured, versionName: 'build-version', now: () => now });
   const presenter = make();
@@ -50,7 +50,9 @@ test('manual discovery switches the button to update without opening an automati
   await h.presenter.action();
   assert.equal(h.presenter.buttonLabel.value, '更新');
   assert.equal(h.dialogs.length, 0);
-  const a = h.presenter.action(), b = h.presenter.action();
+  await h.presenter.action();
+  assert.equal(h.presenter.dialog.value, 'announcement');
+  const a = h.presenter.startUpdate(), b = h.presenter.startUpdate();
   await Promise.all([a, b]);
   assert.equal(h.downloads, 1); assert.equal(h.installs, 1);
   assert.equal(h.presenter.state.value.status, 'installationRequested');
@@ -59,9 +61,9 @@ test('manual discovery switches the button to update without opening an automati
 test('automatic prompt includes release notes, allows skipping even mandatory metadata, and persists that version', async () => {
   const h = harness();
   await h.presenter.check();
-  assert.equal(h.dialogs[0].content, release.notes);
-  assert.match(h.dialogs[0].title, /1\.0\.8/);
-  h.dialogs[0].skip();
+  assert.equal(h.presenter.dialog.value, 'announcement');
+  h.presenter.skipVersion();
+  h.presenter.dialogClosed();
   assert.equal(h.downloads, 0);
   h.presenter.dispose();
   const restarted = h.make();
@@ -77,7 +79,8 @@ test('automatic prompt includes release notes, allows skipping even mandatory me
 test('automatic update confirmation downloads, verifies, and requests system installation', async () => {
   const h = harness();
   await h.presenter.check();
-  h.dialogs[0].update();
+  h.presenter.startUpdate();
+  assert.equal(h.presenter.dialog.value, 'progress');
   await h.presenter.startUpdate();
   assert.equal(h.downloads, 1); assert.equal(h.installs, 1);
 });
@@ -124,4 +127,112 @@ test('unexpected check errors are visible and a manual retry can recover', async
   await h.presenter.action();
   assert.equal(h.presenter.state.value.status, 'upToDate');
   assert.equal(h.notices.at(-1), '已经是最新版本');
+});
+
+const { updateHighlights, updatePresentation, updateProgress } = load('presentation');
+
+test('legacy engineering notes use brief fallback, while concise highlights remain intact', () => {
+  const short = updateHighlights('- 提醒更简洁\n- 新增下载进度');
+  assert.equal(short.join('|'), '提醒更简洁|新增下载进度');
+  for (const notes of ['', '工程部署细节'.repeat(30), '- 一\n- 二\n- 三\n- 四']) {
+    assert.equal(updateHighlights(notes).join(''), '优化使用体验，修复已知问题');
+  }
+  assert.equal(updatePresentation({ status: 'installationRequested' }).title, '请完成系统安装');
+  assert.equal(updatePresentation({ status: 'failed', stage: 'verify', retryable: false }).action, '');
+  assert.equal(updateProgress({ status: 'downloading', progress: 101 }), 100);
+});
+
+test('dismiss and reopen keeps one active download and the same live progress', async () => {
+  const h = harness();
+  let finish, report;
+  h.platform.download = async (_, signal, progress) => {
+    report = progress;
+    return new Promise(resolve => { finish = resolve; });
+  };
+  await h.presenter.check();
+  const task = h.presenter.startUpdate();
+  report(37);
+  assert.equal(h.presenter.dialog.value, 'progress');
+  assert.equal(h.dialogs.length, 1);
+  h.presenter.dialogClosed();
+  assert.equal(h.presenter.state.value.progress, 37);
+  await h.presenter.action(); await h.presenter.action();
+  assert.equal(h.presenter.dialog.value, 'progress');
+  assert.equal(h.dialogs.length, 2);
+  assert.equal(h.presenter.state.value.progress, 37);
+  finish('/update.apk'); await task;
+  assert.equal(h.installs, 1);
+});
+
+test('cancelling a download never launches installer and a new attempt can complete', async () => {
+  const h = harness();
+  const download = h.platform.download;
+  h.platform.download = (_, signal, progress) => new Promise((_, reject) => {
+    progress(25); signal.addEventListener('abort', () => reject(new Error('cancelled')));
+  });
+  await h.presenter.check();
+  const task = h.presenter.startUpdate();
+  await h.presenter.cancel(); await task;
+  assert.equal(h.presenter.state.value.status, 'cancelled');
+  assert.equal(h.installs, 0);
+  h.platform.download = download;
+  await h.presenter.startUpdate();
+  assert.equal(h.presenter.state.value.status, 'installationRequested');
+});
+
+test('download failure stays visible in the progress dialog and can retry', async () => {
+  const h = harness(); const download = h.platform.download;
+  h.platform.download = async () => { throw new Error('下载连接失败'); };
+  await h.presenter.check(); await h.presenter.startUpdate();
+  assert.equal(h.presenter.dialog.value, 'progress');
+  assert.equal(h.presenter.state.value.status, 'failed');
+  assert.equal(updatePresentation(h.presenter.state.value).action, '重试下载');
+  h.platform.download = download; await h.presenter.startUpdate();
+  assert.equal(h.installs, 1);
+});
+
+test('install permission retry reuses verified APK, and cancellation remains ready to install', async () => {
+  const h = harness();
+  h.platform.install = async () => 'permissionDenied';
+  await h.presenter.check(); await h.presenter.startUpdate();
+  assert.equal(h.presenter.state.value.stage, 'install');
+  h.presenter.dialogClosed(); await h.presenter.action();
+  assert.equal(h.presenter.dialog.value, 'progress');
+  h.platform.install = async () => 'cancelled';
+  await h.presenter.startUpdate();
+  assert.equal(h.presenter.state.value.status, 'readyToInstall');
+  assert.equal(h.downloads, 1);
+  h.platform.install = async () => 'requested';
+  await h.presenter.startUpdate();
+  assert.equal(h.downloads, 1);
+  assert.equal(h.presenter.state.value.status, 'installationRequested');
+});
+
+test('manual entry can persist skipped version and verification rejection cannot install', async () => {
+  const h = harness();
+  await h.presenter.check(true); await h.presenter.action();
+  h.presenter.skipVersion(); h.presenter.dialogClosed(); h.advance();
+  await h.presenter.check();
+  assert.equal(h.dialogs.length, 1);
+  h.platform.verify = async () => false;
+  await h.presenter.action(); await h.presenter.startUpdate();
+  assert.equal(h.presenter.state.value.retryable, false);
+  await h.presenter.startUpdate();
+  assert.equal(h.downloads, 1); assert.equal(h.installs, 0);
+});
+
+test('dismiss announcement does not persist skip and automatic navigation failure can recover', async () => {
+  const h = harness();
+  await h.presenter.check(); h.presenter.dialogClosed();
+  assert.equal(h.storage.size, 0);
+  let attempts = 0;
+  const p = createUpdatePresenter(h.service, h.platform.identity, {
+    openDialog: async () => { if (++attempts === 1) throw new Error('navigation unavailable'); },
+    toast: () => {}, readSkip: () => undefined, saveSkip: () => {},
+  }, { configured: true, versionName: '1.0.7', now: () => attempts * 3600001 });
+  await p.check();
+  assert.equal(p.dialog.value, null);
+  await p.check();
+  assert.equal(p.dialog.value, 'announcement');
+  assert.equal(attempts, 2);
 });

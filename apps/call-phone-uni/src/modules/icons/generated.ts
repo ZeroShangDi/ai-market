@@ -171,6 +171,34 @@ export const bundledIcons: Record<string, IconDefinition> = {
     "kind": "svg",
     "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 24 24\"><path fill=\"currentColor\" d=\"M11 11V5h2v6h6v2h-6v6h-2v-6H5v-2z\"/></svg>"
   },
+  "update": {
+    "label": "更新",
+    "colorMode": "theme",
+    "defaultColor": "#1F2937",
+    "kind": "svg",
+    "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 24 24\"><path fill=\"currentColor\" d=\"M4 19h16v-7h2v8a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1v-8h2zm9-10v7h-2V9H6l6-6l6 6z\"/></svg>"
+  },
+  "arrow-down": {
+    "label": "下载",
+    "colorMode": "theme",
+    "defaultColor": "#1F2937",
+    "kind": "svg",
+    "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 24 24\"><path fill=\"currentColor\" d=\"M13 10h5l-6 6l-6-6h5V3h2zm-9 9h16v-7h2v8a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1v-8h2z\"/></svg>"
+  },
+  "shield": {
+    "label": "校验",
+    "colorMode": "theme",
+    "defaultColor": "#1F2937",
+    "kind": "svg",
+    "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 24 24\"><path fill=\"currentColor\" d=\"m12 1l8.217 1.826a1 1 0 0 1 .783.976v9.987a6 6 0 0 1-2.672 4.992L12 23l-6.328-4.219A6 6 0 0 1 3 13.79V3.802a1 1 0 0 1 .783-.976zm0 2.049L5 4.604v9.185a4 4 0 0 0 1.781 3.328L12 20.597l5.219-3.48A4 4 0 0 0 19 13.79V4.604zm4.452 5.173l1.415 1.414L11.503 16L7.26 11.757l1.414-1.414l2.828 2.828z\"/></svg>"
+  },
+  "info": {
+    "label": "提示",
+    "colorMode": "theme",
+    "defaultColor": "#1F2937",
+    "kind": "svg",
+    "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 24 24\"><path fill=\"currentColor\" d=\"M12 22C6.477 22 2 17.523 2 12S6.477 2 12 2s10 4.477 10 10s-4.477 10-10 10m0-2a8 8 0 1 0 0-16a8 8 0 0 0 0 16M11 7h2v2h-2zm0 4h2v6h-2z\"/></svg>"
+  },
   "check": {
     "label": "完成",
     "colorMode": "theme",

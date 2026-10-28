@@ -17,6 +17,7 @@ node tools/app-update/cli.mjs init-key
 
 1. 完成当前版本验证，递增 manifest.json 的 versionName/versionCode。
 2. 将 CHANGELOG.md 的「未发布」内容归入 `## [实际版本] - 日期`。不要把尚未完成的下一版内容夹入本次说明。
+   同时编写 `docs/releases/<实际版本>.json` 的手机摘要，格式见 [摘要约定](../../docs/releases/README.md)。AI 按本次实际变化提炼 1～3 条用户可感知的短句，每条最多 32 字、总计最多 90 字，不把完整工程日志放进弹窗。
 3. 生成个人证书签名的正式 APK。
 4. 运行以下命令，使用真实的 HTTPS 分发根地址替换示例地址：
 
@@ -29,6 +30,8 @@ node tools/app-update/cli.mjs prepare \
 ```
 
 工具会实际读取 APK 的包名、版本和架构，并使用 apksigner 验证目标包与基准包的签名证书一致。当前支持单架构 APK，默认包名 `uni.UNID608100`、AppID `__UNI__D608100`、渠道 stable。版本名称和版本号来自 APK，不手工猜测。
+
+手机说明默认读取 CHANGELOG 所在目录下的 `docs/releases/<APK versionName>.json`，也可用 `--notes /路径/摘要.json` 指定。摘要缺失、版本不符或超过长度限制时拒绝发布，不会截取 CHANGELOG 代替。签名清单仍使用原有 `notes` 字符串（每条一行），旧客户端也会收到简短说明。
 
 macOS 默认复用已安装的 HBuilderX 内置 aapt2、JRE 和 apksigner。其他环境通过 AAPT2、JAVA_BIN、APKSIGNER_JAR 指定 Android 工具。HBuilderX 安装位置可通过 HBUILDERX_HOME 指向其 Contents/HBuilderX 目录。
 

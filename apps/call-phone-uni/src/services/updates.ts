@@ -24,13 +24,10 @@ updates.subscribe(state => {
 export const updatePresenter = createUpdatePresenter(updates, () => platform.identity(), {
   reportError: error => logger.error('update', 'check.failed', { error }),
   toast: title => { logger.info('update', 'notice', { reason: title }); uni.showToast({ title, icon: 'none' }); },
-  confirm: options => uni.showModal({
-    title: options.title,
-    content: options.content,
-    confirmText: '更新',
-    cancelText: '跳过',
-    success: result => { if (result.confirm) options.update(); else if (result.cancel) options.skip(); },
-  }),
+  openDialog: () => new Promise<void>((resolve, reject) => uni.navigateTo({
+    url: '/pages/app-update/index', animationType: 'fade-in', animationDuration: 180,
+    success: () => resolve(), fail: reject,
+  })),
   readSkip: key => uni.getStorageSync(key),
   saveSkip: (key, value) => uni.setStorageSync(key, value),
 }, { configured: !!url, versionName: __APP_VERSION_NAME__ });

@@ -21,6 +21,18 @@ export function releaseNotes(changelog, version) {
   return notes.replace(/^###\s+/gm, '').trim();
 }
 
+/** The phone copy is deliberately authored separately from the engineering changelog. */
+export function updateSummary(document, version) {
+  if (!document || document.versionName !== version) throw new Error('手机更新摘要的 versionName 必须与 APK 一致。');
+  const lines = document.highlights;
+  if (!Array.isArray(lines) || lines.length < 1 || lines.length > 3 ||
+      lines.some(line => typeof line !== 'string' || !line.trim() || /[\r\n]/.test(line) || Array.from(line.trim()).length > 32) ||
+      lines.reduce((sum, line) => sum + Array.from(line.trim()).length, 0) > 90) {
+    throw new Error('手机更新摘要需为 1～3 条短句，每条最多 32 字、总计最多 90 字；请单独概括用户可感知的变化，不要粘贴 CHANGELOG。');
+  }
+  return lines.map(line => line.trim()).join('\n');
+}
+
 export function inspectApk(filename) {
   const hx = process.env.HBUILDERX_HOME || '/Applications/HBuilderX.app/Contents/HBuilderX';
   const temp = mkdtempSync(path.join(os.tmpdir(), 'app-update-apk-'));
@@ -71,14 +83,17 @@ export function clientConfiguration({ baseUrl, keyFile, channel = 'stable', pack
   ].join('\n');
 }
 
-export function prepareRelease({ apk, baselineApk, keyFile, baseUrl, outDir, changelog, channel = 'stable', appId = '__UNI__D608100', packageName = 'uni.UNID608100', inspect = inspectApk, allowLan = false }) {
+export function prepareRelease({ apk, baselineApk, keyFile, baseUrl, outDir, changelog, notesFile, channel = 'stable', appId = '__UNI__D608100', packageName = 'uni.UNID608100', inspect = inspectApk, allowLan = false }) {
   const base = publicationBase(baseUrl, allowLan);
   if (!/^[a-z0-9-]+$/.test(channel) || !/^[a-zA-Z0-9_.]+$/.test(packageName)) throw new Error('发布渠道或包名无效。');
   const target = inspect(apk), previous = inspect(baselineApk);
   if (target.packageName !== packageName || previous.packageName !== packageName || JSON.stringify(target.certificates) !== JSON.stringify(previous.certificates)) throw new Error('目标 APK 与基准正式包的包名或签名不一致。');
   if (target.versionCode <= previous.versionCode) throw new Error('新 APK 的 versionCode 必须高于基准正式包。');
   if (!/^[a-z0-9-]+$/.test(target.architecture) || !Number.isSafeInteger(target.versionCode) || target.versionCode < 1) throw new Error('APK 版本或架构无效。');
-  const notes = releaseNotes(readFileSync(changelog, 'utf8'), target.versionName);
+  releaseNotes(readFileSync(changelog, 'utf8'), target.versionName);
+  const summaryFile = notesFile || path.join(path.dirname(changelog), 'docs/releases', `${target.versionName}.json`);
+  if (!existsSync(summaryFile)) throw new Error(`缺少手机更新摘要 ${summaryFile}，请先编写 versionName 与 highlights（1～3 条短句）；完整 CHANGELOG 仍需保留。可用 --notes 指定文件。`);
+  const notes = updateSummary(JSON.parse(readFileSync(summaryFile, 'utf8')), target.versionName);
   const binary = readFileSync(apk), hash = createHash('sha256').update(binary).digest('hex');
   const root = path.join(outDir, 'public');
   const feedKey = `${packageName}/android/${target.architecture}/${channel}/manifest.json`;
