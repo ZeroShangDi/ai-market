@@ -20,3 +20,14 @@
 - 1.0.24（122）最终 APK 为 `__UNI__D608100__20261026072039.apk`，15,511,993 字节，SHA-256 `9895122a8956f0c845e3d291a22324b71451f0ac4db5b6d48af61321e84e07b9`。签名清单与 APK 已发布至现有专网更新地址；旧版 available、新版 upToDate、清单签名、完整下载、同证书、HEAD/Range 全部通过。未做真机覆盖安装、页面操作及真实邮箱自动回复验收。
 - 本地部署覆盖文件为忽略的 `apps/voice-service/.local/compose.automation.yml`，镜像为 ai-market-{agent,ai,server}-automation:1.0.24。由于镜像仓库获取受阻，本次复用已有基础镜像装入已测试产物；调度二进制按插件 Dockerfile 固定版本构建，许可证及源码归档保留于镜像。后续部署需按插件依赖声明提供 MCP_CRON_COMMAND；宿主 Dockerfile 不硬编码该依赖。
 
+
+## 2026-10-28 部署修复
+
+1.0.25 直接重建宿主镜像，遗漏了定时插件的调度二进制和 `MCP_CRON_COMMAND`。宿主健康接口正常并不表示插件依赖齐全。插件内新增 `Dockerfile.runtime`，将依赖镜像的程序、许可证、源码归档及启动配置装配到目标宿主镜像。以后更新宿主后须重新执行插件装配，不直接部署裸宿主镜像：
+
+```sh
+docker build -f plugins/scheduled-tasks/Dockerfile -t ai-market-scheduled-tasks-dependency:0251d61a plugins/scheduled-tasks
+docker build -f plugins/scheduled-tasks/Dockerfile.runtime --build-arg HOST_IMAGE=ai-market-agent-automation:1.0.25 -t ai-market-agent-automation:1.0.25-scheduler .
+```
+
+本次依赖直接复用已验证的 1.0.24 镜像中的相同程序及许可证、源码归档，没有重新获取上游或改变版本。部署覆盖文件指向 `1.0.25-scheduler`。鉴权后的定时插件 list 接口须返回 `available: true`，并执行独立临时数据库的真实 HTTP 调度验证；不能只检查 `/health`。手机仍为 1.0.25（123），不需要重新打包。
