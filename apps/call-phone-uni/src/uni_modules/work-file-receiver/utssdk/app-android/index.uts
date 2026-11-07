@@ -5,6 +5,12 @@ export function pendingFiles(): string {
   if (context == null) return '[]'
   return WorkFileInbox.pending(context)
 }
+
+export function shareBase64Document(name: string, content: string, callback: (error: string) => void): void {
+  const activity = UTSAndroid.getUniActivity()
+  if (activity == null) throw new Error('应用尚未就绪')
+  WorkFileShare.launchBase64(activity, name, content, callback)
+}
 export function readPendingFile(id: string): string {
   const context = UTSAndroid.getAppContext()
   if (context == null) throw new Error('应用尚未就绪')

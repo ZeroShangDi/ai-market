@@ -7,7 +7,7 @@ const base = '/api/v1/mobile/ai';
 const enc = encodeURIComponent;
 export const remoteChatRepository: ChatRepository = {
   create: key => request('POST', `${base}/conversations`, {}, key),
-  list: cursor => request('GET', `${base}/conversations?limit=20${cursor ? `&cursor=${enc(cursor)}` : ''}`),
+  list: (cursor, source) => request('GET', `${base}/conversations?limit=20${source ? `&source_type=${source}` : ''}${cursor ? `&cursor=${enc(cursor)}` : ''}`),
   messages: (id, cursor) => request('GET', `${base}/conversations/${enc(id)}/messages?limit=50${cursor ? `&cursor=${enc(cursor)}` : ''}`),
   remove: id => request('DELETE', `${base}/conversations/${enc(id)}`),
   status: id => request('GET', `${base}/requests/${enc(id)}`),

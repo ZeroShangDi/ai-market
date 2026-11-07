@@ -7,6 +7,9 @@ import { previewRequestId } from './ai-chat-preview';
 const base = '/api/v1/mobile/work/sessions';
 export interface WorkInteraction { id: string; kind: 'question' | 'approval'; binding: string; status: string; tool: string; input: any }
 export interface WorkPlugin {
+  builtin?: boolean;
+  selectable?: boolean;
+  catalogType?: 'plugins' | 'skills' | 'connections' | 'mcp';
   id: string; name: string; description: string; installed: boolean; enabled: boolean; tools: { id: string; label: string }[]; skills: { id?: string; name: string; description: string; enabled: boolean; standalone?: boolean }[];
   connection: { label?: string; actionLabel?: string; description?: string };
   account: string; connected: boolean; added: boolean;
@@ -20,7 +23,7 @@ export interface WorkSession {
 }
 export interface WorkEvent { created_at?: string; sequence: number; type: string; data: any; run_id: string }
 
-export interface WorkSummary { id: string; conversation_id: string; title: string; status: string; started: boolean; updated_at: string; sequence: number; pending: string[]; unread: boolean }
+export interface WorkSummary { source_type?: import('@/types/ai-chat').ConversationSource; parent_id?: string | null; id: string; conversation_id: string; title: string; status: string; started: boolean; updated_at: string; sequence: number; pending: string[]; unread: boolean }
 export const workInbox = reactive({ items: [] as WorkSummary[], loading: false, error: '' });
 let inboxEpoch = 0;
 function clearInbox() { inboxEpoch++; workInbox.items = []; workInbox.loading = false; workInbox.error = ''; }

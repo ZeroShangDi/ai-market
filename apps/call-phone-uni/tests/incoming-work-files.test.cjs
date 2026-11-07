@@ -7,7 +7,7 @@ function harness({ authenticated = true, busy = false, current = 'pages/index/in
  const bridge = { pendingFiles: () => JSON.stringify(items), readPendingFile: () => 'YQ==', discardPendingFile: id => { discarded.push(id); items = items.filter(f => f.id !== id); return true; } };
  const mocks = { vue, '@/uni_modules/work-file-receiver': bridge, '@/api/http': { hasAccessToken: () => authenticated, onSessionChange: f => resets.push(f), onDeviceChange: f => resets.push(f) }, './calls': { hasUnfinishedCall: () => busy }, './logger': { logger: { warn() {} } } };
  vm.runInNewContext(ts.transpileModule(fs.readFileSync(path.join(__dirname, '../src/services/incoming-work-files.ts'), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 } }).outputText, {
-   exports, require: id => mocks[id], plus: { os: { name: 'Android' } }, getCurrentPages: () => [{ route: current }],
+   exports, require: id => mocks[id], plus: { os: { name: 'Android' } }, getCurrentPages: () => Object.assign([{ route: current }], {at: undefined}),
    uni: { showToast: o => toasts.push(o.title), navigateTo: o => navigations.push(o) },
  });
  return { ...exports, navigations, discarded, toasts, resets, bridge };

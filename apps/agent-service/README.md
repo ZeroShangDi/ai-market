@@ -102,3 +102,11 @@ npm test
 磁盘原报告/任务 JSON、已有数据库回执和真实业务待办保留，不自动迁移为 Work，也不自动重放或删除。v59 建表 SQL 仅作已部署历史保留，启动迁移不再运行它。后续业务 MCP 应复用领域用例，并落实提交去重、查询回执和结果不确定时先核验；不保留一套无人调用的旧 Agent 业务服务。
 
 真实模型测试使用上文 work-native-smoke，当前证据见 [原生 Work 验证](../../docs/reviews/2026-10-15-native-work-validation.md)。普通聊天/联网联调见 AI 服务文档。
+
+## 统一插件与长期待答
+
+源码入口为根 `plugins/`，旧插件与技能路径仅保留兼容链接。能力中心合并 `plugins/catalog.json` 的内置条目与业务插件目录；内置项没有单独卸载开关。独立 MCP 接入见 `plugins/work-control/README.md` 和 `plugins/callphone/README.md`。
+
+等待用户时释放执行名额，执行超时不计算等待时间。默认 60 秒无答复后保存待办并终止当前 SDK 查询；重启后保留待办，答复后有名额即恢复原生会话。恢复后的新操作重新审批，不将旧工具调用的批准自动转移。主动打断仍使未答待办失效，结果不明的写入不自动重试。
+
+Docker 构建上下文改为仓库根目录：`docker build -f apps/agent-service/Dockerfile .`；专用 Dockerfile.dockerignore 只纳入源码、依赖锁与所需插件，排除本机配置和数据。Compose 已同步。

@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "id": "memory",
+  "version": "0.1.0",
+  "name": "长期记忆（待接入）",
+  "upstream": "https://github.com/modelcontextprotocol/servers/tree/main/src/memory",
+  "package": "@modelcontextprotocol/server-memory@2.0.0",
+  "runtime": "node >=24",
+  "status": "definition-only",
+  "requiredConfig": [
+    "MEMORY_FILE_PATH"
+  ],
+  "isolation": "separate process and storage path for each tenant/user",
+  "description": "长期记忆（待接入）",
+  "license": "UNLICENSED",
+  "skills": [],
+  "dependencies": {
+    "node": ">=24",
+    "@modelcontextprotocol/server-memory": "2.0.0"
+  },
+  "mcpServers": {
+    "memory": {
+      "transport": "stdio",
+      "command": "npx",
+      "args": [
+        "--yes",
+        "@modelcontextprotocol/server-memory@2.0.0"
+      ]
+    }
+  }
+}

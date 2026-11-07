@@ -1,0 +1,5 @@
+{
+  "name": "scheduled_tasks",
+  "version": "0.1.0",
+  "description": "按指定时间发送 HTTP 通知"
+}

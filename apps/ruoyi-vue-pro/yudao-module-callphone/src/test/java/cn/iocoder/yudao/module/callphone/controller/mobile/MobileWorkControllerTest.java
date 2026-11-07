@@ -32,7 +32,7 @@ class MobileWorkControllerTest {
         when(relay.request(eq("POST"), eq(""), any(), isNull(), eq(actor))).thenReturn(envelope(json.createObjectNode().put("id", SID)));
         assertEquals(200, controller.create(request, input).getStatusCode().value());
         verify(chat).requireConversation("123", "1", "7", "10");
-        verify(relay).request("POST", "", json.createObjectNode().put("conversation_id", "123"), null, actor);
+        verify(relay).request("POST", "", json.createObjectNode().put("conversation_id", "123").put("source_type", "manual"), null, actor);
         doThrow(new MobileAiRelay.ConversationFailure(403)).when(chat).requireConversation("123", "1", "7", "10");
         assertThrows(MobileAiRelay.ConversationFailure.class, () -> controller.create(request, input));
     }

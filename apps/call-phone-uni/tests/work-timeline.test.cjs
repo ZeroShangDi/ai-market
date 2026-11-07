@@ -65,3 +65,11 @@ test('fresh replay immediately shows confirmed snapshot output and reconciles wi
   const events = [event(1,'text_delta',{message_id:'a',delta:'过程'}),event(2,'artifact',{id:'f',name:'a.pdf',size:1}),event(3,'result',{text:'结果'})];
   assert.deepEqual(Array.from(workTurns(s,events)[0].items,i => i.kind),['text','file','text']);
 });
+
+test('plugin resource cards retain their stream position and navigation identity after replay',()=>{
+ const events=[event(1,'assistant',{id:'a',content:'正在创建任务'}),event(2,'plugin_result',{plugin_id:'scheduled_tasks',title:'晨间简报',summary:'定时任务',rows:[],resource:{id:'rule-1',subtitle:'每天 09:00',status:'已开启'}}),event(3,'assistant',{id:'b',content:'已创建'})];
+ const before=normalize(workTurns(session(),events));
+ assert.deepEqual(before[0].items.map(i=>i.kind),['text','receipt','text']);
+ assert.equal(before[0].items[1].receipt.resource.id,'rule-1');
+ assert.deepEqual(normalize(workTurns(normalize(session()),normalize(events))),before);
+});

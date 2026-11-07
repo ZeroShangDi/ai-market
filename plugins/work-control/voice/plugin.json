@@ -1,0 +1,210 @@
+{
+  "schemaVersion": 1,
+  "id": "work_control",
+  "name": "工作控制",
+  "tools": [
+    {
+      "name": "start_work",
+      "description": "申请创建持久化后台工作，仅发送手机确认弹窗，不直接创建或执行。普通查资料、联网搜索使用 search_web，不能因失败或耗时自动转工作。用户点击确认后由手机创建任务。",
+      "properties": {
+        "prompt": {
+          "type": "string",
+          "description": "完整目标、必要上下文、约束和预期结果"
+        },
+        "user_quote": {
+          "type": "string",
+          "description": "完整逐字引用本轮用户的工作请求"
+        },
+        "retry_id": {
+          "type": "string",
+          "description": "仅重试时填写上次返回的 retry_id"
+        }
+      },
+      "required": [
+        "prompt",
+        "user_quote"
+      ],
+      "requiresHost": true
+    },
+    {
+      "name": "list_work",
+      "description": "查看当前用户近期工作台任务的真实状态；根据上下文识别对象，歧义时询问。",
+      "properties": {
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 30
+        },
+        "before": {
+          "type": "string",
+          "description": "分页游标，使用上次返回的 next_before"
+        }
+      },
+      "required": []
+    },
+    {
+      "name": "read_work",
+      "description": "读取任务状态、会话消息、产物和待确认项。长消息可按 message_id 和 offset 继续读取；历史可按 before 翻页。",
+      "properties": {
+        "session_id": {
+          "type": "string",
+          "description": "任务 ID"
+        },
+        "before": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "message_id": {
+          "type": "string",
+          "description": "读取一条完整消息的 ID"
+        },
+        "offset": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "session_id"
+      ]
+    },
+    {
+      "name": "continue_work",
+      "description": "用户明确要求时在原任务继续追问或交办；不会另建任务，运行时可排队。",
+      "properties": {
+        "session_id": {
+          "type": "string",
+          "description": "已读取并确认的任务 ID"
+        },
+        "prompt": {
+          "type": "string",
+          "description": "追加目标和必要上下文"
+        },
+        "user_quote": {
+          "type": "string",
+          "description": "完整逐字引用本轮用户的继续请求"
+        },
+        "retry_id": {
+          "type": "string",
+          "description": "仅重试时填写上次返回的 retry_id"
+        }
+      },
+      "required": [
+        "session_id",
+        "prompt",
+        "user_quote"
+      ]
+    },
+    {
+      "name": "respond_work",
+      "description": "将用户口述答复提交到已经说明的当前待办。必须先读取并说明事项，再获得用户本轮明确答复；不能代用户审批。",
+      "properties": {
+        "session_id": {
+          "type": "string",
+          "description": "任务 ID"
+        },
+        "interaction_id": {
+          "type": "string",
+          "description": "已说明的待办 ID"
+        },
+        "user_quote": {
+          "type": "string",
+          "description": "完整逐字引用本轮用户答复"
+        },
+        "approved": {
+          "type": "boolean",
+          "description": "审批同意或拒绝，问题答复不填"
+        },
+        "answers": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "问题原文映射到用户回答，所有问题都要回答"
+        }
+      },
+      "required": [
+        "session_id",
+        "interaction_id",
+        "user_quote"
+      ]
+    },
+    {
+      "name": "read_work_activity",
+      "description": "读取任务执行记录、当前进展、工具结果或来源。逐条按 next_after/next_offset 补读；只查是否结束时使用 read_work，避免无谓轮询。",
+      "properties": {
+        "session_id": {
+          "type": "string",
+          "description": "任务 ID"
+        },
+        "after": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "事件游标，可从 read_work 的 sequence 附近开始看最近进展"
+        },
+        "offset": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "同一长事件内的字符位置"
+        }
+      },
+      "required": [
+        "session_id"
+      ]
+    },
+    {
+      "name": "list_conversations",
+      "description": "查看当前账号全部来源的聊天会话，包括手动创建、语音创建及工作关联会话。按 next_cursor 翻页，不能将首屏当作全部记录。",
+      "properties": {
+        "cursor": {
+          "type": "string",
+          "description": "上页 next_cursor"
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 30
+        }
+      },
+      "required": [],
+      "requiresHost": true
+    },
+    {
+      "name": "read_conversation",
+      "description": "读取同一账号的普通聊天历史，不限创建入口；工作执行详情使用 list_work/read_work。按 next_cursor 补读更早消息。",
+      "properties": {
+        "conversation_id": {
+          "type": "string",
+          "description": "list_conversations 返回的会话编号"
+        },
+        "cursor": {
+          "type": "string",
+          "description": "上页 next_cursor"
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 30
+        }
+      },
+      "required": [
+        "conversation_id"
+      ],
+      "requiresHost": true
+    },
+    {
+      "name": "search_web",
+      "description": "查询公开网页的最新信息并返回来源。调用前先用一句简短自然语言回应用户正在准备查询，然后在同一轮立即调用，不等待用户再次回答，也不征求联网许可；不能只发工具调用而保持沉默。仅发送查询所需关键词，不发送私人聊天、客户资料或凭据。不登录或执行写入，不创建后台工作。",
+      "properties": {
+        "query": {
+          "type": "string",
+          "description": "公开信息查询问题及必要公开关键词，最多2000字"
+        }
+      },
+      "required": [
+        "query"
+      ],
+      "requiresHost": true,
+      "timeoutSeconds": 150
+    }
+  ]
+}

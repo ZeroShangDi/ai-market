@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "id": "workspace-files",
+  "version": "0.1.0",
+  "name": "工作文件",
+  "skills": [
+    "skills/workspace-files"
+  ],
+  "description": "工作文件",
+  "license": "UNLICENSED",
+  "dependencies": {},
+  "mcpServers": {}
+}

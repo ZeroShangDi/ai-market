@@ -109,3 +109,15 @@ test('explicit new conversation creates a fresh identity even when the previous 
   await h.newConversation(true);
   assert.notEqual(h.state.activeId, oldId); assert.equal(h.state.conversations.length, 2);
 });
+
+test('source switching requests server-filtered pages without discarding the active conversation',async()=>{
+ const calls=[];
+ const repo={create:async()=>({id:'1',title:'手动',updated_at:'2026-01-01',source_type:'manual'}),
+  list:async(cursor,source)=>{calls.push({cursor,source});return {items:[{id:source==='event'?'2':'1',title:source,updated_at:'2026-01-01',source_type:source}],next_cursor:source==='event'?'next':null};},
+  messages:async()=>({items:[],next_cursor:null,active_request_id:null})};
+ const h=createChatController({stream(){throw Error('No stream expected');}},repo);
+ await h.initialize();const active=h.state.activeId;
+ await h.filterSource('event');assert.equal(h.state.activeId,active);assert.equal(h.state.sourceType,'event');
+ await h.loadMoreConversations();assert.equal(calls.at(-1).source,'event');assert.equal(calls.at(-1).cursor,'next');
+ h.reset();assert.equal(h.state.sourceType,'manual');
+});

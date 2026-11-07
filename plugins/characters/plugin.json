@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "id": "characters",
+  "version": "0.1.0",
+  "name": "人物卡片",
+  "assets": "packages",
+  "description": "人物卡片",
+  "license": "UNLICENSED",
+  "skills": [],
+  "dependencies": {},
+  "mcpServers": {},
+  "hostAdapters": {
+    "persona": "packages/{character}/persona.md",
+    "conversation-skills": "packages/{character}/skills.md"
+  }
+}

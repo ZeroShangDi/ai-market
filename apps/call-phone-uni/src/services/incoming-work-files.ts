@@ -20,7 +20,7 @@ export function receiveIncomingWorkFiles() {
     if (!hasAccessToken()) { uni.showToast({ title: '文件已接收，请先连接电脑', icon: 'none' }); return; }
     if (hasUnfinishedCall()) { uni.showToast({ title: '文件已接收，完成通话后返回应用继续', icon: 'none' }); return; }
     const pages = getCurrentPages();
-    if (pages.at(-1)?.route !== 'pages/ai-chat/index' && !navigating) {
+    if (pages[pages.length - 1]?.route !== 'pages/ai-chat/index' && !navigating) {
       navigating = true;
       uni.navigateTo({ url: '/pages/ai-chat/index', complete: () => { navigating = false; } });
     }

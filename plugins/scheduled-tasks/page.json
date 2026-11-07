@@ -1,0 +1,43 @@
+{
+  "id": "scheduled_tasks",
+  "name": "定时任务",
+  "summary": "按时发送通知",
+  "fields": [
+    {
+      "key": "title",
+      "label": "标题",
+      "type": "text"
+    },
+    {
+      "key": "run_at",
+      "label": "单次时间（含时区）",
+      "type": "text",
+      "placeholder": "2026-10-26T04:00:00+08:00"
+    },
+    {
+      "key": "cron",
+      "label": "重复规则（单次任务留空）",
+      "type": "text",
+      "placeholder": "0 9 * * *"
+    },
+    {
+      "key": "timezone",
+      "label": "时区",
+      "type": "text",
+      "default": "Asia/Shanghai"
+    },
+    {
+      "key": "url",
+      "label": "通知地址",
+      "type": "textarea"
+    },
+    {
+      "key": "payload",
+      "label": "通知参数",
+      "type": "json",
+      "default": "{}"
+    }
+  ],
+  "endpoint": false,
+  "entry": "ui/index.vue"
+}

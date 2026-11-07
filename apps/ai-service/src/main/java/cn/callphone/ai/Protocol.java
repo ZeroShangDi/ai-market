@@ -16,6 +16,7 @@ public final class Protocol {
         public Send(String request_id,String conversation_id,String content,String retry_of,Boolean web_search) { this(request_id,conversation_id,content,retry_of,web_search,null); }
         public Send(String request_id,String conversation_id,String content,String retry_of) { this(request_id,conversation_id,content,retry_of,false); }
     }
+    public record Transcript(@NotBlank String request_id, @NotBlank String role, @NotBlank @Size(max=6000) String content) {}
     public static final class Problem extends RuntimeException {
         public final String code;
         public final int status;

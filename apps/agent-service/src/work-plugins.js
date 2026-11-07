@@ -1,6 +1,6 @@
 import { readFile, realpath } from 'node:fs/promises';
 import { join, isAbsolute } from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { contained } from './work-files.js';
 
 function fields(value) {
@@ -10,12 +10,21 @@ function fields(value) {
 export function validatePluginResult(value) {
   if (!value || typeof value.title !== 'string' || value.title.length > 240 || typeof value.summary !== 'string' || value.summary.length > 2000
     || !Array.isArray(value.rows) || value.rows.length > 500 || value.rows.some(row => !row || ['label', 'status', 'detail'].some(key => typeof row[key] !== 'string' || row[key].length > 500))) throw new Error('Invalid plugin result');
-  return { title: value.title, summary: value.summary, rows: value.rows.map(({ label, status, detail }) => ({ label, status, detail })) };
+  let resource;
+  if(value.resource != null) {
+    const r=value.resource;
+    if(!r || typeof r.id!=='string' || !/^[a-zA-Z0-9_-]{1,100}$/.test(r.id) || typeof r.subtitle!=='string' || r.subtitle.length>240 || typeof r.status!=='string' || r.status.length>40)throw Error('Invalid plugin resource');
+    resource={id:r.id,subtitle:r.subtitle,status:r.status};
+  }
+  return { ...(resource?{resource}:{}), title: value.title, summary: value.summary, rows: value.rows.map(({ label, status, detail }) => ({ label, status, detail })) };
 }
 
 /** Only deployment-approved absolute paths; never reads plugin configuration from user files or model inputs. */
 export async function discoverCapabilityPlugins({ ctx, entries }) {
-  entries ??= JSON.parse(process.env.WORK_CAPABILITY_PLUGINS || '[]');
+  if (entries == null) {
+    const root = process.env.WORK_BUILTIN_ROOT || fileURLToPath(new URL('../../../plugins', import.meta.url));
+    entries = [...JSON.parse(process.env.WORK_CAPABILITY_PLUGINS || '[]'), ...JSON.parse(await readFile(join(root,'runtime-catalog.json'),'utf8')).map(item => ({ path: join(root,item.directory) }))];
+  }
   if (!Array.isArray(entries) || entries.length > 20) throw new Error('Invalid plugin configuration');
   const workspaceRoot = entries.length ? await realpath(ctx.base) : ctx.base;
   const plugins = [];
@@ -27,6 +36,7 @@ export async function discoverCapabilityPlugins({ ctx, entries }) {
     const manifest = JSON.parse(await readFile(join(root, 'work-plugin.json'), 'utf8'));
     if (manifest.schemaVersion !== 1 || !/^[a-z][a-z0-9_]{0,39}$/.test(manifest.id) || manifest.id === 'work' || plugins.some(p => p.manifest.id === manifest.id)
       || typeof manifest.entry !== 'string' || !manifest.tools || typeof manifest.tools !== 'object' || Array.isArray(manifest.tools)) throw new Error('Invalid plugin manifest');
+    if (manifest.catalogType != null && !['plugins', 'skills', 'connections', 'mcp'].includes(manifest.catalogType)) throw new Error('Invalid plugin catalog type');
     if (manifest.name != null && (typeof manifest.name !== 'string' || manifest.name.length > 80)
       || manifest.description != null && (typeof manifest.description !== 'string' || manifest.description.length > 500)
       || manifest.skills != null && (!Array.isArray(manifest.skills) || manifest.skills.length > 30 || manifest.skills.some(s => !s || typeof s.name !== 'string' || s.name.length > 80 || typeof s.description !== 'string' || s.description.length > 500 || s.id != null && !/^[a-z][a-z0-9-]{0,63}$/.test(s.id)))
@@ -56,7 +66,7 @@ export async function loadCapabilityPlugins({ sdk, z, ctx, entries }) {
   for (const { root, manifest, module, config } of available.filter(p => selected.includes(p.manifest.id))) {
     await pluginConnection({ module, config }, ctx.identity);
     const runtime = await module.activate({ sdk, z, config, ctx: { cwd: ctx.cwd, resources: ctx.resources,
-      identity: ctx.identity, signal: ctx.signal,
+      identity: ctx.identity, conversationId:ctx.conversationId, signal: ctx.signal,
       emitResult: value => ctx.onEvent('plugin_result', { plugin_id: manifest.id, ...validatePluginResult(value) }),
     } });
     if (!Array.isArray(runtime.tools) || runtime.tools.length !== Object.keys(manifest.tools).length) throw new Error('Plugin tool manifest mismatch');

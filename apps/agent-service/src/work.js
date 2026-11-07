@@ -2,6 +2,7 @@ import { mkdir, readdir, readFile, writeFile, rename, realpath } from 'node:fs/p
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { ApiError, decimalId, uuid, text, digest, invalid } from './validation.js';
+import { builtInCapabilities } from './capability-catalog.js';
 import { characterContext } from './character.js';
 import { uploadFile, publishFile, snapshot } from './work-files.js';
 
@@ -9,8 +10,8 @@ const conflict = message => new ApiError(409, 'WORK_CONFLICT', message);
 const active = value => ['running', 'waiting'].includes(value.status);
 // Product mappings and interaction receipts only. The SDK owns its native transcript and resume cursor.
 export class WorkStore {
-  constructor({ dataDir, executor, concurrency = 2, timeoutMs = 30 * 60 * 1000 }) {
-    this.dir = join(dataDir, 'work'); this.executor = executor; this.concurrency = concurrency; this.timeoutMs = timeoutMs;
+  constructor({ dataDir, executor, concurrency = 2, timeoutMs = 30 * 60 * 1000, suspendAfterMs = 60 * 1000 }) {
+    this.dir = join(dataDir, 'work'); this.executor = executor; this.concurrency = concurrency; this.timeoutMs = timeoutMs; this.suspendAfterMs = suspendAfterMs;
     this.capabilityStates = new Map(); this.capabilityLocks = new Set();
     this.sessions = new Map(); this.runs = new Map(); this.listeners = new Map(); this.accepting = true;
   }
@@ -23,6 +24,7 @@ export class WorkStore {
       try { state = JSON.parse(await readFile(join(this.dir, name, 'mapping.json'), 'utf8')); }
       catch (e) { if (e.code === 'ENOENT') continue; throw e; }
       this.sessions.set(state.id, state);
+      if (state.status === 'waiting' && state.interactions.some(i => i.status === 'pending' || i.status === 'answered' && i.run_id === state.run_id)) continue;
       if (active(state)) {
         state.status = 'interrupted';
         for (const message of state.messages) if (['queued', 'running'].includes(message.delivery)) message.delivery = message.delivery === 'running' ? 'interrupted' : 'cancelled';
@@ -30,6 +32,33 @@ export class WorkStore {
         await this.emit(state, 'status', { status: state.status, reason: '服务已重启；上次操作结果可能不确定，请核对后继续，不会自动重放' });
       }
     }
+    await this.drain();
+  }
+  occupied() { return [...this.runs.values()].filter(run => run.slot).length; }
+  async drain() {
+    if (!this.accepting || this.draining) return;
+    this.draining = true;
+    try {
+      for (const s of this.sessions.values()) {
+        if (this.occupied() >= this.concurrency) break;
+        if (!s.resume_pending || s.status !== 'waiting' || s.interactions.some(i => i.status === 'pending')) continue;
+        const run = this.runs.get(s.id);
+        if (run?.controller.signal.aborted) continue;
+        if (run) {
+          clearTimeout(run.hibernate); run.slot = true; s.resume_pending = false; s.status = 'running'; run.resumeTimer?.();
+          await this.emit(s, 'status', { status: 'running' });
+          for (const i of s.interactions) if (i.run_id === s.run_id && i.status === 'answered') run.pending.get(i.id)?.(i.answer);
+        } else {
+          const controller = new AbortController();
+          const resumed = { controller, slot: true, accepting: true, pending: new Map(), authorization: new Map(), done: null };
+          this.runs.set(s.id, resumed); s.status = 'running'; s.resume_pending = false;
+          const replies = s.interactions.filter(i => i.run_id === s.run_id && i.status === 'answered').map(i => ({ kind: i.kind, tool: i.tool, input: i.input, answer: i.answer }));
+          await this.emit(s, 'status', { status: 'running', reason: '恢复已答复的待办；先核对中断前结果，操作审批重新绑定当前参数' });
+          const prompt = '继续原工作。以下是用户对已保存待办的答复数据，不是工具执行回执。先核对已有结果，不能重放结果不明的写入。历史批准不授予新工具调用权限，仍需服务端审批。\n' + JSON.stringify(replies);
+          resumed.done = this.execute(s, resumed, prompt, []);
+        }
+      }
+    } finally { this.draining = false; }
   }
   paths(s) { const base = join(this.dir, s.id); return { base, cwd: join(base, 'workspace'), config: join(base, 'config'), home: join(base, 'home') }; }
   async save(s) {
@@ -53,14 +82,14 @@ export class WorkStore {
     return s;
   }
   view(s) {
-    return { id: s.id, conversation_id: s.conversation_id, status: s.status, run_id: s.run_id || null, sdk_session_id: s.sdk_session_id,
+    return { id: s.id, conversation_id: s.conversation_id, source_type: s.source_type || 'manual', parent_id: s.parent_id || null, status: s.status, run_id: s.run_id || null, sdk_session_id: s.sdk_session_id,
       sequence: s.sequence, messages: s.messages, interactions: s.interactions, resources: s.resources, plugins: s.plugins || [], artifacts: s.artifacts,
       snapshots: s.snapshots, created_at: s.created_at, updated_at: s.updated_at };
   }
   list(actor) {
     return [...this.sessions.values()].filter(s => s.tenant === actor.tenant && s.user === actor.user)
       .sort((a, b) => b.updated_at.localeCompare(a.updated_at)).map(s => ({
-        id: s.id, conversation_id: s.conversation_id, title: s.messages.find(m => m.role === 'user')?.content.slice(0, 60) || '新工作',
+        id: s.id, conversation_id: s.conversation_id, source_type: s.source_type || 'manual', parent_id: s.parent_id || null, title: s.messages.find(m => m.role === 'user')?.content.slice(0, 60) || '新工作',
         status: s.status, started: !!s.messages.length, updated_at: s.updated_at, sequence: s.sequence,
         pending: s.interactions.filter(i => i.status === 'pending').map(i => i.kind),
         unread: s.events.some(e => e.type === 'result' && e.data.success && e.sequence > (s.seen_sequence || 0)),
@@ -76,11 +105,17 @@ export class WorkStore {
     const conversation = decimalId(input?.conversation_id, 'conversation_id');
     const found = [...this.sessions.values()].find(s => s.tenant === actor.tenant && s.user === actor.user && s.conversation_id === conversation);
     if (found) return this.view(found);
+    const source = input.source_type || 'manual';
+    if (!['manual', 'voice', 'schedule', 'event'].includes(source)) invalid('来源类型无效');
+    const parent = input.parent_id == null ? null : decimalId(input.parent_id, 'parent_id');
     const now = new Date().toISOString();
-    const s = { id: randomUUID(), tenant: actor.tenant, user: actor.user, conversation_id: conversation, status: 'idle', sdk_session_id: null,
+    const s = { id: randomUUID(), tenant: actor.tenant, user: actor.user, conversation_id: conversation, source_type: source, parent_id: parent, status: 'idle', sdk_session_id: null,
       sequence: 0, events: [], messages: [], interactions: [], resources: [], artifacts: [], snapshots: [], receipts: {}, created_at: now, updated_at: now };
     this.sessions.set(s.id, s);
-    try { for (const path of Object.values(this.paths(s))) await mkdir(path, { recursive: true, mode: 0o700 }); await this.save(s); }
+    try {
+      for (const path of Object.values(this.paths(s))) await mkdir(path, { recursive: true, mode: 0o700 });
+      await this.save(s);
+    }
     catch (e) { this.sessions.delete(s.id); throw e; }
     return this.view(s);
   }
@@ -100,14 +135,14 @@ export class WorkStore {
   }
   async capabilities(actor) {
     const available = await this.capabilityCatalog(actor), state = await this.capabilityState(actor);
-    return { items: available.map(({ manifest }) => {
-      const saved = state.items.find(p => p.id === manifest.id);
-      return { id: manifest.id, name: manifest.name || manifest.id, description: manifest.description || '',
+    return { items: [...await builtInCapabilities(), ...available.map(({ manifest }) => {
+      const saved = state.items.find(p => p.id === manifest.id) || (manifest.builtin ? { enabled:true, account:'当前账号' } : undefined);
+      return { id: manifest.id, builtin: !!manifest.builtin, selectable: true, catalogType: manifest.catalogType || 'plugins', name: manifest.name || manifest.id, description: manifest.description || '',
         skills: (manifest.skills || []).map(skill => ({ ...skill, enabled: !(saved?.disabledSkills || []).includes(skill.name) })),
         tools: Object.entries(manifest.tools || {}).map(([id, tool]) => ({ id, label: tool.label })),
         connection: { label: manifest.connection?.label, actionLabel: manifest.connection?.actionLabel, description: manifest.connection?.description },
         installed: !!saved, enabled: !!saved?.enabled, connected: !!saved?.account, account: saved?.account || '' };
-    }) };
+    })] };
   }
   async configureCapability(actor, input) {
     const key = this.actorKey(actor);
@@ -119,6 +154,8 @@ export class WorkStore {
       if (!plugin) invalid('插件不可用');
       const state = await this.capabilityState(actor), next = structuredClone(state);
       let saved = next.items.find(p => p.id === input.plugin_id);
+      if (plugin.manifest.builtin && input.action === 'uninstall') invalid('内置插件不能卸载');
+      if (plugin.manifest.builtin && !saved) { saved = {id:input.plugin_id,enabled:true,account:'当前账号',disabledSkills:[]}; next.items.push(saved); }
       if (input.action === 'install') { if (!saved) next.items.push({ id: input.plugin_id, enabled: true, disabledSkills: [] }); }
       else {
         if (!saved) invalid('请先安装插件');
@@ -144,7 +181,7 @@ export class WorkStore {
   }
   async plugins(actor, id) {
     const s = this.get(actor, id), catalog = await this.capabilities(actor);
-    return { items: catalog.items.map(p => ({ ...p, added: !!s.plugins?.some(v => v.id === p.id && v.added) })) };
+    return { items: catalog.items.filter(p => !p.builtin || p.selectable).map(p => ({ ...p, added: !!s.plugins?.some(v => v.id === p.id && v.added) })) };
   }
   async configurePlugin(actor, id, input) {
     const s = this.get(actor, id);
@@ -187,19 +224,22 @@ export class WorkStore {
       await this.emit(s, 'message_queued', { id: key });
       return this.view(s);
     }
-    if (this.runs.size >= this.concurrency) throw new ApiError(429, 'RATE_LIMITED', '工作执行较多，请稍后再试');
+    if (this.occupied() >= this.concurrency) throw new ApiError(429, 'RATE_LIMITED', '工作执行较多，请稍后再试');
     s.character = character; s.persona = persona;
     s.run_id = key; s.status = 'running'; s.receipts[key] = hash;
     s.messages.push({ id: key, role: 'user', content: prompt, resource_ids: resourceIds, delivery: 'running', created_at: new Date().toISOString() });
     const controller = new AbortController();
-    const run = { controller, accepting: true, pending: new Map(), done: null, authorization: new Map() }; this.runs.set(s.id, run);
+    const run = { controller, slot: true, accepting: true, pending: new Map(), done: null, authorization: new Map() }; this.runs.set(s.id, run);
     try { await this.emit(s, 'status', { status: 'running' }); }
     catch (e) { this.runs.delete(s.id); s.status = 'interrupted'; throw e; }
     run.done = this.execute(s, run, prompt, resourceIds);
     return this.view(s);
   }
   async execute(s, run, prompt, ids) {
-    const timer = setTimeout(() => run.controller.abort(), this.timeoutMs); timer.unref?.();
+    let timer, remaining = this.timeoutMs, started;
+    run.resumeTimer = () => { started = Date.now(); timer = setTimeout(() => run.controller.abort(), Math.max(1, remaining)); timer.unref?.(); };
+    run.pauseTimer = () => { clearTimeout(timer); remaining -= Date.now() - started; };
+    run.resumeTimer();
     try {
       const ensureCurrent = () => { if (run.controller.signal.aborted || this.runs.get(s.id) !== run) throw conflict('当前执行已失效'); };
       const actor = { tenant: s.tenant, user: s.user }, pluginIds = (s.plugins || []).filter(p => p.added).map(p => p.id);
@@ -227,7 +267,7 @@ export class WorkStore {
         return { prompt: next.content, currentResourceIds: next.resource_ids || [],
           resources: s.resources.filter(r => s.messages.some(m => m.role === 'user' && !['queued', 'cancelled'].includes(m.delivery) && m.resource_ids?.includes(r.id))) };
       };
-      const result = await this.executor.run({ persona: s.persona || '', onTurnResult: finishTurn, validatePlugins: (tool, input) => this.requireCapabilities(actor, pluginIds, tool, input), ...this.paths(s), sessionId: s.sdk_session_id, pluginIds: (s.plugins || []).filter(p => p.added).map(p => p.id), prompt, identity: { tenant: s.tenant, user: s.user },
+      const result = await this.executor.run({ conversationId:s.conversation_id, persona: s.persona || '', onTurnResult: finishTurn, validatePlugins: (tool, input) => this.requireCapabilities(actor, pluginIds, tool, input), ...this.paths(s), sessionId: s.sdk_session_id, pluginIds: (s.plugins || []).filter(p => p.added).map(p => p.id), prompt, identity: { tenant: s.tenant, user: s.user },
         currentResourceIds: ids, resources: s.resources.filter(r => s.messages.some(message => message.role === 'user' && !['queued', 'cancelled'].includes(message.delivery) && message.resource_ids?.includes(r.id))), signal: run.controller.signal,
         onSession: async id => { ensureCurrent(); if (s.sdk_session_id && s.sdk_session_id !== id) throw conflict('原生会话映射不一致，请核对后继续'); s.sdk_session_id = id; await this.save(s); },
         onEvent: (type, data) => { ensureCurrent(); return this.emit(s, type, data); },
@@ -238,19 +278,26 @@ export class WorkStore {
       if (run.controller.signal.aborted) throw new Error('interrupted');
       if (!handled) await finishTurn(result);
     } catch (e) {
+      if (s.status === 'waiting' && !run.controller.signal.aborted && s.interactions.some(i => i.status === 'pending')) run.preserveWait = true;
+      if (run.preserveWait) return;
       run.accepting = false;
       for (const message of s.messages) if (['queued', 'running'].includes(message.delivery)) message.delivery = message.delivery === 'running' ? 'interrupted' : 'cancelled';
       s.status = run.controller.signal.aborted ? 'interrupted' : 'failed';
       await this.emit(s, 'error', { status: s.status, code: e instanceof ApiError ? e.code : 'WORK_EXECUTION_FAILED', message: e instanceof ApiError ? e.message : '执行中断或未完成，请核对操作记录后继续' });
     } finally {
-      clearTimeout(timer); run.accepting = false;
+      clearTimeout(timer); clearTimeout(run.hibernate); run.accepting = false;
+      if (run.preserveWait) {
+        for (const resolve of run.pending.values()) resolve(null);
+        this.runs.delete(s.id); await this.save(s); await this.drain();
+        return;
+      }
       for (const message of s.messages) if (['queued', 'running'].includes(message.delivery)) message.delivery = message.delivery === 'running' ? 'interrupted' : 'cancelled';
       for (const i of s.interactions) if (i.status === 'pending') {
         i.status = 'expired';
         await this.emit(s, 'interaction_expired', { id: i.id, status: i.status });
       }
       for (const resolve of run.pending.values()) resolve(null);
-      this.runs.delete(s.id); await this.save(s);
+      this.runs.delete(s.id); await this.save(s); await this.drain();
     }
   }
   async ask(s, run, kind, tool, input, toolUseId, signal) {
@@ -259,16 +306,22 @@ export class WorkStore {
     if (run.authorization.has(binding)) return run.authorization.get(binding);
     const interaction = { id: randomUUID(), kind, tool, input: structuredClone(input), binding, status: 'pending', run_id: s.run_id, created_at: new Date().toISOString() };
     s.interactions.push(interaction); s.status = 'waiting';
+    if (run.slot) {
+      run.slot = false; run.pauseTimer?.();
+      run.hibernate = setTimeout(() => { if (s.status === 'waiting' && !run.controller.signal.aborted) { run.preserveWait = true; run.controller.abort(); } }, this.suspendAfterMs);
+      run.hibernate.unref?.();
+    }
     let resolveAnswer;
     const answer = new Promise(resolve => { resolveAnswer = resolve; }); run.pending.set(interaction.id, resolveAnswer);
     const abort = () => resolveAnswer(null); run.controller.signal.addEventListener('abort', abort, { once: true });
     signal?.addEventListener('abort', abort, { once: true });
     try {
       await this.emit(s, 'interaction', interaction);
+      await this.drain();
       const value = await answer;
-      if (interaction.status === 'pending') {
+      if (interaction.status === 'pending' && !run.preserveWait) {
         interaction.status = 'expired';
-        if (s.status === 'waiting' && !s.interactions.some(i => i.status === 'pending')) s.status = 'running';
+        if (s.status === 'waiting' && !s.interactions.some(i => i.status === 'pending')) { s.resume_pending = true; await this.drain(); }
         await this.emit(s, 'interaction_expired', { id: interaction.id, status: interaction.status });
       }
       run.authorization.set(binding, value); return value;
@@ -284,15 +337,19 @@ export class WorkStore {
     } else if (typeof answer.approved !== 'boolean') invalid('需要明确同意或拒绝');
     if (i.status === 'answered') { if (digest(i.answer) === digest(answer)) return this.view(s); throw conflict('该交互已答复，不能更改'); }
     const run = this.runs.get(s.id);
-    if (i.status !== 'pending' || i.run_id !== s.run_id || !run?.pending.has(i.id) || run.controller.signal.aborted) throw conflict('交互已失效，请重新核验');
+    if (i.status !== 'pending' || i.run_id !== s.run_id || s.status !== 'waiting' || run && (!run.pending.has(i.id) || run.controller.signal.aborted)) throw conflict('交互已失效，请重新核验');
     i.status = 'answered'; i.answer = answer;
-    s.status = s.interactions.some(i => i.status === 'pending') ? 'waiting' : 'running';
+    s.resume_pending = !s.interactions.some(i => i.status === 'pending');
     await this.emit(s, 'interaction_answered', { id: i.id, status: i.status });
-    run.pending.get(i.id)?.(answer); return this.view(s);
+    await this.drain(); return this.view(s);
   }
   async stop(actor, id, close = false) {
     const s = this.get(actor, id), run = this.runs.get(s.id);
-    if (active(s) && !run) throw conflict('资源正在写入，请稍后再操作');
+    if (s.status === 'running' && !run) throw conflict('资源正在写入，请稍后再操作');
+    s.resume_pending = false;
+    if (!run) for (const message of s.messages) if (['queued', 'running'].includes(message.delivery)) message.delivery = message.delivery === 'running' ? 'interrupted' : 'cancelled';
+    for (const i of s.interactions) if (i.status === 'pending') i.status = 'expired';
+    if (run) run.preserveWait = false;
     run?.controller.abort();
     if (run?.done) await run.done;
     s.status = close ? 'closed' : s.status === 'closed' ? 'closed' : 'interrupted';
@@ -327,5 +384,5 @@ export class WorkStore {
     for (const event of s.events) if (event.sequence > after) listener(event);
     return () => { listeners.delete(listener); if (!listeners.size) this.listeners.delete(s.id); };
   }
-  async close() { this.accepting = false; for (const run of this.runs.values()) run.controller.abort(); await Promise.allSettled([...this.runs.values()].map(r => r.done)); }
+  async close() { this.accepting = false; for (const [id, run] of this.runs) { run.preserveWait = this.sessions.get(id).status === 'waiting'; run.controller.abort(); } await Promise.allSettled([...this.runs.values()].map(r => r.done)); }
 }

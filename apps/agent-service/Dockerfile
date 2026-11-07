@@ -5,11 +5,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends bubblewrap soca
     && rm -rf /var/lib/apt/lists/*
 ENV PATH="/opt/work-python/bin:${PATH}"
 WORKDIR /app
-COPY package*.json ./
+COPY apps/agent-service/package*.json ./
 RUN npm ci --omit=dev && mkdir /data && chown node:node /data
-COPY --chown=node:node src ./src
-COPY --chown=node:node resources ./resources
-COPY --chown=node:node plugins ./plugins
+COPY --chown=node:node apps/agent-service/src ./src
+COPY --chown=node:node plugins/workspace-files/skills ./resources/work-skills
+COPY --chown=node:node plugins/callphone ./plugins/callphone
+COPY --chown=node:node plugins/catalog.json ./plugins/catalog.json
+COPY --chown=node:node apps/agent-service/.plugin-bundle/ ./plugins/
+RUN node --input-type=module -e 'import {readFileSync,existsSync} from "node:fs"; import {execFileSync} from "node:child_process"; for(const p of JSON.parse(readFileSync("plugins/runtime-catalog.json","utf8"))){const cwd="plugins/"+p.directory;if(existsSync(cwd+"/package-lock.json"))execFileSync("npm",["ci","--omit=dev","--ignore-scripts"],{cwd,stdio:"inherit"});}'
+ENV WORK_BUILTIN_ROOT=/app/plugins
+ENV WORK_BUILTIN_CATALOG=/app/plugins/catalog.json
 USER node
 ENV AGENT_BIND_HOST=0.0.0.0 AGENT_PORT=48082 AGENT_DATA_DIR=/data
 EXPOSE 48082

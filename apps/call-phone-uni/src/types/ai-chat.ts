@@ -1,4 +1,5 @@
 /** Mobile AI contract v1. Wire fields follow the mobile API's snake_case convention. */
+export type ConversationSource = 'manual' | 'voice' | 'schedule' | 'event';
 export type ChatStatus = 'pending' | 'streaming' | 'complete' | 'stop' | 'error';
 export interface ChatMessage {
   id: string;
@@ -12,6 +13,8 @@ export interface ChatMessage {
   local?: boolean;
 }
 export interface ChatConversation {
+  source_type?: ConversationSource;
+  parent_id?: string | null;
   id: string;
   title: string;
   updated_at: string;
@@ -44,11 +47,11 @@ export interface ChatTransport {
 }
 
 export interface ChatPage<T> { items: T[]; next_cursor: string | null; }
-export type ConversationSummary = Pick<ChatConversation, 'id' | 'title' | 'updated_at'>;
+export type ConversationSummary = Pick<ChatConversation, 'id' | 'title' | 'updated_at' | 'source_type' | 'parent_id'>;
 export interface ChatRequestState { request_id: string; conversation_id: string; status: 'running' | 'complete' | 'cancelled' | 'failed'; assistant_message_id: string; }
 export interface ChatRepository {
   create(key: string): Promise<ConversationSummary>;
-  list(cursor?: string): Promise<ChatPage<ConversationSummary>>;
+  list(cursor?: string, source?: ConversationSource): Promise<ChatPage<ConversationSummary>>;
   messages(id: string, cursor?: string): Promise<ChatPage<ChatMessage> & { active_request_id: string | null; busy?: boolean }>;
   remove(id: string): Promise<{ deleted: boolean }>;
   status(id: string): Promise<ChatRequestState>;

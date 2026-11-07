@@ -1,0 +1,19 @@
+{
+  "id": "event_trigger",
+  "name": "事件触发",
+  "summary": "通知触发工作",
+  "fields": [
+    {
+      "key": "title",
+      "label": "标题",
+      "type": "text"
+    },
+    {
+      "key": "prompt",
+      "label": "工作说明",
+      "type": "textarea"
+    }
+  ],
+  "endpoint": true,
+  "entry": "ui/index.vue"
+}

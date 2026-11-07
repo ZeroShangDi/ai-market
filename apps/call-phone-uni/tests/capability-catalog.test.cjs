@@ -7,7 +7,7 @@ const plugin={id:'example',name:'示例',description:'描述',installed:true,ena
 test('all capability kinds share truthful parent installation and connection states',()=>{
  const entries=moduleExports.capabilityEntries([plugin]);assert.equal(entries.length,4);
  assert.equal(new Set(entries.map(e=>e.key)).size,4);
- for(const e of entries){assert.equal(e.installed,true);assert.equal(e.enabled,true);assert.equal(e.hasConnection,true);assert.ok(e.name);assert.ok(e.description);}
+ for(const e of entries){assert.equal(e.installed,true);assert.equal(e.enabled,true);assert.equal(e.hasConnection,e.type!=='skills');assert.ok(e.name);assert.ok(e.description);}
  const absent=moduleExports.capabilityEntries([{...plugin,installed:false}]);assert.ok(absent.every(e=>!e.installed&&!e.enabled));
  const disabled=moduleExports.capabilityEntries([{...plugin,enabled:false}]);assert.ok(disabled.every(e=>!e.enabled));
 });
@@ -20,4 +20,22 @@ test('bundled skills, MCP and connections remain in plugin details rather than d
  const entries=moduleExports.capabilityEntries([plugin]);
  assert.equal(entries.filter(e=>!e.parentId).length,1);
  assert.equal(entries.filter(e=>e.parentId===plugin.id).length,3);
+});
+
+test('standalone skills own one catalog entry and never inherit account or connection UI',()=>{
+ const entries=moduleExports.capabilityEntries([{...plugin,catalogType:'skills'}]);
+ assert.equal(entries.length,1);assert.equal(entries[0].type,'skills');assert.equal(entries[0].parentId,undefined);assert.equal(entries[0].hasConnection,false);
+ assert.equal(moduleExports.capabilityTags(entries[0]).length,2);
+ assert.ok(moduleExports.capabilityTags(entries[0]).every(t=>!t.text.includes('连接')));
+});
+test('status colors distinguish disabled, ready and enabled without connection',()=>{
+ const entries=moduleExports.capabilityEntries([plugin]);
+ assert.equal(moduleExports.capabilityTags(entries[0]).find(t=>t.text==='待连接').tone,'pending');
+ const connection=entries.find(e=>e.type==='connections');
+ assert.equal(moduleExports.capabilityTags(connection).length,1);
+ assert.equal(moduleExports.capabilityTags(connection)[0].tone,'off');
+ const connected=moduleExports.capabilityEntries([{...plugin,connected:true}])[0];
+ assert.ok(moduleExports.capabilityTags(connected).every(t=>t.tone==='on'));
+ const disabled=moduleExports.capabilityEntries([{...plugin,enabled:false}])[0];
+ assert.equal(moduleExports.capabilityTags(disabled).find(t=>t.text==='未启用').tone,'off');
 });

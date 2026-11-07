@@ -25,6 +25,10 @@
     "notification": { "source": "ri:notification-3-line", "label": "通知" },
     "close": { "source": "ri:close-line", "label": "关闭" },
     "add": { "source": "ri:add-line", "label": "添加" },
+    "update": { "source": "ri:upload-2-line", "label": "更新" },
+    "arrow-down": { "source": "ri:download-2-line", "label": "下载" },
+    "shield": { "source": "ri:shield-check-line", "label": "校验" },
+    "info": { "source": "ri:information-line", "label": "提示" },
     "check": { "source": "ri:check-line", "label": "完成" }
   }
 }

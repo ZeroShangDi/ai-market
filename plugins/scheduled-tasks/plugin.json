@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "id": "scheduled-tasks",
+  "version": "0.1.0",
+  "name": "定时任务",
+  "description": "按指定时间发送 HTTP 通知",
+  "license": "UNLICENSED",
+  "skills": [
+    "skills/scheduled-tasks"
+  ],
+  "mcpServers": {},
+  "dependencies": {
+    "node": ">=22",
+    "mcp-cron": {
+      "revision": "0251d61a1fe1175ce96df46d4257499018f8f9e0",
+      "license": "AGPL-3.0-only",
+      "build": "Dockerfile",
+      "commandEnv": "MCP_CRON_COMMAND"
+    }
+  },
+  "hostAdapters": {
+    "work": "work-plugin.json"
+  }
+}

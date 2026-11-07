@@ -1,5 +1,5 @@
 import { computed, reactive } from 'vue';
-import type { ChatConversation, ChatMessage, ChatRepository, ChatStreamRequest, ChatTransport } from '@/types/ai-chat';
+import type { ConversationSource, ChatConversation, ChatMessage, ChatRepository, ChatStreamRequest, ChatTransport } from '@/types/ai-chat';
 import { previewChatTransport, previewId, previewRequestId } from './ai-chat-preview';
 import { remoteChatRepository, remoteChatTransport } from './ai-chat-remote';
 import { mockEnabled } from '@/config';
@@ -9,7 +9,7 @@ import { onSessionChange, onDeviceChange } from '@/api/http';
 export function createChatController(transport: ChatTransport = previewChatTransport, repository?: ChatRepository) {
   const state = reactive({ conversations: [] as ChatConversation[], activeId: '', generating: false,
     recovering: false, loading: false, error: '', initialized: false, visible: true, webSearch: true, activity: '',
-    nextCursor: null as string | null, messageCursor: null as string | null });
+    sourceType: 'manual' as ConversationSource, nextCursor: null as string | null, messageCursor: null as string | null });
   const active = computed(() => state.conversations.find(item => item.id === state.activeId));
   let running: { cancel(): void } | undefined, activeRequest = '';
   let generation = 0, epoch = 0, navigation = 0;
@@ -27,12 +27,12 @@ export function createChatController(transport: ChatTransport = previewChatTrans
   function reset() {
     stop(); ++epoch; ++navigation;
     state.conversations = []; state.activeId = ''; state.loading = false; state.error = '';
-    state.initialized = false; state.nextCursor = null; state.messageCursor = null;
+    state.initialized = false; state.sourceType = 'manual'; state.nextCursor = null; state.messageCursor = null;
   }
   async function newConversation(force = false) {
     if (state.loading) return false;
     stop(); state.error = '';
-    const empty = !force && state.conversations.find(item => !item.messages.length && !item.draft);
+    const empty = !force && state.conversations.find(item => (item.source_type || 'manual') === 'manual' && !item.messages.length && !item.draft);
     if (empty) { state.activeId = empty.id; state.messageCursor = null; return true; }
     const identity = epoch, operation = ++navigation;
     state.loading = true;
@@ -91,7 +91,7 @@ export function createChatController(transport: ChatTransport = previewChatTrans
     const identity = epoch, operation = ++navigation;
     state.loading = true; state.error = '';
     try {
-      const result = await repository.list();
+      const result = await repository.list(undefined, state.sourceType);
       if (identity !== epoch || operation !== navigation) return;
       const old = state.conversations;
       state.conversations = result.items.map(item => ({ ...item, messages: old.find(c => c.id === item.id)?.messages || [], draft: old.find(c => c.id === item.id)?.draft || '' }));
@@ -171,11 +171,28 @@ export function createChatController(transport: ChatTransport = previewChatTrans
       if (id === state.activeId) { state.activeId = ''; if (state.conversations.length) await select(state.conversations[0].id); else await newConversation(); }
     } catch (reason) { if (identity === epoch) state.error = readable(reason); }
   }
+  async function filterSource(source: ConversationSource) {
+    if (state.loading) return;
+    if (!repository) { state.sourceType = source; return; }
+    const identity = epoch; state.loading = true;
+    try {
+      const result = await repository.list(undefined, source);
+      if (identity !== epoch) return;
+      state.sourceType = source;
+      for (const item of result.items) {
+        const existing = state.conversations.find(c => c.id === item.id);
+        if (existing) Object.assign(existing, item);
+        else state.conversations.push({ ...item, messages: [], draft: '' });
+      }
+      state.nextCursor = result.next_cursor;
+    } catch (reason) { if (identity === epoch) state.error = readable(reason); }
+    finally { if (identity === epoch) state.loading = false; }
+  }
   async function loadMoreConversations() {
     if (!repository || !state.nextCursor || state.loading) return;
     const identity = epoch; state.loading = true;
     try {
-      const result = await repository.list(state.nextCursor);
+      const result = await repository.list(state.nextCursor, state.sourceType);
       if (identity !== epoch) return;
       state.conversations.push(...result.items.filter(item => !state.conversations.some(c => c.id === item.id)).map(item => ({ ...item, messages: [], draft: '' })));
       state.nextCursor = result.next_cursor;
@@ -195,7 +212,7 @@ export function createChatController(transport: ChatTransport = previewChatTrans
   }
   function suspend() { state.visible = false; stop(); }
   async function resume() { state.visible = true; await initialize(); }
-  return { state, active, newConversation, select, send, stop, retry, remove, reset, initialize, resume, suspend, loadMoreConversations, loadOlderMessages };
+  return { state, active, newConversation, select, send, stop, retry, remove, reset, initialize, resume, suspend, filterSource, loadMoreConversations, loadOlderMessages };
 }
 export const aiChat = mockEnabled ? createChatController() : createChatController(remoteChatTransport, remoteChatRepository);
 onSessionChange(() => aiChat.reset());

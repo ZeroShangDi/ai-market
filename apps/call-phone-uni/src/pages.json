@@ -12,7 +12,12 @@
         "navigationStyle": "custom"
       }
     },
-    { "path": "pages/capabilities/index", "style": { "navigationStyle": "custom" } },
+    {
+      "path": "pages/capabilities/index",
+      "style": {
+        "navigationStyle": "custom"
+      }
+    },
     {
       "path": "pages/apps/manage",
       "style": {
@@ -23,7 +28,10 @@
       "path": "pages/ai-chat/index",
       "style": {
         "navigationStyle": "custom",
-        "app-plus": { "softinputMode": "adjustResize", "bounce": "none" }
+        "app-plus": {
+          "softinputMode": "adjustResize",
+          "bounce": "none"
+        }
       }
     },
     {
@@ -46,6 +54,34 @@
     },
     {
       "path": "pages/login/index",
+      "style": {
+        "navigationStyle": "custom"
+      }
+    },
+    {
+      "path": "pages/app-update/index",
+      "style": {
+        "navigationStyle": "custom",
+        "disableScroll": true,
+        "backgroundColor": "transparent",
+        "app-plus": {
+          "background": "transparent",
+          "titleNView": false,
+          "popGesture": "none",
+          "scrollIndicator": "none",
+          "animationType": "fade-in",
+          "animationDuration": 180
+        }
+      }
+    },
+    {
+      "path": "pages/plugin-generated/scheduled_tasks/index",
+      "style": {
+        "navigationStyle": "custom"
+      }
+    },
+    {
+      "path": "pages/plugin-generated/event_trigger/index",
       "style": {
         "navigationStyle": "custom"
       }

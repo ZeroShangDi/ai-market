@@ -22,17 +22,23 @@ uv run --env-file .env.local ai-market-voice
 
 服务默认只绑定回环地址。配置独立 HTTPS 域名把 `/` 代理到 48083，并允许设备和服务之间的 WebRTC UDP 媒体流。当前是直接 WebRTC，适合局域网或可互通的专网；尚未配置 STUN/TURN，跨公网 NAT 不能视为已支持。Android WebView 的 WebRTC 负责设备回声消除；外放、蓝牙及不同机型的实际效果需真机验证。
 
-Java 网关设置 `VOICE_PUBLIC_URL`（独立 HTTPS 源，根路径）和相同的 `VOICE_TICKET_SECRET`。复用现有 AI 权限及设备验证签发 60 秒、一次性票据；票据仅在内存和首次页面 fragment 中短暂存在，页面立即清除地址 fragment，不把业务登录令牌发给语音服务。单进程运行，最多四会话，每会话最长 30 分钟；多进程部署前需共享票据重放与容量控制。音频和正文不落盘；关闭第三方管道的正文调试日志。
+Java 网关设置 `VOICE_PUBLIC_URL`（独立 HTTPS 源，根路径）和相同的 `VOICE_TICKET_SECRET`。复用现有 AI 权限及设备验证签发 60 秒、一次性票据；票据仅在内存和首次页面 fragment 中短暂存在，页面立即清除地址 fragment，不把业务登录令牌发给语音服务。单进程运行，最多四会话，不设置会话总时长或空闲退出时限；多进程部署前需共享票据重放与容量控制。音频不落盘；配置 `AI_SERVICE_URL` 和 `AI_INTERNAL_TOKEN` 后，支持宿主授权桥的 App 将双方转写保存到现有加密聊天会话；关闭第三方管道的正文调试日志。
 
 Mac 本机已配置并通过真实模型与 WebRTC 两轮/打断测试；手机专网 HTTPS 接入已部署，并通过合成配对设备验证票据、证书和媒体连接，实际 Android 使用尚未真机验收。`/health` 仅证明进程可用，不代表模型已经就绪。
 
 ## 模型接入
 
-- 快速模型：显式配置 OpenAI-compatible `/chat/completions` 地址、模型与密钥；支持工具调用才能转交 Agent。
+- 快速模型：DeepSeek 官方接口在语音适配层显式关闭思考模式，避免工具续答缺失 `reasoning_content` 返回 400；其他供应商保持默认参数。显式配置 OpenAI-compatible `/chat/completions` 地址、模型与密钥；支持工具调用才能转交 Agent。
 - Mac ASR：`qwen-mlx-http` 对接独立 Qwen3-ASR MLX worker；接收内存中的 16kHz 单声道 WAV，按句识别，不保存音频。设置 `QWEN_ASR_*` 后执行 `uv run --env-file .env.local ai-market-qwen-asr`。
 - ASR：`openai-http` 使用 `/audio/transcriptions`，由 VAD 按句送入识别。`openai-realtime` 使用兼容 Realtime transcription 的 WebSocket 服务。**尚未实现 Qwen3-ASR 原生流式协议适配，不应把任意 Qwen 服务当作上述协议直接配置。** 第一版须选定真实 ASR 部署后联调。
 - TTS：OpenAI-compatible `/audio/speech`，要求返回 `audio/pcm`、`audio/raw` 或 `application/octet-stream`，24kHz、单声道、16-bit little-endian PCM。音色与克隆在服务端配置。输出按句启动、句内分块，尚非逐 token 输入模型。
 - Qwen 本机 worker：`uv sync --extra mlx`，设置 `QWEN_TTS_*` 后执行 `uv run --env-file .env.local ai-market-qwen-tts`。默认 `QWEN_TTS_MODE=preset` 配合 CustomVoice 模型及 `QWEN_TTS_SPEAKER=Vivian`，不读取参考音频；只有显式 `clone` 模式才使用参考音频与转写。仅绑定回环，token 对应 `VOICE_TTS_API_KEY`。Apple Silicon MLX 生成在线程内串行运行；断开后在下个生成块协作停止，不强杀 GPU 调用。单次合成按句切为最多 120 字，限制生成长度；每个 MLX worker 默认最多缓存 128MiB 空闲显存，并在每轮后清理缓存。分块 0.3 秒只是可调起点，不是延迟承诺；单样本性能见 [Mac 验证记录](../../docs/reviews/2026-10-17-pet-voice-mac.md)，仍需更多实测。
+
+## 会话记录与失败恢复
+
+`AI_SERVICE_URL` 指向现有 AI 服务，`AI_INTERNAL_TOKEN` 与该服务内部令牌一致。Compose 仅将 48081 映射到宿主回环地址，供 Mac 语音写入。由手机原有授权桥创建一条会话，每次语音连接一条，首个用户转写形成标题；文字追加使用稳定 UUID 重试去重，不触发新模型或 Work。助手记录为已排入播放的句子，不是逐字收听证明，打断时可能只听到其中一部分。存储故障显示提示但不关闭麦克风；断线前有限等待写入，无法持久化的尾部文字不会伪称保存成功。不配置存储或无宿主桥的浏览器仍不保存历史。历史检索与跨会话记忆尚未启用。
+
+识别/合成暂时失败可以继续对话；模型忙碌仅在未接收音频时有限重试，不重播已播放片段。合成有耗时和音频时长上限，防止异常生成无限卡住。取消语音总时长和空闲退出不改变用户主动关闭、设备撤销、网络断开与应用前后台的现有行为。
 
 ## 检查
 
@@ -63,7 +69,7 @@ VOICE_TEST_NETWORK=1 PYTHONPATH=. uv run python -m unittest discover -s tests -v
 
 ## 手机气泡
 
-最终用户转写经独立事件返回；回复在 TTS 开始播报该句时返回句子事件，Android 语音窗口通过受限桥接交给宿主，再由宿主调用现有宠物文字接口。气泡区分「你：」「她：」，超过 80 字符显示最近内容；关闭会话即清空，不写日志或历史。语音模块仍不直接依赖宠物实现。
+最终用户转写经独立事件返回；回复在 TTS 开始播报该句时返回句子事件，Android 语音窗口通过受限桥接交给宿主，再由宿主调用现有宠物文字接口。气泡区分「你：」「她：」，超过 80 字符显示最近内容；关闭会话即清空气泡，不写诊断日志；配置聊天存储后文字保存在会话历史。语音模块仍不直接依赖宠物实现。
 
 `smoke-mobile-session.py` 用合成设备检查已部署网关票据、HTTPS 证书、实际 WebRTC 和重放拒绝，结束撤销合成设备；`stability-tts.py` 连续合成并用 ASR 回测合成文本，只是生成漂移检查，不能替代用户听感验收。
 

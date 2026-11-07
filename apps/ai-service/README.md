@@ -54,7 +54,7 @@ python3 apps/ai-service/scripts/run-local.py
 docker compose -f apps/ruoyi-vue-pro/compose.local.yml -f apps/ai-service/compose.ai.yml --profile ai up -d --build ai-service server
 ```
 
-AI 端口只在 Compose 内部网络暴露，手机使用原客户后端地址。首次加入转发入口需要构建客户后端；后续只改 AI 服务时，只发布该服务：
+AI 端口供 Compose 内部服务访问，并仅映射到宿主回环地址供本机语音写入转写；手机使用原客户后端地址。首次加入转发入口需要构建客户后端；后续只改 AI 服务时，只发布该服务：
 
 ```sh
 docker compose -f apps/ruoyi-vue-pro/compose.local.yml -f apps/ai-service/compose.ai.yml --profile ai up -d --build ai-service

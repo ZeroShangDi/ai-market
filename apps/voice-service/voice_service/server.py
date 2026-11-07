@@ -13,6 +13,7 @@ from pipecat.transports.smallwebrtc.connection import SmallWebRTCConnection
 from .providers import required
 from .tickets import verify_ticket
 from .pipeline import build_pipeline
+from .plugin_host import load_packages
 from pipecat.workers.runner import WorkerRunner
 
 ROOT = Path(__file__).parent / "web"
@@ -24,6 +25,7 @@ def create_app():
         raise RuntimeError("VOICE_TICKET_SECRET must be at least 32 characters")
     # Dependency debug logs can contain transcriptions, SDP and prompts. Keep them out of logs.
     logger.remove()
+    load_packages()  # Freeze plugin code and schema together before accepting calls.
     used, sessions = {}, {}
     lock = asyncio.Lock()
 
@@ -98,18 +100,22 @@ def create_app():
 
             async def run():
                 try:
-                    async with asyncio.timeout(1800):
-                        runner = WorkerRunner(handle_sigint=False)
-                        await runner.add_workers(worker)
-                        await runner.run()
+                    runner = WorkerRunner(handle_sigint=False)
+                    await runner.add_workers(worker)
+                    await runner.run()
                 except asyncio.CancelledError:
                     raise
                 except Exception:
                     connection.send_app_message({"type": "voice", "state": "error", "message": "语音连接已结束，请重新打开"})
                 finally:
-                    await worker.cancel()
-                    await connection.disconnect()
-                    sessions.pop(connection.pc_id, None)
+                    try:
+                        await worker.voice_history.close()
+                        await worker.cancel()
+                    finally:
+                        try:
+                            await connection.disconnect()
+                        finally:
+                            sessions.pop(connection.pc_id, None)
 
             task = asyncio.create_task(run())
             sessions[connection.pc_id] = (connection, task)

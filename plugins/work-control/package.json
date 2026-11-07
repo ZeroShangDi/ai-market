@@ -1,0 +1,10 @@
+{
+  "name": "@ai-market/work-control",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "bin": {"ai-market-work": "server.js"},
+  "scripts": {"test": "node --test test/*.test.js"},
+  "engines": {"node": ">=22"},
+  "dependencies": {"@modelcontextprotocol/sdk": "1.32.1", "zod": "4.1.12"}
+}

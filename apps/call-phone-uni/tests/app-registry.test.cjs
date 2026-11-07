@@ -14,6 +14,7 @@ function harness({ unfinished = false, session = true } = {}) {
     { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 } },
   ).outputText;
   const mocks = {
+    '../plugin-pages/catalog.json': { default: require('../src/modules/plugin-pages/catalog.json') },
     '@/services/calls': { hasUnfinishedCall: () => unfinished },
     '@/services/session': { ensureSession: () => { sessionChecks++; return session; } },
     '@/ui/format': { toast: message => messages.push(message) },

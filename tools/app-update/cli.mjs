@@ -26,6 +26,7 @@ try {
       apk: required('apk'), baselineApk: required('baseline-apk'), baseUrl: required('base-url'),
       keyFile: options.key || '.local/app-update/release-private.pem', outDir: options.out || '.local/app-update/release',
       changelog: options.changelog || 'CHANGELOG.md', channel: options.channel || 'stable',
+      notesFile: options.notes,
       allowLan: options.lan === 'true',
     });
     console.log(`已准备 ${result.release.versionName}（${result.release.versionCode}）的静态发布材料。`);

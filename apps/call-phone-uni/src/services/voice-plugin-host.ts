@@ -13,15 +13,19 @@ export async function handleVoicePluginRequest(value: any, current: () => boolea
   const inspection = value.method === 'GET' && typeof value.path === 'string'
     && value.path.startsWith('/api/v1/mobile/work/sessions/')
     && uuid.test(value.path.slice('/api/v1/mobile/work/sessions/'.length)) && value.body == null;
-  if (!allocation && !inspection) {
+  const listing = value.method === 'GET' && value.path === '/api/v1/mobile/work/sessions' && value.body == null;
+  const chatInspection = value.method === 'GET' && typeof value.path === 'string'
+    && (value.path === '/api/v1/mobile/ai/conversations' || /^\/api\/v1\/mobile\/ai\/conversations\/[1-9][0-9]{0,18}\/messages\?limit=1$/.test(value.path))
+    && value.body == null;
+  if (!allocation && !inspection && !chatInspection && !listing) {
     return { ...response, error: 'HOST_OPERATION_NOT_ALLOWED' };
   }
   const identity = getSessionVersion();
   if (!current()) return;
   try {
-    const data = await request<{ id: string }>(allocation ? 'POST' : 'GET', value.path, allocation ? {} : undefined, allocation ? value.request_id : undefined);
+    const data = await request<{ id: string; items?: Record<string, unknown>[] }>(allocation ? 'POST' : 'GET', value.path, allocation ? {} : undefined, allocation ? value.request_id : undefined);
     if (!current() || identity !== getSessionVersion()) return;
-    return { ...response, data: { id: data.id } };
+    return { ...response, data: listing ? { items: (data.items || []).map(({ id, conversation_id, title, status, started, updated_at, sequence, pending, unread }) => ({ id, conversation_id, title, status, started, updated_at, sequence, pending, unread })) } : chatInspection ? { authorized: true } : { id: data.id } };
   } catch {
     if (!current() || identity !== getSessionVersion()) return;
     return { ...response, error: 'HOST_REQUEST_UNCONFIRMED' };

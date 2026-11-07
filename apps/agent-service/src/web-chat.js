@@ -68,7 +68,7 @@ export function sourceFooter(sources, answer = '') {
 
 export function createWebChatExecutor({ provider = process.env.AGENT_PROVIDER || 'anthropic', apiKey = process.env.ANTHROPIC_API_KEY,
   deepseekApiKey = process.env.DEEPSEEK_API_KEY, model = process.env.AGENT_MODEL, loadSdk = () => import('@anthropic-ai/claude-agent-sdk') } = {}) {
-  return { async *stream(turns, { signal } = {}) {
+  return { async *stream(turns, { signal, includeSources = false } = {}) {
     const selected = providerConfig({ provider, apiKey, deepseekApiKey, model });
     const sdk = await loadSdk();
     const cwd = await mkdtemp(join(tmpdir(), 'callphone-web-chat-'));
@@ -124,7 +124,10 @@ export function createWebChatExecutor({ provider = process.env.AGENT_PROVIDER ||
         }
       }
       if (!success || !length || searched && !sources.size) throw new ApiError(502, 'WEB_SEARCH_UNAVAILABLE', '联网搜索未返回可核对的来源，请重试');
-      if (sources.size) yield { type: 'chunk', text: sourceFooter(sources,answer) };
+      if (sources.size) {
+        if (includeSources) yield { type: 'sources', items: [...sources.values()].slice(0, 8) };
+        yield { type: 'chunk', text: sourceFooter(sources,answer) };
+      }
     } finally {
       signal?.removeEventListener('abort', abort); abortController.abort(); query?.close?.();
       await rm(cwd, { recursive: true, force: true });

@@ -1,0 +1,9 @@
+# Build Dockerfile in this directory as ai-market-scheduled-tasks-dependency first.
+ARG SCHEDULER_IMAGE=ai-market-scheduled-tasks-dependency:0251d61a
+ARG HOST_IMAGE=ai-market-agent-automation:1.0.25
+FROM ${SCHEDULER_IMAGE} AS scheduler
+FROM ${HOST_IMAGE}
+COPY --from=scheduler /mcp-cron /usr/local/bin/mcp-cron
+COPY --from=scheduler /LICENSE /opt/mcp-cron/LICENSE
+COPY --from=scheduler /source.tar.gz /opt/mcp-cron/source.tar.gz
+ENV MCP_CRON_COMMAND=/usr/local/bin/mcp-cron

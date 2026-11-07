@@ -4,9 +4,9 @@
   "scripts": {
     "icons:build": "node ../../resources/icons/build.mjs",
     "dev:custom": "uni -p",
-    "dev:h5": "node ../../resources/icons/build.mjs && uni",
-    "dev:app": "node ../../resources/icons/build.mjs && uni -p app",
-    "build:app": "node ../../resources/icons/build.mjs && uni build -p app",
+    "dev:h5": "node ../../scripts/build-plugin-pages.mjs && node ../../resources/icons/build.mjs && uni",
+    "dev:app": "node ../../scripts/build-plugin-pages.mjs && node ../../resources/icons/build.mjs && uni -p app",
+    "build:app": "node ../../scripts/build-plugin-pages.mjs && node ../../resources/icons/build.mjs && uni build -p app",
     "dev:h5:ssr": "uni --ssr",
     "dev:mp-alipay": "uni -p mp-alipay",
     "dev:mp-baidu": "uni -p mp-baidu",
@@ -22,7 +22,7 @@
     "dev:quickapp-webview-huawei": "uni -p quickapp-webview-huawei",
     "dev:quickapp-webview-union": "uni -p quickapp-webview-union",
     "build:custom": "uni build -p",
-    "build:h5": "node ../../resources/icons/build.mjs && uni build",
+    "build:h5": "node ../../scripts/build-plugin-pages.mjs && node ../../resources/icons/build.mjs && uni build",
     "build:h5:ssr": "uni build --ssr",
     "build:mp-alipay": "uni build -p mp-alipay",
     "build:mp-baidu": "uni build -p mp-baidu",
@@ -40,7 +40,7 @@
     "type-check": "vue-tsc --noEmit",
     "test": "node --test tests/*.test.cjs",
     "pack:android:debug": "node scripts/pack-android-debug.cjs",
-    "pack:android:safe": "node ../../resources/icons/build.mjs && node scripts/pack-android-debug.cjs --safe-cloud-cert",
+    "pack:android:safe": "node ../../scripts/build-plugin-pages.mjs && node ../../resources/icons/build.mjs && node scripts/pack-android-debug.cjs --safe-cloud-cert",
     "pack:android:release": "node ../../resources/icons/build.mjs && node scripts/pack-android-release.cjs"
   },
   "dependencies": {
