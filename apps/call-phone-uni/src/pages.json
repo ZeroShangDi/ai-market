@@ -59,6 +59,22 @@
       }
     },
     {
+      "path": "pages/app-update/index",
+      "style": {
+        "navigationStyle": "custom",
+        "disableScroll": true,
+        "backgroundColor": "transparent",
+        "app-plus": {
+          "background": "transparent",
+          "titleNView": false,
+          "popGesture": "none",
+          "scrollIndicator": "none",
+          "animationType": "fade-in",
+          "animationDuration": 180
+        }
+      }
+    },
+    {
       "path": "pages/plugin-generated/scheduled_tasks/index",
       "style": {
         "navigationStyle": "custom"

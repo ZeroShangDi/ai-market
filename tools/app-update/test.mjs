@@ -4,7 +4,7 @@ import { mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, wr
 import { createHash, createPublicKey, verify } from 'node:crypto';
 import path from 'node:path';
 import os from 'node:os';
-import { initializeKey, prepareRelease, releaseNotes, clientConfiguration } from './release.mjs';
+import { initializeKey, prepareRelease, releaseNotes, updateSummary, clientConfiguration } from './release.mjs';
 
 function fixture(t) {
   const root = mkdtempSync(path.join(os.tmpdir(), 'app-update-test-'));
@@ -13,8 +13,10 @@ function fixture(t) {
   initializeKey(keyFile);
   writeFileSync(apk, 'test APK bytes'); writeFileSync(baselineApk, 'baseline bytes');
   writeFileSync(changelog, '# 日志\n\n## [未发布]\n- 后续内容\n\n## [1.0.8] - 2026-10-15\n\n### 调整\n- 简化更新交互\n\n## [1.0.7] - 2026-10-14\n- 修复入口\n');
+  const notesFile = path.join(root, 'notes.json');
+  writeFileSync(notesFile, JSON.stringify({ versionName: '1.0.8', highlights: ['简化更新交互'] }));
   const metadata = { packageName: 'uni.UNID608100', versionCode: 106, versionName: '1.0.8', architecture: 'arm64-v8a', certificates: ['a'.repeat(64)] };
-  return { root, metadata, options: { apk, baselineApk, keyFile, changelog, baseUrl: 'https://updates.example.test/releases', outDir: path.join(root, 'out'), inspect: file => ({ ...metadata, versionCode: file === baselineApk ? 104 : metadata.versionCode }) } };
+  return { root, metadata, options: { apk, baselineApk, keyFile, changelog, notesFile, baseUrl: 'https://updates.example.test/releases', outDir: path.join(root, 'out'), inspect: file => ({ ...metadata, versionCode: file === baselineApk ? 104 : metadata.versionCode }) } };
 }
 
 test('explicit LAN mode generates a signed feed and pinned client origin before an APK exists', t => {
@@ -73,4 +75,20 @@ test('tampering with the existing feed cannot silently change publication histor
   envelope.payload = JSON.stringify({ release: null });
   writeFileSync(result.manifest, JSON.stringify(envelope));
   assert.throws(() => prepareRelease(f.options), /签名不匹配/);
+});
+
+
+test('phone summary is concise, version-bound and independent of complete changelog', t => {
+  const f = fixture(t);
+  writeFileSync(f.options.changelog, '## [1.0.8] - 2026-10-28\n- 完整工程日志，部署细节与待验证事项仍然保留。\n');
+  assert.equal(prepareRelease(f.options).release.notes, '简化更新交互');
+  assert.equal(updateSummary({ versionName: '1.0.8', highlights: [' 更新更方便 ', '下载进度一目了然'] }, '1.0.8'), '更新更方便\n下载进度一目了然');
+  for (const highlights of [[], ['一', '二', '三', '四'], ['字'.repeat(33)], ['字'.repeat(31), '字'.repeat(31), '字'.repeat(31)], [''], ['一\n二'], [null]]) {
+    assert.throws(() => updateSummary({ versionName: '1.0.8', highlights }, '1.0.8'), /短句/);
+  }
+  assert.throws(() => updateSummary({ versionName: '1.0.7', highlights: ['改进体验'] }, '1.0.8'), /versionName/);
+  const previousFeed = readFileSync(prepareRelease(f.options).manifest, 'utf8');
+  rmSync(f.options.notesFile);
+  assert.throws(() => prepareRelease(f.options), /缺少手机更新摘要/);
+  assert.equal(readFileSync(path.join(f.options.outDir, 'public/uni.UNID608100/android/arm64-v8a/stable/manifest.json'), 'utf8'), previousFeed);
 });
