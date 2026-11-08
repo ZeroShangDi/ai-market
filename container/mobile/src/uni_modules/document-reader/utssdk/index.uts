@@ -1,0 +1,1 @@
+export function readDocument(uri: string): string { throw new Error('当前平台不支持原生文档读取') }

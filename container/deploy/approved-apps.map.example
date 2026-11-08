@@ -1,0 +1,3 @@
+# SHA-1 certificate fingerprint as Nginx reports it (not a secret), mapped to OAuth client_id.
+# Obtain from your approved certificate, not from an HTTP request header.
+# "AABBCCDDEEFF0011223344556677889900AABBCCDD" "customer-backend";

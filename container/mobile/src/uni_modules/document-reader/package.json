@@ -1,0 +1,27 @@
+{
+  "id": "document-reader",
+  "displayName": "Document reader",
+  "version": "1.0.0",
+  "description": "Bounded Android SAF document reader extracted from existing native implementation",
+  "engines": {
+    "HBuilderX": "^4.81"
+  },
+  "dcloudext": {
+    "type": "uts"
+  },
+  "uni_modules": {
+    "dependencies": [],
+    "encrypt": [],
+    "platforms": {
+      "client": {
+        "Vue": {
+          "vue3": "y"
+        },
+        "App": {
+          "app-android": "y",
+          "app-ios": "n"
+        }
+      }
+    }
+  }
+}

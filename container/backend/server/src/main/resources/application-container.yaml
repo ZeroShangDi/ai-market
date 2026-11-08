@@ -1,0 +1,86 @@
+server:
+  address: 127.0.0.1
+  port: ${CONTAINER_PORT:48090}
+spring:
+  datasource:
+    druid:
+      web-stat-filter:
+        enabled: true
+      stat-view-servlet:
+        enabled: true
+        url-pattern: /druid/*
+        reset-enable: false
+      filter:
+        stat:
+          enabled: true
+          merge-sql: true
+    dynamic:
+      primary: master
+      datasource:
+        master:
+          url: ${CONTAINER_DATABASE_URL}
+          username: ${CONTAINER_DATABASE_USER}
+          password: ${CONTAINER_DATABASE_PASSWORD}
+          driver-class-name: com.mysql.cj.jdbc.Driver
+  data:
+    redis:
+      host: ${CONTAINER_REDIS_HOST:127.0.0.1}
+      port: ${CONTAINER_REDIS_PORT:6379}
+      database: ${CONTAINER_REDIS_DATABASE:2}
+  boot:
+    admin:
+      context-path: /admin
+      client:
+        enabled: true
+        url: http://127.0.0.1:${server.port}/admin
+        username: ${CONTAINER_MONITOR_USER}
+        password: ${CONTAINER_MONITOR_PASSWORD}
+        instance:
+          service-base-url: http://127.0.0.1:${server.port}
+          metadata:
+            user.name: ${CONTAINER_MONITOR_USER}
+            user.password: ${CONTAINER_MONITOR_PASSWORD}
+  quartz:
+    auto-startup: false
+  autoconfigure:
+    exclude:
+      - org.springframework.boot.autoconfigure.quartz.QuartzAutoConfiguration
+      - com.binarywang.spring.starter.wxjava.mp.config.WxMpAutoConfiguration
+      - com.binarywang.spring.starter.wxjava.miniapp.config.WxMaAutoConfiguration
+yudao:
+  websocket:
+    enable: true
+    path: /infra/ws
+    sender-type: local
+    allowed-origins:
+      - ${CONTAINER_PC_URL:http://127.0.0.1:5188}
+      - http://127.0.0.1:${server.port}
+  captcha:
+    enable: ${CONTAINER_CAPTCHA_ENABLED:true}
+  security:
+    mock-enable: false
+  web:
+    admin-ui:
+      url: ${CONTAINER_PC_URL:http://127.0.0.1:5188}
+app-update:
+  allow-http: ${CONTAINER_RELEASE_ALLOW_HTTP:false}
+  max-artifact-bytes: ${CONTAINER_RELEASE_MAX_BYTES:268435456}
+  storage-root: ${CONTAINER_RELEASE_ROOT:./.local/releases}
+logging:
+  file:
+    name: .local/logs/container.log
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,threaddump,prometheus
+  endpoint:
+    health:
+      show-details: when_authorized
+
+container:
+  security:
+    browser-origins: ${CONTAINER_BROWSER_ORIGINS:http://127.0.0.1:5188,http://127.0.0.1:5190}
+    login-per-minute: ${CONTAINER_LOGIN_RATE_LIMIT:30}
+    api-per-minute: ${CONTAINER_API_RATE_LIMIT:600}

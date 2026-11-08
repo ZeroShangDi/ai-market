@@ -1,0 +1,10 @@
+# Enable only behind the trusted loopback TLS gateway; backend remains loopback-only.
+server:
+  forward-headers-strategy: native
+  tomcat:
+    remoteip:
+      internal-proxies: 127\.0\.0\.1|0:0:0:0:0:0:0:1|::1
+container:
+  security:
+    require-app-binding: true
+    browser-origins: ${CONTAINER_BROWSER_ORIGINS:}

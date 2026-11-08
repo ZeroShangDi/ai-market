@@ -1,0 +1,7 @@
+# Optional payment module. Configuration and records are available; money processing is off.
+yudao:
+  pay:
+    order-notify-url: ${CONTAINER_PUBLIC_URL:http://127.0.0.1:48090}/admin-api/pay/notify/order
+    refund-notify-url: ${CONTAINER_PUBLIC_URL:http://127.0.0.1:48090}/admin-api/pay/notify/refund
+    transfer-notify-url: ${CONTAINER_PUBLIC_URL:http://127.0.0.1:48090}/admin-api/pay/notify/transfer
+    transactions-enabled: false

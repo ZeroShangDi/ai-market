@@ -1,0 +1,14 @@
+node_modules/
+dist/
+target/
+.flattened-pom.xml
+.local/
+.env
+.env.local
+*.log
+__pycache__/
+*.pyc
+*.tsbuildinfo
+# Committed frontend profiles contain only public build switches, never credentials.
+!pc/.env.container
+!pc/.env.production

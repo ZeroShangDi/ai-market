@@ -1,0 +1,30 @@
+{
+  "name": "容器",
+  "appid": "",
+  "description": "shared能力移动宿主",
+  "versionName": "0.0.0",
+  "versionCode": 1,
+  "transformPx": false,
+  "app-plus": {
+    "usingComponents": true,
+    "modules": {
+      "Invocation": {}
+    },
+    "distribute": {
+      "android": {
+        "permissions": [
+          "<uses-permission android:name=\"android.permission.INTERNET\"/>",
+          "<uses-permission android:name=\"android.permission.REQUEST_INSTALL_PACKAGES\"/>"
+        ]
+      }
+    }
+  },
+  "h5": {
+    "router": {
+      "mode": "hash"
+    }
+  },
+  "uniStatistics": {
+    "enable": false
+  }
+}

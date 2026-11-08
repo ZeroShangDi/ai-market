@@ -1,0 +1,27 @@
+services:
+  mysql:
+    image: mysql:8
+    ports: ["127.0.0.1:23316:3306"]
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: container
+      MYSQL_USER: container
+      MYSQL_PASSWORD: ${CONTAINER_DATABASE_PASSWORD}
+    volumes:
+      - mysql-data:/var/lib/mysql
+      - ../backend/sql/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1"]
+      interval: 2s
+      timeout: 2s
+      retries: 60
+  redis:
+    image: redis:6-alpine
+    ports: ["127.0.0.1:23379:6379"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+volumes:
+  mysql-data:

@@ -1,0 +1,7 @@
+import { UTSAndroid } from 'io.dcloud.uts'
+import { ContainerDocuments } from 'dev.container.documents'
+export function readDocument(uri: string): string {
+  const context = UTSAndroid.getAppContext()
+  if (context == null) throw new Error('应用尚未就绪')
+  return ContainerDocuments.readDocument(context, uri)
+}
