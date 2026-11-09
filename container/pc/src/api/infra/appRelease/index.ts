@@ -49,3 +49,14 @@ export const get = (id: number) =>
     url: "/infra/app-release/get",
     params: { id },
   });
+
+export const historyList = (params: any) =>
+  request.get<{ list: any[]; total: number }>({
+    url: "/infra/app-release/history/list",
+    params,
+  });
+export const historyGet = (id: number) =>
+  request.get<Record<string, any>>({
+    url: "/infra/app-release/history/get",
+    params: { id },
+  });

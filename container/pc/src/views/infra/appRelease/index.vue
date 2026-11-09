@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import * as Api from "@/api/infra/appRelease";
 import type { UploadFile } from "element-plus";
-import { dateFormatter } from "@/utils/formatTime";
+import { dateFormatter, formatDate } from "@/utils/formatTime";
 defineOptions({ name: "InfraAppRelease" });
 const message = useMessage();
 const apps = ref<Api.ReleaseApplication[]>([]),
@@ -9,6 +9,9 @@ const apps = ref<Api.ReleaseApplication[]>([]),
 const current = computed(() =>
   apps.value.find((app) => app.id === selected.value),
 );
+const mode = ref("managed"),
+  historyDetail = ref<Record<string, any>>(),
+  historyDialog = ref(false);
 const rows = ref<any[]>([]),
   total = ref(0),
   loading = ref(false),
@@ -39,9 +42,35 @@ async function loadApps() {
   apps.value = await Api.applications();
   if (!apps.value.some((app) => app.id === selected.value))
     selected.value = apps.value[0]?.id;
-  await load();
+  await selectApplication();
 }
+async function selectApplication() {
+  query.pageNo = 1;
+  mode.value = "managed";
+  const applicationId = selected.value;
+  await load();
+  if (
+    applicationId &&
+    selected.value === applicationId &&
+    mode.value === "managed" &&
+    total.value === 0
+  ) {
+    const archived = await Api.historyList({ applicationId, ...query });
+    if (selected.value !== applicationId || mode.value !== "managed") return;
+    if (archived.total) {
+      mode.value = "history";
+      rows.value = archived.list;
+      total.value = archived.total;
+    }
+  }
+}
+async function showHistory(row: any) {
+  historyDetail.value = await Api.historyGet(row.id);
+  historyDialog.value = true;
+}
+let loadGeneration = 0;
 async function load() {
+  const generation = ++loadGeneration;
   if (!selected.value) {
     rows.value = [];
     total.value = 0;
@@ -49,11 +78,15 @@ async function load() {
   }
   loading.value = true;
   try {
-    const page = await Api.list({ applicationId: selected.value, ...query });
+    const page = await (mode.value === "history" ? Api.historyList : Api.list)({
+      applicationId: selected.value,
+      ...query,
+    });
+    if (generation !== loadGeneration) return;
     rows.value = page.list;
     total.value = page.total;
   } finally {
-    loading.value = false;
+    if (generation === loadGeneration) loading.value = false;
   }
 }
 function openApp(app?: Api.ReleaseApplication) {
@@ -259,10 +292,7 @@ onMounted(loadApps);
           v-model="selected"
           class="!w-280px"
           placeholder="请选择应用"
-          @change="
-            query.pageNo = 1;
-            load();
-          "
+          @change="selectApplication"
           ><el-option
             v-for="app in apps"
             :key="app.id"
@@ -286,6 +316,16 @@ onMounted(loadApps);
     </el-form>
   </ContentWrap>
   <ContentWrap v-if="current">
+    <el-tabs
+      v-model="mode"
+      @tab-change="
+        query.pageNo = 1;
+        load();
+      "
+    >
+      <el-tab-pane label="版本发布" name="managed" />
+      <el-tab-pane label="历史记录" name="history" />
+    </el-tabs>
     <el-descriptions :column="3" border
       ><el-descriptions-item label="应用标识">{{
         current.appId
@@ -325,6 +365,7 @@ onMounted(loadApps);
           "
           ><Icon icon="ep:search" class="mr-5px" />搜索</el-button
         ><el-button
+          v-if="mode === 'managed'"
           v-hasPermi="['infra:app-release:upload']"
           type="primary"
           plain
@@ -332,6 +373,7 @@ onMounted(loadApps);
           >上传安装包</el-button
         >
         <el-upload
+          v-if="mode === 'managed'"
           v-hasPermi="['infra:app-release:import']"
           class="inline-flex mx-10px"
           accept=".json,application/json"
@@ -343,6 +385,7 @@ onMounted(loadApps);
           ></el-upload
         >
         <el-button
+          v-if="mode === 'managed'"
           v-hasPermi="['infra:app-release:publish']"
           type="warning"
           plain
@@ -350,6 +393,7 @@ onMounted(loadApps);
           >撤回目标版本</el-button
         >
         <el-tooltip
+          v-if="mode === 'managed'"
           content="上传后下载模板，在离线环境签名，再导入校验并发布。撤回也需要新的签名清单。"
           placement="top"
           ><Icon icon="ep:question-filled" class="ml-10px"
@@ -359,6 +403,7 @@ onMounted(loadApps);
   </ContentWrap>
   <ContentWrap>
     <el-table
+      v-if="mode === 'managed'"
       v-loading="loading || busy"
       :data="rows"
       stripe
@@ -433,6 +478,61 @@ onMounted(loadApps);
         ></el-table-column
       >
     </el-table>
+    <el-table
+      v-else
+      v-loading="loading"
+      :data="rows"
+      stripe
+      :show-overflow-tooltip="true"
+    >
+      <el-table-column label="版本" min-width="140"
+        ><template #default="{ row }"
+          >{{ row.versionName }}（{{ row.versionCode }}）</template
+        ></el-table-column
+      >
+      <el-table-column label="渠道" prop="channel" width="100" />
+      <el-table-column label="架构" prop="architecture" width="130" />
+      <el-table-column label="校验依据" min-width="150"
+        ><template #default="{ row }"
+          ><el-tag
+            :type="
+              row.sourceKind === 'SIGNED_LEGACY_MANIFEST' ? 'success' : 'info'
+            "
+            >{{
+              row.sourceKind === "SIGNED_LEGACY_MANIFEST"
+                ? "原清单签名及安装包"
+                : "安装包签名与哈希"
+            }}</el-tag
+          ></template
+        ></el-table-column
+      >
+      <el-table-column label="原发布时间" width="180"
+        ><template #default="{ row }">{{
+          row.publishedAt ? formatDate(row.publishedAt) : "未留存"
+        }}</template></el-table-column
+      >
+      <el-table-column label="大小" width="110"
+        ><template #default="{ row }"
+          >{{ (row.artifactBytes / 1024 / 1024).toFixed(1) }} MB</template
+        ></el-table-column
+      >
+      <el-table-column label="更新说明" prop="notes" min-width="180" />
+      <el-table-column label="操作" width="150" fixed="right"
+        ><template #default="{ row }"
+          ><el-button link type="primary" @click="showHistory(row)"
+            >详情</el-button
+          ><el-link
+            :href="row.artifactUrl"
+            target="_blank"
+            rel="noopener noreferrer"
+            type="primary"
+            :underline="false"
+            class="ml-12px"
+            >下载安装包</el-link
+          ></template
+        ></el-table-column
+      >
+    </el-table>
     <Pagination
       v-model:page="query.pageNo"
       v-model:limit="query.pageSize"
@@ -440,6 +540,41 @@ onMounted(loadApps);
       @pagination="load"
     />
   </ContentWrap>
+  <Dialog v-model="historyDialog" title="历史版本详情" width="760px">
+    <el-descriptions v-if="historyDetail" :column="1" border>
+      <el-descriptions-item label="版本"
+        >{{ historyDetail.version_name }}（{{
+          historyDetail.version_code
+        }}）</el-descriptions-item
+      >
+      <el-descriptions-item label="原始文件">{{
+        historyDetail.source_reference
+      }}</el-descriptions-item>
+      <el-descriptions-item label="SHA-256"
+        ><span class="break-all">{{
+          historyDetail.artifact_sha256
+        }}</span></el-descriptions-item
+      >
+      <el-descriptions-item label="签名证书"
+        ><span class="break-all">{{
+          JSON.parse(historyDetail.certificates).join("\n")
+        }}</span></el-descriptions-item
+      >
+      <el-descriptions-item label="原发布时间">{{
+        historyDetail.published_at
+          ? formatDate(historyDetail.published_at)
+          : "未留存"
+      }}</el-descriptions-item>
+      <el-descriptions-item label="归档时间">{{
+        formatDate(historyDetail.imported_at)
+      }}</el-descriptions-item>
+      <el-descriptions-item label="更新说明"
+        ><div class="whitespace-pre-wrap">
+          {{ historyDetail.notes || "未留存" }}
+        </div></el-descriptions-item
+      >
+    </el-descriptions>
+  </Dialog>
   <Dialog
     v-model="appDialog"
     :title="edit.id ? '应用设置' : '新增应用'"

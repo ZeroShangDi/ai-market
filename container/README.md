@@ -55,3 +55,5 @@ PC 使用 iframe、移动使用 WebView。模块后端独立提供业务接口�
 使用生产 Nginx 模板时启用 `container,edge`（带支付则 `container,payments,edge`），Nginx 与后端通过可信回环连接；其他部署拓扑需显式配置可信代理。监控页面保留 Cookie，业务 Token API 不转发或回写 Cookie，不能丢掉该隔离配置。浏览器直接跨域来源通过 `CONTAINER_BROWSER_ORIGINS` 精确登记，生产同源默认不需增加来源。
 
 当前 PC 导航为「系统管理、公共服务、运维中心、支付管理」。菜单结构调整通过 `backend/sql/menu-layout.sql` 应用；新环境启动自动导入，已有环境手工升级时执行该文件。旧页面地址保留跳转，审计日志与支付分组不动。
+
+应用版本支持历史归档：从旧本地发布目录逐包验签、迁入历史及安装包，不自动发布。操作与证据分级见 [版本管理说明](docs/app-release.md)。正式包、私钥与本机归档数据均不提交 Git。

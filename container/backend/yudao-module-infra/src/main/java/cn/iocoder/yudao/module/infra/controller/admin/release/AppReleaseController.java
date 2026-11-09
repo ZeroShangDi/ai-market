@@ -26,6 +26,15 @@ public class AppReleaseController {
     public CommonResult<cn.iocoder.yudao.framework.common.pojo.PageResult<Map<String,Object>>> list(@RequestParam long applicationId,
             @RequestParam(defaultValue="1") int pageNo,@RequestParam(defaultValue="20") int pageSize,
             @RequestParam(required=false) String channel,@RequestParam(required=false) String architecture){return success(service.page(applicationId,pageNo,pageSize,channel,architecture));}
+    @GetMapping("/history/list") @PreAuthorize("@ss.hasPermission('infra:app-release:query')")
+    public CommonResult<cn.iocoder.yudao.framework.common.pojo.PageResult<Map<String,Object>>> history(@RequestParam long applicationId,
+            @RequestParam(defaultValue="1") int pageNo,@RequestParam(defaultValue="20") int pageSize,
+            @RequestParam(required=false) String channel,@RequestParam(required=false) String architecture){return success(service.historyPage(applicationId,pageNo,pageSize,channel,architecture));}
+    @GetMapping("/history/get") @PreAuthorize("@ss.hasPermission('infra:app-release:query')")
+    public CommonResult<Map<String,Object>> historyGet(@RequestParam long id){return success(service.historyGet(id));}
+    @PostMapping("/history/import") @PreAuthorize("@ss.hasPermission('infra:app-release:import')")
+    @ApiAccessLog(requestEnable=false,responseEnable=false)
+    public CommonResult<Long> historyImport(@RequestBody AppReleaseService.HistoryImport req) throws Exception {return success(service.importHistory(req,String.valueOf(getLoginUserId())));}
     @GetMapping("/target") @PreAuthorize("@ss.hasPermission('infra:app-release:query')")
     public CommonResult<Map<String,Object>> target(@RequestParam long applicationId,@RequestParam String architecture,@RequestParam String channel){return success(service.targetState(applicationId,architecture,channel));}
     @PostMapping(value="/artifact",consumes="application/octet-stream") @PreAuthorize("@ss.hasPermission('infra:app-release:upload')")

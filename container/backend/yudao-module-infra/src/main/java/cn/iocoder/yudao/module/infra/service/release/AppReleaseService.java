@@ -35,8 +35,9 @@ public class AppReleaseService {
     public record Application(Long id,String name,String appId,String packageName,String publicKey,String artifactBaseUrl) { }
     public record PublicManifest(boolean managed,String envelope) { }
     private static void check(boolean valid,String message) { if (!valid) throw exception0(400,message); }
-    private Map<String,Object> app(long id) {
-        var rows=db.queryForList("SELECT * FROM infra_release_application WHERE id=?",id);
+    private Map<String,Object> app(long id) { return app(id,false); }
+    private Map<String,Object> app(long id,boolean lock) {
+        var rows=db.queryForList("SELECT * FROM infra_release_application WHERE id=?"+(lock?" FOR UPDATE":""),id);
         check(!rows.isEmpty(),"应用不存在");return rows.get(0);
     }
     private static String text(Map<String,Object> map,String key) { return Objects.toString(map.get(key),""); }
@@ -61,9 +62,9 @@ public class AppReleaseService {
             check("https".equals(uri.getScheme()) || allowHttp && "http".equals(uri.getScheme()) && Set.of("127.0.0.1","localhost","[::1]").contains(uri.getHost()),"生产下载地址必须使用HTTPS");
         } catch (IllegalArgumentException error) { throw exception0(400,"下载根地址格式无效"); }
         if (req.id()!=null) {
-            var old=app(req.id());
+            var old=app(req.id(),true);
             check(text(old,"app_id").equals(req.appId()) && text(old,"package_name").equals(req.packageName()),"已登记的应用标识和包名不可更换");
-            check(db.queryForObject("SELECT COUNT(*) FROM infra_app_release WHERE application_id=?",Long.class,req.id())==0 || text(old,"public_key").equals(req.publicKey()) && text(old,"artifact_base_url").equals(req.artifactBaseUrl()),"已有版本后不可直接替换签名公钥或下载地址");
+            check(db.queryForObject("SELECT COUNT(*) FROM infra_app_release WHERE application_id=?",Long.class,req.id())==0 && db.queryForObject("SELECT COUNT(*) FROM infra_app_release_history WHERE application_id=?",Long.class,req.id())==0 || text(old,"public_key").equals(req.publicKey()) && text(old,"artifact_base_url").equals(req.artifactBaseUrl()),"已有版本后不可直接替换签名公钥或下载地址");
             db.update("UPDATE infra_release_application SET name=?,public_key=?,artifact_base_url=? WHERE id=?",req.name(),req.publicKey(),req.artifactBaseUrl(),req.id());return req.id();
         }
         return insert("INSERT INTO infra_release_application(name,app_id,package_name,public_key,artifact_base_url,creator) VALUES (?,?,?,?,?,?)",req.name(),req.appId(),req.packageName(),req.publicKey(),req.artifactBaseUrl(),actor);
@@ -82,7 +83,9 @@ public class AppReleaseService {
     }
     public Map<String,Object> targetState(long applicationId,String architecture,String channel) {
         app(applicationId);
-        return db.queryForMap("SELECT COALESCE(MAX(sequence),0) AS sequence,COALESCE(MAX(version_code),0) AS versionCode FROM infra_app_release WHERE application_id=? AND architecture=? AND channel=?",applicationId,architecture,channel);
+        var state=new HashMap<>(db.queryForMap("SELECT COALESCE(MAX(sequence),0) AS sequence,COALESCE(MAX(version_code),0) AS versionCode FROM infra_app_release WHERE application_id=? AND architecture=? AND channel=?",applicationId,architecture,channel));
+        Long archived=db.queryForObject("SELECT COALESCE(MAX(version_code),0) FROM infra_app_release_history WHERE application_id=? AND architecture=? AND channel=? AND source_kind='SIGNED_LEGACY_MANIFEST'",Long.class,applicationId,architecture,channel);
+        state.put("versionCode",Math.max(((Number)state.get("versionCode")).longValue(),archived));return state;
     }
     public cn.iocoder.yudao.framework.common.pojo.PageResult<Map<String,Object>> page(long applicationId,int pageNo,int pageSize,String channel,String architecture) {
         app(applicationId);check(pageNo>0 && pageNo<=100000 && pageSize>0 && pageSize<=100,"分页参数无效");
@@ -118,7 +121,7 @@ public class AppReleaseService {
     }
     @Transactional
     public long importManifest(long applicationId,String payload,String signature,String actor) throws Exception {
-        var application=app(applicationId);check(payload!=null && payload.getBytes(StandardCharsets.UTF_8).length<=100000 && signature!=null && signature.length()<=4096,"签名清单格式或大小无效");
+        var application=app(applicationId,true);check(payload!=null && payload.getBytes(StandardCharsets.UTF_8).length<=100000 && signature!=null && signature.length()<=4096,"签名清单格式或大小无效");
         try {var verifier=Signature.getInstance("SHA256withRSA");verifier.initVerify(key(text(application,"public_key")));verifier.update(payload.getBytes(StandardCharsets.UTF_8));check(verifier.verify(Base64.getDecoder().decode(signature)),"签名校验失败");}
         catch(GeneralSecurityException|IllegalArgumentException error){throw exception0(400,"签名校验失败");}
         JsonNode metadata=json.readTree(payload);check(metadata.path("schemaVersion").isIntegralNumber() && metadata.path("schemaVersion").asInt()==2 && metadata.path("sequence").isIntegralNumber() && metadata.path("sequence").canConvertToLong(),"仅接收v2签名发布清单");long sequence=metadata.path("sequence").asLong();check(sequence>0 && sequence<=9007199254740991L,"清单序号无效");
@@ -159,7 +162,13 @@ public class AppReleaseService {
         check(((Number)release.get("sequence")).longValue()>((Number)maxima.get("sequence")).longValue(),"清单序号必须高于已发布历史，不能回滚");
         if (release.get("version_code")!=null) {
             long version=((Number)release.get("version_code")).longValue(),highest=((Number)maxima.get("version")).longValue();
-            check(version>=highest,"版本号不能低于已发布历史");
+            Long legacy=db.queryForObject("SELECT COALESCE(MAX(version_code),0) FROM infra_app_release_history WHERE application_id=? AND architecture=? AND channel=? AND source_kind='SIGNED_LEGACY_MANIFEST'",Long.class,applicationId,release.get("architecture"),release.get("channel"));
+            check(version>=Math.max(highest,legacy),"版本号不能低于已发布历史");
+            if(version==legacy && legacy>highest) {
+                var historical=db.queryForMap("SELECT version_name,artifact_sha256,artifact_bytes FROM infra_app_release_history WHERE application_id=? AND architecture=? AND channel=? AND version_code=?",applicationId,release.get("architecture"),release.get("channel"),version);
+                JsonNode data=json.readTree(json.readTree(text(release,"manifest")).path("payload").asText()).path("release");
+                check(data.path("versionName").asText().equals(historical.get("version_name")) && data.path("artifact").path("sha256").asText().equals(historical.get("artifact_sha256")) && data.path("artifact").path("bytes").asLong()==((Number)historical.get("artifact_bytes")).longValue(),"承接历史版本不能替换安装包");
+            }
             if(version==highest) {
                 var previous=db.queryForList("SELECT manifest FROM infra_app_release WHERE application_id=? AND architecture=? AND channel=? AND state<>'DRAFT' AND version_code=? ORDER BY sequence DESC LIMIT 1",applicationId,release.get("architecture"),release.get("channel"),version);
                 check(!previous.isEmpty(),"找不到续期版本");
@@ -172,6 +181,64 @@ public class AppReleaseService {
         db.update("UPDATE infra_app_release SET state='SUPERSEDED' WHERE application_id=? AND architecture=? AND channel=? AND state='PUBLISHED'",applicationId,release.get("architecture"),release.get("channel"));
         check(db.update("UPDATE infra_app_release SET state='PUBLISHED',publisher=?,published_at=CURRENT_TIMESTAMP WHERE id=? AND state='DRAFT'",actor,id)==1,"版本状态已变化，请重试");
     }
+    public record HistoryImport(long applicationId,long versionCode,String versionName,String architecture,
+            String channel,String notes,Map<String,Object> artifact,List<String> certificates,
+            String sourceReference,String legacyManifest) { }
+    public cn.iocoder.yudao.framework.common.pojo.PageResult<Map<String,Object>> historyPage(long applicationId,int pageNo,int pageSize,String channel,String architecture) {
+        app(applicationId);check(pageNo>0 && pageNo<=100000 && pageSize>0 && pageSize<=100,"分页参数无效");
+        String where=" WHERE application_id=?";List<Object> args=new ArrayList<>();args.add(applicationId);
+        if(channel!=null && !channel.isBlank()){where+=" AND channel=?";args.add(channel);}
+        if(architecture!=null && !architecture.isBlank()){where+=" AND architecture=?";args.add(architecture);}
+        Long total=db.queryForObject("SELECT COUNT(*) FROM infra_app_release_history"+where,Long.class,args.toArray());
+        args.add(pageSize);args.add((pageNo-1)*pageSize);
+        var list=db.queryForList("SELECT id,application_id AS applicationId,version_code AS versionCode,version_name AS versionName,architecture,channel,notes,published_at AS publishedAt,artifact_url AS artifactUrl,artifact_bytes AS artifactBytes,artifact_sha256 AS artifactSha256,certificates,source_kind AS sourceKind,source_reference AS sourceReference,imported_by AS importedBy,imported_at AS importedAt FROM infra_app_release_history"+where+" ORDER BY version_code DESC,id DESC LIMIT ? OFFSET ?",args.toArray());
+        return new cn.iocoder.yudao.framework.common.pojo.PageResult<>(list,total);
+    }
+    public Map<String,Object> historyGet(long id) {
+        var rows=db.queryForList("SELECT * FROM infra_app_release_history WHERE id=?",id);
+        check(!rows.isEmpty(),"历史版本不存在");return rows.get(0);
+    }
+    @Transactional
+    public long importHistory(HistoryImport req,String actor) throws Exception {
+        var application=app(req.applicationId(),true);
+        check(req.versionCode()>0 && req.versionCode()<=2100000000L && req.versionName()!=null && !req.versionName().isBlank() && req.versionName().length()<=64,"历史版本字段无效");
+        check(req.architecture()!=null && req.architecture().matches("[a-z0-9][a-z0-9-]{0,31}") && req.channel()!=null && req.channel().matches("[a-z0-9][a-z0-9-]{0,31}"),"历史版本目标无效");
+        check(req.notes()==null || req.notes().length()<=20000,"历史更新说明过长");
+        check(req.sourceReference()!=null && req.sourceReference().matches("[A-Za-z0-9_.-]{1,180}"),"来源仅允许文件名，不包含本地路径");
+        check(req.certificates()!=null && !req.certificates().isEmpty() && req.certificates().size()<=8 && req.certificates().stream().allMatch(value->value!=null && value.matches("[a-f0-9]{64}")),"安装包证书摘要无效");
+        var certificates=req.certificates().stream().distinct().sorted().toList();
+        JsonNode artifact=json.valueToTree(req.artifact());String hash=artifact.path("sha256").asText(),pkg=text(application,"package_name");
+        check(hash.matches("[a-f0-9]{64}") && artifact.path("bytes").isIntegralNumber() && artifact.path("bytes").asLong()>0 && artifact.path("bytes").asLong()<=maxArtifactBytes && "apk".equals(artifact.path("type").asText()) && pkg.equals(artifact.path("packageName").asText()),"历史安装包元数据无效");
+        String filename=req.versionCode()+"-"+hash+".apk",url=text(application,"artifact_base_url")+"/"+pkg+"/apk/"+filename;
+        check(url.equals(artifact.path("url").asText()),"历史安装包地址与登记应用不匹配");
+        Path file=packageDirectory(pkg).resolve(filename);
+        check(Files.isRegularFile(file) && !Files.isSymbolicLink(file) && Files.size(file)==artifact.path("bytes").asLong() && hash.equals(sha256(file)),"历史安装包不存在或校验失败");
+        String sourceKind="APK_ONLY",notes=Objects.toString(req.notes(),""),manifest=null;Long publishedAt=null;
+        if(req.legacyManifest()!=null && !req.legacyManifest().isBlank()) {
+            check(req.legacyManifest().getBytes(StandardCharsets.UTF_8).length<=150000,"旧清单过大");
+            JsonNode envelope=json.readTree(req.legacyManifest());String payload=envelope.path("payload").asText(),signature=envelope.path("signature").asText();
+            check(!payload.isBlank() && signature.length()<=4096,"旧签名清单无效");
+            try {var verifier=Signature.getInstance("SHA256withRSA");verifier.initVerify(key(text(application,"public_key")));verifier.update(payload.getBytes(StandardCharsets.UTF_8));check(verifier.verify(Base64.getDecoder().decode(signature)),"旧清单签名校验失败");}
+            catch(GeneralSecurityException|IllegalArgumentException error){throw exception0(400,"旧清单签名校验失败");}
+            JsonNode metadata=json.readTree(payload),release=metadata.path("release");
+            check(!metadata.has("schemaVersion") && release.path("versionCode").isIntegralNumber() && release.path("artifact").path("bytes").isIntegralNumber() && "apk".equals(release.path("artifact").path("type").asText()) && text(application,"app_id").equals(release.path("appId").asText()) && "android".equals(release.path("platform").asText()) && req.architecture().equals(release.path("architecture").asText()) && req.channel().equals(release.path("channel").asText()) && req.versionCode()==release.path("versionCode").asLong() && req.versionName().equals(release.path("versionName").asText()),"旧清单与历史版本不匹配");
+            check(pkg.equals(release.path("artifact").path("packageName").asText()) && hash.equals(release.path("artifact").path("sha256").asText()) && artifact.path("bytes").asLong()==release.path("artifact").path("bytes").asLong(),"旧清单与安装包不匹配");
+            try {publishedAt=Instant.parse(release.path("publishedAt").asText()).toEpochMilli();}catch(Exception error){throw exception0(400,"旧清单发布时间无效");}
+            notes=release.path("notes").asText();check(notes.length()<=20000,"旧清单更新说明过长");
+            sourceKind="SIGNED_LEGACY_MANIFEST";manifest=json.writeValueAsString(envelope);
+        }
+        var existing=db.queryForList("SELECT * FROM infra_app_release_history WHERE application_id=? AND architecture=? AND channel=? AND version_code=?",req.applicationId(),req.architecture(),req.channel(),req.versionCode());
+        if(!existing.isEmpty()) {
+            var old=existing.get(0);check(hash.equals(old.get("artifact_sha256")) && req.versionName().equals(old.get("version_name")) && json.readTree(text(old,"certificates")).equals(json.valueToTree(certificates)),"历史版本已存在且安装包或身份不一致");
+            if(manifest!=null) {
+                if(old.get("original_manifest")!=null)check(json.readTree(text(old,"original_manifest")).equals(json.readTree(manifest)),"历史签名证据不可覆盖");
+                else db.update("UPDATE infra_app_release_history SET source_kind=?,original_manifest=?,notes=?,published_at=? WHERE id=?",sourceKind,manifest,notes,publishedAt,old.get("id"));
+            }
+            return ((Number)old.get("id")).longValue();
+        }
+        return insert("INSERT INTO infra_app_release_history(application_id,version_code,version_name,architecture,channel,notes,published_at,artifact_url,artifact_bytes,artifact_sha256,certificates,source_kind,source_reference,original_manifest,imported_at,imported_by) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",req.applicationId(),req.versionCode(),req.versionName(),req.architecture(),req.channel(),notes,publishedAt,url,artifact.path("bytes").asLong(),hash,json.writeValueAsString(certificates),sourceKind,req.sourceReference(),manifest,System.currentTimeMillis(),actor);
+    }
+
     public PublicManifest publicManifest(String packageName,String architecture,String channel) {
         var apps=db.queryForList("SELECT id FROM infra_release_application WHERE package_name=?",packageName);if(apps.isEmpty())return new PublicManifest(false,null);
         var rows=db.queryForList("SELECT manifest,expires_at FROM infra_app_release WHERE application_id=? AND architecture=? AND channel=? AND state='PUBLISHED'",apps.get(0).get("id"),architecture,channel);

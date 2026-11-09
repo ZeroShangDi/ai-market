@@ -934,3 +934,26 @@ CREATE TABLE IF NOT EXISTS infra_app_release (
  UNIQUE KEY uk_release_sequence(application_id,architecture,channel,sequence),
  KEY idx_release_target(application_id,architecture,channel,state)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Archived APKs are evidence only; they never become a current update automatically.
+CREATE TABLE IF NOT EXISTS infra_app_release_history (
+ id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+ application_id BIGINT NOT NULL,
+ version_code BIGINT NOT NULL,
+ version_name VARCHAR(64) NOT NULL,
+ architecture VARCHAR(32) NOT NULL,
+ channel VARCHAR(32) NOT NULL,
+ notes TEXT NULL,
+ published_at BIGINT NULL,
+ artifact_url VARCHAR(768) NOT NULL,
+ artifact_bytes BIGINT NOT NULL,
+ artifact_sha256 CHAR(64) NOT NULL,
+ certificates TEXT NOT NULL,
+ source_kind VARCHAR(32) NOT NULL,
+ source_reference VARCHAR(180) NOT NULL,
+ original_manifest MEDIUMTEXT NULL,
+ imported_at BIGINT NOT NULL,
+ imported_by VARCHAR(64) NOT NULL DEFAULT '',
+ create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+ UNIQUE KEY uk_history_version(application_id,architecture,channel,version_code)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

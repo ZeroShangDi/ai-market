@@ -31,7 +31,7 @@ container/
 │       └── uni_modules/             原生扩展组件
 ├── shared/                          两端共用的客户端、会话、入口校验等
 ├── deploy/                          部署代理与证书映射示例
-├── scripts/                         离线验包、签名等维护工具
+├── scripts/                         离线验包、签名、旧版本导入工具
 ├── acceptance/                      独立启动与验收工具
 ├── docs/                            说明、边界、验收记录
 └── .local/                          本机运行数据和凭据，不提交
