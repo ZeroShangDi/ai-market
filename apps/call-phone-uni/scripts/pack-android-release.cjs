@@ -5,7 +5,9 @@ const path = require('node:path');
 const { spawn } = require('node:child_process');
 const { createInterface } = require('node:readline');
 
-const project = path.resolve(__dirname, '..');
+const projectIndex = process.argv.indexOf('--project');
+if (projectIndex >= 0 && !process.argv[projectIndex + 1]) throw new Error('--project 缺少项目目录');
+const project = projectIndex >= 0 ? path.resolve(process.argv[projectIndex + 1]) : path.resolve(__dirname, '..');
 const cloudCertificate = process.argv.includes('--safe-cloud-cert');
 const signingPath = path.join(project, '.android-signing.local.json');
 const cli = process.env.HBUILDERX_CLI || '/Applications/HBuilderX.app/Contents/MacOS/cli';

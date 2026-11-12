@@ -1,0 +1,5 @@
+import {settings} from '@/platform';
+async function post(path:string,body:unknown){return new Promise<any>((resolve,reject)=>uni.request({url:settings.baseUrl+path,method:'POST',header:{'tenant-id':settings.tenantId},data:body as any,success:r=>resolve(r),fail:()=>reject(Error('无法连接登录服务'))}));}
+export async function captchaRequest<T>(action:'get'|'check',body:unknown):Promise<T>{const r=await post('/admin-api/system/captcha/'+action,body);if(r.statusCode!==200||r.data?.repCode!=='0000')throw Error('验证失败，请重试');return r.data.repData;}
+export function messageOf(_value:unknown){return '验证失败，请重新尝试';}
+export async function resolveTenant(name:string):Promise<string>{if(!name.trim())throw Error('请输入租户名称');return new Promise((resolve,reject)=>uni.request({url:settings.baseUrl+'/admin-api/system/tenant/get-id-by-name?name='+encodeURIComponent(name.trim()),header:{'tenant-id':settings.tenantId},success:r=>{const v=r.data as any;if(r.statusCode===200&&v?.code===0&&/^\d{1,19}$/.test(String(v.data)))resolve(String(v.data));else reject(Error('租户不存在或暂不可用'));},fail:()=>reject(Error('无法连接登录服务'))}));}

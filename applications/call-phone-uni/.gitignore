@@ -1,0 +1,11 @@
+node_modules
+dist/
+unpackage/
+.local/
+.env*.local
+*.apk
+*.keystore
+*.pem
+
+.hbuilderx/
+.android-signing.local.json
