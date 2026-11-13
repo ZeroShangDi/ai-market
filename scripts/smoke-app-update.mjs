@@ -10,17 +10,20 @@ import vm from 'node:vm';
 import { execFileSync } from 'node:child_process';
 import { inspectApk } from '../tools/app-update/release.mjs';
 
-const [envFile, baseline] = process.argv.slice(2);
+const [envFile, baseline, project = 'apps/call-phone-uni'] = process.argv.slice(2);
 if (!envFile || !baseline) throw new Error('用法：node scripts/smoke-app-update.mjs client.env 原正式包.apk');
 const settings = Object.fromEntries(readFileSync(envFile, 'utf8').split('\n').filter(line => line.includes('=')).map(line => { const i=line.indexOf('='); return [line.slice(0,i),line.slice(i+1)]; }));
-const root = path.resolve('apps/call-phone-uni');
+const root = path.resolve(project);
+const modules = new Map(), storage = new Map();
 const require = createRequire(root + '/package.json'), ts = require('typescript');
 const signatureKey = createPublicKey({ key: Buffer.from(settings.VITE_UPDATE_PUBLIC_KEY, 'base64'), type: 'spki', format: 'der' });
 const verifySignature = (payload, signature) => verify('RSA-SHA256', Buffer.from(payload), signatureKey, Buffer.from(signature, 'base64'));
 function load(name) {
+  if (modules.has(name)) return modules.get(name);
   const exports = {};
+  modules.set(name, exports);
   const code = ts.transpileModule(readFileSync(root + '/src/modules/app-update/' + name + '.ts', 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 } }).outputText;
-  vm.runInNewContext(code, { exports, AbortController, Error, console, uni: { request(options) {
+  vm.runInNewContext(code, { exports, require: id => { if (id !== './core') throw new Error('Unexpected import'); return load('core'); }, AbortController, Error, console, uni: { getStorageSync: key => storage.get(key), setStorageSync: (key,value) => storage.set(key,value), request(options) {
     const controller = new AbortController();
     fetch(options.url, { signal: controller.signal, redirect: 'error' }).then(async response => options.success({ statusCode: response.status, data: await response.json() })).catch(options.fail).finally(options.complete);
     return { abort: () => controller.abort() };
@@ -37,7 +40,7 @@ function installedMetadata(file) {
   assert.ok(runtime.id && manifests[0].includes('/' + runtime.id + '/'));
   return { ...inspectApk(file), appId: runtime.id };
 }
-const old = installedMetadata(baseline), release = await source.latest({}, new AbortController().signal);
+const old = installedMetadata(baseline), release = await source.latest({ ...old, platform: 'android', channel: settings.VITE_UPDATE_CHANNEL || 'stable', baseVersionCode: old.versionCode }, new AbortController().signal);
 assert.ok(release);
 const temp = mkdtempSync(path.join(os.tmpdir(), 'update-live-'));
 try {
@@ -77,5 +80,5 @@ try {
   assert.equal(head.status, 200); assert.equal(Number(head.headers.get('content-length')), release.artifact.bytes);
   const current = createUpdateService(source, { ...adapter, identity: async () => identity(downloadedMetadata) });
   await current.check(); assert.equal(current.getState().status, 'upToDate');
-  console.log(JSON.stringify({ checkUrl: settings.VITE_UPDATE_MANIFEST_URL, oldVersion: old.versionName, newVersion: release.versionName, bytes: release.artifact.bytes, sha256: release.artifact.sha256, anonymousSignedManifest: true, downloadVerified: true, sameCertificate: true, rangeAndHead: true, oldVersionState: 'available', installedVersionState: 'upToDate', androidInstallation: '待真机确认' }, null, 2));
+  console.log(JSON.stringify({ clientProject: project, checkUrl: settings.VITE_UPDATE_MANIFEST_URL, oldVersion: old.versionName, newVersion: release.versionName, bytes: release.artifact.bytes, sha256: release.artifact.sha256, anonymousSignedManifest: true, downloadVerified: true, sameCertificate: true, rangeAndHead: true, oldVersionState: 'available', installedVersionState: 'upToDate', androidInstallation: '待真机确认' }, null, 2));
 } finally { rmSync(temp, { recursive: true, force: true }); }

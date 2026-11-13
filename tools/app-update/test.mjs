@@ -92,3 +92,21 @@ test('phone summary is concise, version-bound and independent of complete change
   assert.throws(() => prepareRelease(f.options), /缺少手机更新摘要/);
   assert.equal(readFileSync(path.join(f.options.outDir, 'public/uni.UNID608100/android/arm64-v8a/stable/manifest.json'), 'utf8'), previousFeed);
 });
+
+
+test('v2 publication preserves the legacy release, advances renewal sequence and refuses downgrade', t => {
+  const f=fixture(t),first=prepareRelease(f.options);
+  const legacy=JSON.parse(JSON.parse(readFileSync(first.manifest)).payload).release;
+  const upgraded=prepareRelease({...f.options,schemaVersion:2});
+  const envelope=JSON.parse(readFileSync(upgraded.manifest)),v2=JSON.parse(envelope.payload);
+  assert(verify('RSA-SHA256',Buffer.from(envelope.payload),createPublicKey(readFileSync(f.options.keyFile)),Buffer.from(envelope.signature,'base64')));
+  assert.deepEqual(v2.release,legacy);
+  assert.equal(v2.schemaVersion,2);assert.equal(v2.sequence,1);
+  assert.equal(v2.target.packageName,f.metadata.packageName);
+  assert.equal(Date.parse(v2.expiresAt)-Date.parse(v2.issuedAt),30*86400000);
+  prepareRelease(f.options);
+  const renewed=JSON.parse(JSON.parse(readFileSync(upgraded.manifest)).payload);
+  assert.equal(renewed.schemaVersion,2);assert.equal(renewed.sequence,2);
+  assert.deepEqual(renewed.release,legacy);
+  assert.throws(()=>prepareRelease({...f.options,schemaVersion:1}),/降级/);
+});

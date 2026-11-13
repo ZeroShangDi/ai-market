@@ -9,3 +9,5 @@ unpackage/
 
 .hbuilderx/
 .android-signing.local.json
+
+/static/app-icons/

@@ -36,6 +36,9 @@ try {
     if (!fs.statSync(certfile).isFile()) throw new Error('个人证书路径不是文件。');
   }
   const manifest = fs.readFileSync(path.join(project, 'src/manifest.json'), 'utf8');
+  // HBuilderX validates icon paths from the CLI project root before compiling src/.
+  const iconSource = path.join(project, 'src/static/app-icons');
+  if (fs.existsSync(iconSource)) fs.cpSync(iconSource, path.join(project, 'static/app-icons'), { recursive: true });
   const packagename = manifest.match(/"packagename"\s*:\s*"([^"]+)"/)?.[1];
   if (!packagename) throw new Error('manifest.json 未配置 Android 包名。');
   const config = {

@@ -92,3 +92,17 @@ node scripts/smoke-app-update.mjs .local/app-update/release/client.env /路径/�
 每个新包递增 versionCode，并归档对应 CHANGELOG；发布后不必重启后台。网络 smoke 执行真实清单获取、签名/摘要/证书核验、版本判断及文件下载，不调用手机系统安装。
 
 仅页面资源变化时可用 `python3 scripts/pack-android-offline.py --baseline 原正式包 --assets 已编译App资源 --output 新APK` 复用原生材料并本地签名。插件、权限发生变化时需重新原生构建；脚本验证原生代码、证书及编译资源一致性，不替代真机安装验证。
+
+
+## 新版客户端与 v2 清单
+
+applications/call-phone-uni 的 1.0.26 更新组件要求 v2。在既有 prepare 命令追加 `--schema 2`，使用原签名密钥及同一不可变 APK；工具增加 target、sequence、issuedAt 和 30 天 expiresAt，保留旧版组件读取的 release 字段。首次升级为序号 1，以后同包续期和新版本发布自动递增；已为 v2 的源即使省略该选项也保持 v2，禁止显式降回 v1。到期前须续期，不能依赖过期清单继续发现更新。续期保留安装包和原发布时间，不虚增 App 版本。
+
+网络验证可以选择实际客户端源码：
+
+```sh
+node scripts/smoke-app-update.mjs .local/app-update/release/client.env /原正式包.apk
+node scripts/smoke-app-update.mjs .local/app-update/release/client.env /原正式包.apk applications/call-phone-uni
+```
+
+1.0.26 已在既有分发地址升级为 v2，并验证旧版及新版组件兼容；容器内仅归档同一成品和原发布证据，不自动改为容器托管源。

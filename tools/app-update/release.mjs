@@ -83,7 +83,7 @@ export function clientConfiguration({ baseUrl, keyFile, channel = 'stable', pack
   ].join('\n');
 }
 
-export function prepareRelease({ apk, baselineApk, keyFile, baseUrl, outDir, changelog, notesFile, channel = 'stable', appId = '__UNI__D608100', packageName = 'uni.UNID608100', inspect = inspectApk, allowLan = false }) {
+export function prepareRelease({ apk, baselineApk, keyFile, baseUrl, outDir, changelog, notesFile, channel = 'stable', appId = '__UNI__D608100', packageName = 'uni.UNID608100', inspect = inspectApk, allowLan = false, schemaVersion }) {
   const base = publicationBase(baseUrl, allowLan);
   if (!/^[a-z0-9-]+$/.test(channel) || !/^[a-zA-Z0-9_.]+$/.test(packageName)) throw new Error('发布渠道或包名无效。');
   const target = inspect(apk), previous = inspect(baselineApk);
@@ -100,19 +100,32 @@ export function prepareRelease({ apk, baselineApk, keyFile, baseUrl, outDir, cha
   const artifactKey = `${packageName}/apk/${target.versionCode}-${hash}.apk`;
   const feed = path.join(root, feedKey);
   const key = readFileSync(keyFile);
+  let oldMetadata;
   if (existsSync(feed)) {
     const old = JSON.parse(readFileSync(feed, 'utf8'));
     if (!verify('RSA-SHA256', Buffer.from(old.payload), createPublicKey(key), Buffer.from(old.signature, 'base64'))) throw new Error('已有发布清单签名不匹配，拒绝替换。');
-    const release = JSON.parse(old.payload).release;
+    oldMetadata = JSON.parse(old.payload);
+    const release = oldMetadata.release;
     if (release && (release.versionCode > target.versionCode || (release.versionCode === target.versionCode && release.artifact.sha256 !== hash))) throw new Error('不能回退版本或为同一版本号替换安装包，请递增 versionCode。');
   }
+  const schema = schemaVersion ?? oldMetadata?.schemaVersion ?? 1;
+  if (![1, 2].includes(schema) || oldMetadata?.schemaVersion === 2 && schema !== 2) throw new Error('清单协议不允许降级。');
+  const now = new Date();
   const release = {
     id: `${packageName}-${channel}-${target.versionCode}`, appId, platform: 'android', architecture: target.architecture, channel,
     versionCode: target.versionCode, versionName: target.versionName, minBaseVersionCode: 1,
-    publishedAt: new Date().toISOString(), notes, mandatory: false,
+    publishedAt: oldMetadata?.release?.versionCode === target.versionCode ? oldMetadata.release.publishedAt : now.toISOString(), notes, mandatory: false,
     artifact: { type: 'apk', url: `${base.href.replace(/\/$/, '')}/${artifactKey}`, bytes: binary.length, sha256: hash, packageName },
   };
-  const signed = signReleaseManifest({ release }, key);
+  let metadata = { release };
+  if (schema === 2) {
+    const sequence = (oldMetadata?.schemaVersion === 2 ? oldMetadata.sequence : 0) + 1;
+    if (!Number.isSafeInteger(sequence) || sequence < 1) throw new Error('清单序号无效。');
+    metadata = { schemaVersion: 2, sequence, issuedAt: now.toISOString(),
+      expiresAt: new Date(now.getTime() + 30 * 86400000).toISOString(),
+      target: { appId, packageName, platform: 'android', architecture: target.architecture, channel }, release };
+  }
+  const signed = signReleaseManifest(metadata, key);
   mkdirSync(path.dirname(path.join(root, artifactKey)), { recursive: true });
   const artifact = path.join(root, artifactKey), temporary = artifact + '.' + process.pid + '.tmp';
   try {

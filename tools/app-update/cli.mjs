@@ -28,6 +28,7 @@ try {
       changelog: options.changelog || 'CHANGELOG.md', channel: options.channel || 'stable',
       notesFile: options.notes,
       allowLan: options.lan === 'true',
+      schemaVersion: options.schema ? Number(options.schema) : undefined,
     });
     console.log(`已准备 ${result.release.versionName}（${result.release.versionCode}）的静态发布材料。`);
     console.log('只部署目录：' + result.publicDirectory);
