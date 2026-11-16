@@ -4,6 +4,7 @@
 
 ## [未发布]
 
+- 新增 `servers/agent-link`：TypeScript npm 包，提供二维码配对、token、双向消息/长轮询、审批与问题接口，以及给宿主的 `/api/host/*` 控制面。
 - 手机端提交当前 Agent 消息/会话、扫码配对、Prompt 弹层、语音与桌宠实现，以及迁入应用内的 `shared/mobile`、`resources` 素材。
 - 仓库级脚本与发布工具收进容器：`container/scripts/` 负责 CHANGELOG 检查、git hooks、签名，`container/tools/app-update/` 负责手机发布。
 - 删除遗留 `.agents/skills/uniapp-safe-pack`（已归档到 `_reference/legacy-root`）。

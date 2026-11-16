@@ -1,0 +1,41 @@
+{
+  "name": "@ai-market/agent-link",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "局域网 Agent 配对、消息与交互服务",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "bin": {
+    "agent-link": "./bin/agent-link.js"
+  },
+  "files": [
+    "dist",
+    "bin",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=22.18"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "start": "node bin/agent-link.js",
+    "prestart": "npm run build"
+  },
+  "dependencies": {
+    "qrcode": "^1.5.4"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@types/qrcode": "^1.5.5",
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0"
+  }
+}
