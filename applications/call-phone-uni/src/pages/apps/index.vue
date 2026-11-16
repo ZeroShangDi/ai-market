@@ -1,1 +1,18 @@
-<template><view class="page"><view class="wrap"><MobileHeader title="应用"/><view class="grid"><view v-for="app in apps" :key="app.id" class="app" role="button" @tap="open(app.id)"><view class="application-icon"><image v-if="app.image" :src="app.image" class="application-image" mode="aspectFit"/><AppIcon v-else :name="app.icon" :size="46" color="#294fdb"/></view><text>{{app.title}}</text></view></view></view><TabBar current="apps"/></view></template><script setup lang="ts">import MobileHeader from '@/components/MobileHeader.vue';import AppIcon from '@/components/AppIcon.vue';import TabBar from '@/components/TabBar.vue';const apps=[{id:'chat',title:'聊天',icon:'message',image:'/static/application-icons/chat-v1.png'},{id:'work',title:'工作',icon:'apps',image:'/static/application-icons/work-v1.png'},{id:'voice',title:'语音',icon:'microphone',image:''}];function open(app:string){uni.navigateTo({url:'/pages/module/index?app='+app});}</script><style scoped>.page{min-height:100vh;background:#f7f8fc}.wrap{max-width:500px;margin:auto;padding:0 15px}.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-top:25px}.app{background:#fff;border-radius:20px;padding:24px 8px;display:flex;flex-direction:column;gap:18px;align-items:center;box-shadow:0 6px 16px #1423330b}.application-icon{width:76px;height:76px;display:flex;align-items:center;justify-content:center}.application-image{width:76px;height:76px}.app{min-height:150px;justify-content:center}.app text{font-size:15px}</style>
+<template><view class="page" /></template>
+
+<script setup lang="ts">
+import { onLoad } from '@dcloudio/uni-app';
+
+// 应用入口暂时下线，保留路由以避免旧链接落到空白页。
+onLoad(() => {
+  uni.reLaunch({ url: '/pages/agent/index' });
+});
+</script>
+
+<style scoped>
+.page {
+  height: 100vh;
+  height: 100dvh;
+  background: #f7f8fc;
+}
+</style>

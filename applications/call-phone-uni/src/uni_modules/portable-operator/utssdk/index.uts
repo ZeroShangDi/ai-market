@@ -1,0 +1,4 @@
+export function operatorReady(): boolean { return false }
+export function operatorExecute(payload: string, callback: (result: string) => void) {
+  callback('{"status":"failed","verified":false,"error":{"code":"UNSUPPORTED"}}')
+}

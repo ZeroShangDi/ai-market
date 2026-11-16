@@ -7,3 +7,5 @@ export function initialConnection(deployed: unknown, saved: any, legacyUrl: unkn
   try { return normalizeConnection(base, tenant); }
   catch { return normalizeConnection(configured, '1'); }
 }
+
+export function browserConnection(saved:any,legacyTenant:unknown){return initialConnection('',{baseUrl:'',tenantId:saved?.tenantId},'',legacyTenant);}

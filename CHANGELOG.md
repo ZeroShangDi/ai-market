@@ -4,6 +4,7 @@
 
 ## [未发布]
 
+- 手机端提交当前 Agent 消息/会话、扫码配对、Prompt 弹层、语音与桌宠实现，以及迁入应用内的 `shared/mobile`、`resources` 素材。
 - 仓库级脚本与发布工具收进容器：`container/scripts/` 负责 CHANGELOG 检查、git hooks、签名，`container/tools/app-update/` 负责手机发布。
 - 删除遗留 `.agents/skills/uniapp-safe-pack`（已归档到 `_reference/legacy-root`）。
 - 清理 `docs/`：历史 reviews、旧 contracts/modules、旧架构与技术选型移到 `_trash/docs`；保留应用更新、移动诊断、4 个仍有效的 issue 和发布说明，新增 [当前仓库架构](docs/architecture/overview.md)，重写文档索引。`docs/_references` 继续保存外部资料。

@@ -18,7 +18,7 @@ EasyFloat 默认窗口未开启硬件加速，`VideoOverlayContext` 仅包装该
 
 当前完整接入 [PC2005-cloud/dsh-pet](https://github.com/PC2005-cloud/dsh-pet) 的 106 段动画，包含「时节 → 舞狮头」。动作名称、分类、随机权重沿用原配置。移动类动作目前播放动画，不自动移动窗口；点击回应、工作状态、余额、碎碎念等事件动画可手动点播，未复制 DSH 的业务逻辑。
 
-原精灵与先前 PNG 方案分别保存在仓库 `resources/mobile-pet/archive/elf-v3`、`archive/dsh-png`，不参与客户端打包。源 WebM、版本与授权记录在 `resources/mobile-pet/dsh-source`，手机只打包 MP4、播放器和署名。素材明确禁止商用，用户已确认仅本地自用；分发前改用自有素材或取得授权。
+原精灵与先前 PNG 方案分别保存在仓库 `_reference/mobile-pet-archive/elf-v3`、`archive/dsh-png`，不参与客户端打包。源 WebM、版本与授权记录在 `resources/mobile-pet/dsh-source`，手机只打包 MP4、播放器和署名。素材明确禁止商用，用户已确认仅本地自用；分发前改用自有素材或取得授权。
 
 浏览器真实视频解码、透明合成、结束事件、快速切换与释放可通过 `scripts/verify-pet-video.cjs` 验证。原生代码通过独立 Kotlin 编译检查，不能代替完整 UTS/APK 编译或真机验收。Android 上的透明窗口、Home 后播放、长按/拖动、菜单与旋转仍需真机确认。
 

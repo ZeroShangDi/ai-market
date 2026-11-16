@@ -14,12 +14,14 @@ object VoiceSurface {
     private val main = Handler(Looper.getMainLooper())
     private var dialog: Dialog? = null
     private var appBrowser: VoiceBrowser? = null
+    internal val hasAppSurface: Boolean get() = appBrowser != null
     @JvmStatic fun deliver(payload: String) { main.post { (VoiceDesktopService.instance?.let { it.deliver(payload); true } ?: false).let { if (!it) appBrowser?.deliver(payload) } } }
     private var desktopContext: android.content.Context? = null
     private var desktopCallback: ((String) -> Unit)? = null
     internal var pendingAddress: String? = null
     internal fun send(value: String) { try { desktopCallback?.invoke(value) } catch (_: Exception) {} }
     @JvmStatic fun close() { main.post {
+        InlineVoice.close()
         pendingAddress = null
         VoiceTasks.dismiss()
         dialog?.dismiss()
@@ -27,7 +29,7 @@ object VoiceSurface {
     } }
     @JvmStatic fun openDesktop(activity: Activity?, address: String, callback: (String) -> Unit) {
         main.post {
-            if (activity == null || pendingAddress != null || VoiceDesktopService.running || dialog != null) { callback("error"); return@post }
+            if (activity == null || pendingAddress != null || VoiceDesktopService.running || InlineVoice.running || dialog != null) { callback("error"); return@post }
             desktopContext = activity.applicationContext; desktopCallback = callback; pendingAddress = address
             try {
                 activity.applicationContext.startActivity(Intent(activity, VoiceStartActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
@@ -36,7 +38,7 @@ object VoiceSurface {
     }
     @JvmStatic fun open(activity: Activity?, address: String, callback: (String) -> Unit) {
         main.post {
-            if (activity == null || activity.isFinishing || dialog != null || VoiceDesktopService.running) { callback("error"); return@post }
+            if (activity == null || activity.isFinishing || dialog != null || InlineVoice.running || VoiceDesktopService.running) { callback("error"); return@post }
             val surface = Dialog(activity, android.R.style.Theme_Material_Light_NoActionBar)
             var browser: VoiceBrowser? = null
             var released = false

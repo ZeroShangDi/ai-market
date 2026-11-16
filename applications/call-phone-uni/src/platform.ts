@@ -1,9 +1,12 @@
 import {loginUrl} from './modules/auth-navigation';
-import {initialConnection} from './modules/connection';
+import {initialConnection,browserConnection} from './modules/connection';
 import { reactive } from 'vue';
 import { createClient,normalizeConnection } from '../shared/client';
 import { multipartDocument } from '../shared/multipart';
 function readConnection(){
+  // #ifdef H5
+  return browserConnection(uni.getStorageSync('container.connection'),uni.getStorageSync('container.tenant'));
+  // #endif
   return initialConnection(import.meta.env.VITE_CONTAINER_API_URL, uni.getStorageSync('container.connection'),
     uni.getStorageSync('container.url'), uni.getStorageSync('container.tenant'));
 }
@@ -38,12 +41,12 @@ export function requireSession(){return !!session.identity;}
 export function openLogin(destination?:string){const pages=getCurrentPages();if(pages[pages.length-1]?.route==='pages/login/index')return;uni.navigateTo({url:loginUrl(destination)});}
 
 
-export async function applicationUrl(app:'chat'|'work'|'voice'){
+export async function applicationUrl(app:'chat'|'work'|'voice'|'team-chat',agentId?:string){
  if(!requireSession())throw Error('请先登录');
  await client.request('GET','/admin-api/system/auth/get-permission-info');
  const base=applicationHost();
  if(base)normalizeConnection(base,'1');
- const value:any=await new Promise((resolve,reject)=>uni.request({url:base+'/mobile-host/ticket',method:'POST',header:{Authorization:hostAuthorization,'tenant-id':settings.tenantId},data:{app},success:r=>r.statusCode===200?resolve(r.data):reject(Error('应用服务未连接')),fail:()=>reject(Error('应用服务未连接'))}));
+ const value:any=await new Promise((resolve,reject)=>uni.request({url:base+'/mobile-host/ticket',method:'POST',header:{Authorization:hostAuthorization,'tenant-id':settings.tenantId},data:{app,...(agentId?{agentId}:{})},success:r=>r.statusCode===200?resolve(r.data):reject(Error('应用服务未连接')),fail:()=>reject(Error('应用服务未连接'))}));
  return base+value.url;
 }
 

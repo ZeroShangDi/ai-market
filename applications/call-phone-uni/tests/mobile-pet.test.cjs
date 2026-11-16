@@ -117,7 +117,7 @@ test('bridge cannot report successful cleanup while a window remains visible', a
 });
 test('complete upstream DS video catalog preserves every animation and category', () => {
   const { petActions } = load('appearance');
-  const source = path.join(__dirname, '../../../resources/mobile-pet/dsh-source');
+  const source = path.join(__dirname, '../resources/mobile-pet/dsh-source');
   const tree = JSON.parse(fs.readFileSync(path.join(source, 'upstream-tree.json'), 'utf8'));
   const upstream = tree.tree.filter(item => item.path.startsWith('dsh-pet/assets/webm/') && item.path.endsWith('.webm'));
   assert.equal(petActions.length, upstream.length);
@@ -135,7 +135,7 @@ test('complete upstream DS video catalog preserves every animation and category'
     const [left, top, width, height] = action.bounds;
     assert.ok(left >= 0 && top >= 0 && width > 0 && height > 0 && left + width <= 640 && top + height <= 640);
     if (action.id !== 'idle') assert.equal(action.repeats, 1);
-    const mp4 = fs.readFileSync(path.join(__dirname, '../../../resources/mobile-pet/packages/whale/video', path.basename(action.video)));
+    const mp4 = fs.readFileSync(path.join(__dirname, '../resources/mobile-pet/packages/whale/video', path.basename(action.video)));
     assert.equal(mp4.subarray(4, 8).toString(), 'ftyp');
     assert.ok(mp4.indexOf(Buffer.from('moov')) < mp4.indexOf(Buffer.from('mdat')), 'metadata precedes video data for fast startup');
   }

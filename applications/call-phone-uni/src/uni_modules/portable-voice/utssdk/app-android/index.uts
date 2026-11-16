@@ -18,3 +18,7 @@ export function confirmTask(prompt: string, callback: (confirmed: boolean) => vo
   VoiceTasks.confirm(UTSAndroid.getUniActivity(), prompt, (confirmed: boolean) => { callback(confirmed) })
 }
 export function deliverTask(payload: string) { VoiceSurface.deliver(payload) }
+
+import { InlineVoice } from 'dev.portablevoice'
+@UTSJS.keepAlive
+export function openInlineVoice(url: string, callback: (event: string) => void) { InlineVoice.open(UTSAndroid.getUniActivity(), url, (event: string) => { callback(event) }) }

@@ -1,3 +1,4 @@
+import {sameOriginHost} from './shared/proxy-origin';
 import { defineConfig, loadEnv } from "vite";
 import uni from "@dcloudio/vite-plugin-uni";
 import { readFileSync } from "node:fs";
@@ -10,7 +11,12 @@ if (!versionName) throw new Error("manifest.json 缺少 versionName");
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), "");
   const isolateCookies = (proxy: any) => {
-    proxy.on('proxyReq', (request: any) => request.removeHeader('cookie'));
+    proxy.on('proxyReq', (request: any, incoming: any) => {
+      request.removeHeader('cookie');
+      const origin=incoming.headers.origin;
+      // Same-origin browser traffic becomes an authenticated server-to-server request.
+      if(sameOriginHost(origin,incoming.headers.host))request.removeHeader('origin');
+    });
     proxy.on('proxyRes', (response: any) => delete response.headers['set-cookie']);
   };
   return {

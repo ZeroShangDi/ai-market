@@ -1,0 +1,80 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:ai-market:mobile-execution:request:1",
+  "title": "Device execution envelope (separate from action protocol)",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "requestId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "rootTaskId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "sessionId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "deviceId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "deviceEpoch": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "protocolVersion": {
+      "const": 1
+    },
+    "expiresAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "action": {
+      "$ref": "urn:ai-market:mobile-action:1"
+    },
+    "control": {
+      "enum": [
+        "capabilities"
+      ]
+    }
+  },
+  "required": [
+    "requestId",
+    "rootTaskId",
+    "sessionId",
+    "deviceId",
+    "deviceEpoch",
+    "protocolVersion",
+    "expiresAt"
+  ],
+  "oneOf": [
+    {
+      "required": [
+        "action"
+      ],
+      "not": {
+        "required": [
+          "control"
+        ]
+      }
+    },
+    {
+      "required": [
+        "control"
+      ],
+      "not": {
+        "required": [
+          "action"
+        ]
+      }
+    }
+  ]
+}

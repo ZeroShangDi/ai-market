@@ -67,6 +67,47 @@
       "style": {
         "navigationStyle": "custom"
       }
+    },
+    {
+      "path": "pages/phone/index",
+      "style": {
+        "navigationStyle": "custom"
+      }
+    },
+    {
+      "path": "pages/team-chat/index",
+      "style": {
+        "navigationStyle": "custom"
+      }
+    },
+    {
+      "path": "pages/agent/index",
+      "style": {
+        "navigationStyle": "custom"
+      }
+    },
+    {
+      "path": "pages/agent/chat",
+      "style": {
+        "navigationStyle": "custom",
+        "app-plus": {
+          "softinputMode": "adjustResize"
+        }
+      }
+    },
+    {
+      "path": "pages/call/voice",
+      "style": {
+        "navigationStyle": "custom",
+        "backgroundColor": "#0e121b"
+      }
+    },
+    {
+      "path": "pages/call/video",
+      "style": {
+        "navigationStyle": "custom",
+        "backgroundColor": "#0d1119"
+      }
     }
   ],
   "globalStyle": {

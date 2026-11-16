@@ -2,8 +2,20 @@
   "containerUrl": "http://127.0.0.1:48090",
   "voiceUrl": "http://127.0.0.1:8891",
   "port": 5193,
-  "origins": ["https://mobile.example.com"],
-  "control": {"url": "ws://127.0.0.1:8792", "tokenFile": "/absolute/private/control-ws.token"},
+  "origins": [
+    "https://mobile.example.com"
+  ],
+  "control": {
+    "url": "ws://127.0.0.1:8792",
+    "tokenFile": "/absolute/private/control-ws.token"
+  },
   "voiceOwnerKey": "1:1",
-  "bindings": {"1:1": {"voiceSessionId": "existing-fixed-control-session", "localVoiceSessionId": "existing-local-voice-session", "workSessionIds": []}}
+  "bindings": {
+    "1:1": {
+      "voiceSessionId": "existing-fixed-control-session",
+      "localVoiceSessionId": "existing-local-voice-session",
+      "workSessionIds": []
+    }
+  },
+  "workArtifactRoots": []
 }

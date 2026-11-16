@@ -1,0 +1,106 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+export const iconRoot = path.dirname(fileURLToPath(import.meta.url));
+export const projectRoot = path.resolve(iconRoot, '../..');
+
+export function safeSvg(svg) {
+  if (!/<svg\b/i.test(svg) || !/<\/svg>/i.test(svg)) throw new Error('图标必须是完整 SVG');
+  if (/<(?:script|foreignObject|image|iframe|style)\b|<!DOCTYPE|<!ENTITY|\bon\w+\s*=|\b(?:href|src)\s*=\s*["'](?!#)/i.test(svg)) {
+    throw new Error('SVG 仅支持独立的静态图形，不支持脚本或外部引用');
+  }
+  for (const reference of svg.matchAll(/url\s*\(([^)]*)\)/gi)) {
+    const id = reference[1].trim().replace(/^["']|["']$/g, '');
+    if (!/^#[a-zA-Z_][\w:.-]*$/.test(id)) throw new Error('SVG 仅支持独立的静态图形，不支持脚本或外部引用');
+  }
+  return svg;
+}
+
+export function iconifySvg(catalog, name, trail = []) {
+  if (trail.includes(name)) throw new Error(`图标别名循环: ${name}`);
+  const data = catalog.icons[name];
+  if (!data) {
+    const alias = catalog.aliases?.[name];
+    if (!alias) throw new Error(`图库 ${catalog.prefix} 中不存在 ${name}`);
+    // 无变换别名可以直接复用；有变换的图标显式失败，避免静默生成错误图形。
+    if (alias.rotate || alias.hFlip || alias.vFlip) throw new Error(`请改用无变换的源图标: ${name}`);
+    return iconifySvg(catalog, alias.parent, [...trail, name]);
+  }
+  if (data.rotate || data.hFlip || data.vFlip) throw new Error(`不支持图标自带变换: ${name}`);
+  const width = data.width ?? catalog.width ?? 24;
+  const height = data.height ?? catalog.height ?? 24;
+  return safeSvg(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="${data.left ?? 0} ${data.top ?? 0} ${width} ${height}">${data.body}</svg>`);
+}
+
+export function collectLiteralNames(source) {
+  const names = new Set();
+  for (const tag of source.matchAll(/<AppIcon\b[\s\S]*?\/>|<AppIcon\b[\s\S]*?>/g)) {
+    for (const attribute of tag[0].matchAll(/(?:^|\s)(?:name\s*=\s*["']([^"']+)["']|:name\s*=\s*"'([^']+)'"|:name\s*=\s*'"([^"]+)"')/g)) {
+      names.add(attribute[1] ?? attribute[2] ?? attribute[3]);
+    }
+  }
+  return names;
+}
+
+function sourceFiles(root) {
+  if (!fs.existsSync(root)) return [];
+  return fs.readdirSync(root, { withFileTypes: true }).flatMap(entry => {
+    const full = path.join(root, entry.name);
+    if (entry.isDirectory()) return sourceFiles(full);
+    return entry.isFile() && /\.vue$/.test(full) ? [full] : [];
+  });
+}
+
+export function buildIcons({ root = iconRoot, output = path.join(projectRoot, 'apps/call-phone-uni/src/modules/icons/generated.ts'), sourceRoot = path.join(projectRoot, 'apps/call-phone-uni/src'), imageOutput = path.join(projectRoot, 'apps/call-phone-uni/src/static/app-icons/generated') } = {}) {
+  const registry = JSON.parse(fs.readFileSync(path.join(root, 'registry.json'), 'utf8'));
+  const entries = { ...registry.icons };
+  if (!entries[registry.fallback]) throw new Error('必须注册回退图标');
+  for (const file of sourceFiles(sourceRoot)) {
+    for (const name of collectLiteralNames(fs.readFileSync(file, 'utf8'))) {
+      if (!entries[name] && /^ri:[a-z0-9-]+$/.test(name)) entries[name] = { source: name };
+      else if (!entries[name]) throw new Error(`${file} 使用了未注册的图标 ${name}`);
+    }
+  }
+  const catalogs = new Map();
+  const icons = {};
+  const images = [];
+  for (const [name, entry] of Object.entries(entries)) {
+    if (!/^[a-z0-9][a-z0-9:-]*$/.test(name)) throw new Error(`无效语义名称: ${name}`);
+    if (entry.source && entry.file) throw new Error(`${name} 不能同时配置 source 与 file`);
+    if (entry.colorMode && !['theme', 'original'].includes(entry.colorMode)) throw new Error(`无效配色策略: ${name}`);
+    const common = { label: entry.label ?? name, colorMode: entry.colorMode ?? (entry.file ? 'original' : 'theme'), defaultColor: entry.defaultColor ?? '#1F2937' };
+    let svg;
+    if (entry.source) {
+      const [prefix, icon, extra] = entry.source.split(':');
+      if (extra || !/^[a-z0-9-]+$/.test(prefix) || !/^[a-z0-9-]+$/.test(icon ?? '')) throw new Error(`无效来源: ${entry.source}`);
+      if (!catalogs.has(prefix)) catalogs.set(prefix, JSON.parse(fs.readFileSync(path.join(root, 'catalogs', `${prefix}.json`), 'utf8')));
+      svg = iconifySvg(catalogs.get(prefix), icon);
+    } else if (entry.file) {
+      const file = path.resolve(root, entry.file);
+      if (!file.startsWith(path.join(root, 'custom') + path.sep)) throw new Error('自定义图标必须保存在 resources/icons/custom 中');
+      if (/\.svg$/i.test(file)) svg = safeSvg(fs.readFileSync(file, 'utf8'));
+      else if (/\.png$/i.test(file)) {
+        if (common.colorMode !== 'original') throw new Error('PNG 图标只能保留原色');
+        const filename = name.replace(/:/g, '-') + '.png';
+        images.push({ file, filename });
+        icons[name] = { ...common, kind: 'image', src: `/static/app-icons/generated/${filename}` };
+        continue;
+      } else throw new Error('自定义图标仅支持 SVG 或 PNG');
+    } else throw new Error(`${name} 缺少来源`);
+    icons[name] = { ...common, kind: 'svg', svg };
+  }
+  fs.mkdirSync(path.dirname(output), { recursive: true });
+  fs.writeFileSync(output, `// Generated by resources/icons/build.mjs. Edit the shared registry instead.\nimport type { IconDefinition } from './types';\n\nexport const fallbackIcon = ${JSON.stringify(registry.fallback)};\nexport const bundledIcons: Record<string, IconDefinition> = ${JSON.stringify(icons, null, 2)};\n`);
+  if (images.length || fs.existsSync(imageOutput)) {
+    fs.mkdirSync(imageOutput, { recursive: true });
+    for (const existing of fs.readdirSync(imageOutput)) if (/\.png$/.test(existing) && !images.some(item => item.filename === existing)) fs.unlinkSync(path.join(imageOutput, existing));
+    for (const image of images) fs.copyFileSync(image.file, path.join(imageOutput, image.filename));
+  }
+  return icons;
+}
+
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  const icons = buildIcons();
+  console.log(`离线图标已生成: ${Object.keys(icons).length} 个。`);
+}

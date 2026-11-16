@@ -7,3 +7,5 @@ export function openDesktopVoice(url: string, callback: (event: string) => void)
 
 export function confirmTask(prompt: string, callback: (confirmed: boolean) => void) { callback(false) }
 export function deliverTask(payload: string) {}
+
+export function openInlineVoice(url: string, callback: (event: string) => void) { callback('error') }

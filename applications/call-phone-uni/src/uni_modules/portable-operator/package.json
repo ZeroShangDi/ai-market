@@ -1,0 +1,1 @@
+{"id":"portable-operator","displayName":"App Operator Android Bridge","version":"0.1.0","description":"App-local AccessibilityService bridge","engines":{"HBuilderX":"^4.81"},"dcloudext":{"type":"uts"},"uni_modules":{"dependencies":[],"encrypt":[],"platforms":{"client":{"Vue":{"vue2":"n","vue3":"y"},"App":{"app-android":"y","app-ios":"n"}}}}}

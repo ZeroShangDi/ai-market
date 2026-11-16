@@ -10,6 +10,8 @@
     "pack:android:safe": "node ../../apps/call-phone-uni/scripts/pack-android-release.cjs --safe-cloud-cert --project .",
     "preview:gateway": "vite preview --host 127.0.0.1 --port 5194 --strictPort --outDir dist/build/h5",
     "host": "node host/server.mjs",
+    "operator:debug": "node scripts/operator-debug.mjs",
+    "operator:watch": "node scripts/operator-debug.mjs watch",
     "test:host": "node --test host/*.test.mjs"
   },
   "dependencies": {
@@ -31,7 +33,13 @@
     "@dcloudio/uni-quickapp-webview": "3.0.0-5020420260813003",
     "@tdesign/uniapp": "^0.10.3",
     "@tdesign/uniapp-chat": "^0.3.0",
+    "@tencentcloud/chat-uikit-uniapp": "^3.2.0",
+    "ajv": "8.20.0",
+    "ajv-formats": "3.0.1",
+    "bezier-js": "6.1.4",
+    "bottleneck": "2.19.5",
     "crypto-js": "4.2.0",
+    "semver": "7.8.6",
     "vue": "^3.4.21",
     "vue-i18n": "^9.1.9"
   },

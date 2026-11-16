@@ -13,7 +13,7 @@ export class Control {
         if(m.type==='hello.ack'){ws.send(JSON.stringify({type:'subscribe',topics:['control.*']}));return;}
         if(m.type==='subscribe.ack'){clearTimeout(timer);this.ready=true;resolve();return;}
         if(m.type==='error'){for(const p of this.pending.values()){clearTimeout(p.timer);p.reject(Error('CONTROL_PROTOCOL_ERROR'));}this.pending.clear();return;}
-        if(m.type==='event'){const e=m.event,p=this.pending.get(e?.correlationId);if(p){clearTimeout(p.timer);this.pending.delete(e.correlationId);if(/failed$|error$/.test(e.topic))p.reject(Error('CONTROL_REQUEST_FAILED'));else p.resolve(e.payload);}}
+        if(m.type==='event'){const e=m.event,p=this.pending.get(e?.correlationId);if(p){clearTimeout(p.timer);this.pending.delete(e.correlationId);if(/failed$|error$/.test(e.topic))p.reject(Object.assign(Error('CONTROL_REQUEST_FAILED'),{remoteCode:['chat_busy','chat_send_failed','chat_reply_timeout','session_not_found','skill_not_found'].includes(e.payload?.code)?e.payload.code:'unknown'}));else p.resolve(e.payload);}}
       });
       const closed=()=>{clearTimeout(timer);this.ready=false;reject(Error('CONTROL_DISCONNECTED'));for(const p of this.pending.values()){clearTimeout(p.timer);p.reject(Error('CONTROL_RESULT_UNKNOWN'));}this.pending.clear();};
       ws.addEventListener('error',closed);ws.addEventListener('close',closed);

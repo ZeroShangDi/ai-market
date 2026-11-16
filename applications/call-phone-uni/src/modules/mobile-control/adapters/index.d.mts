@@ -1,0 +1,1 @@
+export class AppFunctions { register(definition:{id:string;packageName:string;versionRange:string;functions:Record<string,Function>}):void; discover(packageName:string,version:string):any[]; invoke(input:any,runtime:any,options?:any):Promise<any>; }

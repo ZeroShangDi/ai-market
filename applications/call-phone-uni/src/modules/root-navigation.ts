@@ -1,8 +1,8 @@
-export type RootTab = 'workbench' | 'apps' | 'mine';
+export type RootTab = 'workbench' | 'agent' | 'mine';
 
 const routes: Record<RootTab, string> = {
   workbench: '/pages/index/index',
-  apps: '/pages/apps/index',
+  agent: '/pages/agent/index',
   mine: '/pages/mine/index',
 };
 

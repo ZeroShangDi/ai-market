@@ -1,0 +1,7 @@
+import { UTSAndroid } from 'io.dcloud.uts'
+import { OperatorBridge } from 'dev.appoperator'
+export function operatorReady(): boolean { return OperatorBridge.ready() }
+@UTSJS.keepAlive
+export function operatorExecute(payload: string, callback: (result: string) => void) {
+  OperatorBridge.execute(UTSAndroid.getUniActivity(), payload, (result: string) => { callback(result) })
+}
