@@ -4,6 +4,7 @@
 
 ## [未发布]
 
+- 仓库级脚本与发布工具收进容器：`container/scripts/` 负责 CHANGELOG 检查、git hooks、签名，`container/tools/app-update/` 负责手机发布。
 - 删除遗留 `.agents/skills/uniapp-safe-pack`（已归档到 `_reference/legacy-root`）。
 - 清理 `docs/`：历史 reviews、旧 contracts/modules、旧架构与技术选型移到 `_trash/docs`；保留应用更新、移动诊断、4 个仍有效的 issue 和发布说明，新增 [当前仓库架构](docs/architecture/overview.md)，重写文档索引。`docs/_references` 继续保存外部资料。
 - 根目录收敛为 `applications/`、`container/`、`servers/`、`docs/`、`_reference/`、`_trash/`：`shared/mobile` 并入 `applications/call-phone-uni/shared`，`resources` 并入 `applications/call-phone-uni/resources`，`scripts` 并入 `container/scripts`，`tools/app-update` 并入 `container/tools/app-update`，`tools/assets` 移入 `_trash`；同步更新 `.githooks`、`AGENTS.md` 和 App 引用路径。
