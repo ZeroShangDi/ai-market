@@ -1,8 +1,0 @@
-{
-  "name": "@ai-market/assets",
-  "private": true,
-  "type": "module",
-  "engines": { "node": ">=22.13" },
-  "scripts": { "test": "node --test test.mjs" },
-  "optionalDependencies": { "sharp": "^0.35.5" }
-}

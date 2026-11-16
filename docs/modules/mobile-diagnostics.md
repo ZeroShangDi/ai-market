@@ -20,7 +20,7 @@
 
 ## 统一使用
 
-`apps/call-phone-uni/src/services/logger.ts` 提供唯一应用日志入口：
+`applications/call-phone-uni/src/services/logger.ts` 提供唯一应用日志入口：
 
 ```ts
 import { logger } from '@/services/logger';

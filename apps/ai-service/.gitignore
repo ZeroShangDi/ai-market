@@ -1,5 +1,0 @@
-.env.local
-data/
-target/
-__pycache__/
-*.pyc

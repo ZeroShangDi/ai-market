@@ -1,6 +1,6 @@
 # 通用应用更新模块
 
-状态：2026-10-15。已复用现有后台提供独立公共检查/下载路由，并使用手机现有的 `100.87.254.68:48080` Tailscale 地址验证真实下载。1.0.8 已带发布配置，首次需覆盖安装一次。Android 系统安装仍待手机确认。最新验收见[交付记录](../reviews/2026-10-15-lan-app-update-release.md)。
+状态：2026-10-15。已复用现有后台提供独立公共检查/下载路由，并使用手机现有的 `100.87.254.68:48080` Tailscale 地址验证真实下载。1.0.8 已带发布配置，首次需覆盖安装一次。Android 系统安装仍待手机确认。。
 
 ## 当前交互
 
@@ -32,7 +32,7 @@
 
 下载前校验发布签名和允许域名；下载后及安装前校验 APK 大小、SHA256、包名、版本号及与当前安装应用相同的签名证书。清单来源不可达、签名失败和无更新分别处理。
 
-完整的密钥初始化、真实 APK 核验、独立摘要校验、生成静态发布目录和客户端配置流程见 [发布工具](../../tools/app-update/README.md)。发布工具复用 scripts/sign-app-release.mjs 的签名实现。手机摘要与完整 CHANGELOG 分开维护，默认文件为 `docs/releases/<versionName>.json`；旧清单超长内容使用简短通用说明兜底，不直接截取技术日志。
+完整的密钥初始化、真实 APK 核验、独立摘要校验、生成静态发布目录和客户端配置流程见 [发布工具](../../container/tools/app-update/README.md)。发布工具复用 container/scripts/sign-app-release.mjs 的签名实现。手机摘要与完整 CHANGELOG 分开维护，默认文件为 `docs/releases/<versionName>.json`；旧清单超长内容使用简短通用说明兜底，不直接截取技术日志。
 
 ## 当前部署选择
 
@@ -42,7 +42,7 @@
 
 ## 变更日志与提交
 
-根目录 CHANGELOG.md 持续记录变化。每次代码/配置/资源提交，必须在同次提交中增加对应日志条目；纯 Markdown 文档可免。根 AGENTS.md 写明规则；`.githooks/pre-commit` 通过 scripts/check-changelog.mjs 检查暂存区，防止只修改日志但未暂存。新克隆运行 `node scripts/install-git-hooks.mjs`。
+根目录 CHANGELOG.md 持续记录变化。每次代码/配置/资源提交，必须在同次提交中增加对应日志条目；纯 Markdown 文档可免。根 AGENTS.md 写明规则；`.githooks/pre-commit` 通过 container/scripts/check-changelog.mjs 检查暂存区，防止只修改日志但未暂存。新克隆运行 `node container/scripts/install-git-hooks.mjs`。
 
 开发阶段追加「未发布」，正式发布时归档到 `[版本号] - 日期`，与 APK 实际 versionName 对应。发布工具不会自动将未完成内容写入更新弹窗。
 
